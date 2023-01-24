@@ -1,11 +1,11 @@
-package messages
+package ocpp
 
 import (
 	"evsys/types"
 	"reflect"
 )
 
-const featureName = "BootNotification"
+const BootNotificationFeatureName = "BootNotification"
 
 // RegistrationStatus Result of registration in response to a BootNotification request.
 type RegistrationStatus string
@@ -40,11 +40,11 @@ func NewBootNotificationResponse(currentTime *types.DateTime, interval int, stat
 }
 
 func (r *BootNotificationRequest) GetFeatureName() string {
-	return featureName
+	return BootNotificationFeatureName
 }
 
 func (r *BootNotificationResponse) GetFeatureName() string {
-	return featureName
+	return BootNotificationFeatureName
 }
 
 func (r *BootNotificationRequest) GetRequestType() reflect.Type {

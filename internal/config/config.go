@@ -18,15 +18,19 @@ type Config struct {
 var instance *Config
 var once sync.Once
 
-func GetConfig() *Config {
+func GetConfig() (*Config, error) {
+	var err error
 	once.Do(func() {
 		log.Println("reading config")
 		instance = &Config{}
-		if err := cleanenv.ReadConfig("config.yml", instance); err != nil {
+		if err = cleanenv.ReadConfig("config.yml", instance); err != nil {
 			desc, _ := cleanenv.GetDescription(instance, nil)
 			log.Println(desc)
-			log.Fatal(err)
+			instance = nil
 		}
 	})
-	return instance
+	//if instance == nil {
+	//	err = utility.Err("failed to read configuration file")
+	//}
+	return instance, err
 }

@@ -1,12 +1,12 @@
-package handlers
+package core
 
 import (
 	"encoding/json"
-	"evsys/internal/ocpp16/messages"
 	"evsys/ocpp"
 	"evsys/utility"
 	"fmt"
 	"log"
+	"reflect"
 )
 
 type MessageType string
@@ -56,7 +56,7 @@ const (
 type CallResult struct {
 	TypeId   CallType
 	UniqueId string
-	Payload  *ocpp.Response
+	Payload  *Response
 }
 
 func (callResult *CallResult) MarshalJSON() ([]byte, error) {
@@ -67,7 +67,7 @@ func (callResult *CallResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func CreateCallResult(confirmation *ocpp.Response, uniqueId string) (*CallResult, error) {
+func CreateCallResult(confirmation *Response, uniqueId string) (*CallResult, error) {
 	callResult := CallResult{
 		TypeId:   CallTypeResult,
 		UniqueId: uniqueId,
@@ -79,11 +79,15 @@ func CreateCallResult(confirmation *ocpp.Response, uniqueId string) (*CallResult
 type CallRequest struct {
 	TypeId   CallType
 	UniqueId string
-	Feature  string
-	Payload  ocpp.Request
+	feature  string
+	Payload  Request
 }
 
-func ParseRequest(data []interface{}) (*CallRequest, error) {
+func (callRequest *CallRequest) GetFeatureName() string {
+	return callRequest.feature
+}
+
+func ParseRequest(data []interface{}) (Request, error) {
 	if len(data) != 4 {
 		return nil, utility.Err("unsupported request format; expected length: 4 elements")
 	}
@@ -102,19 +106,36 @@ func ParseRequest(data []interface{}) (*CallRequest, error) {
 	action := data[2].(string)
 	log.Printf("<<< got request %s (%s)", action, uniqueId)
 
-	if action == string(BootNotification) {
-		bootRequest := messages.BootNotificationRequest{}
-		request, err := ocpp.ParseRawJsonRequest(data[3], bootRequest.GetRequestType())
+	if action == ocpp.BootNotificationFeatureName {
+		bootRequest := ocpp.BootNotificationRequest{}
+		request, err := ParseRawJsonRequest(data[3], bootRequest.GetRequestType())
 		if err != nil {
 			return nil, err
 		}
 		callRequest := CallRequest{
 			TypeId:   typeId,
 			UniqueId: uniqueId,
-			Feature:  action,
+			feature:  action,
 			Payload:  request,
 		}
 		return &callRequest, nil
 	}
 	return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
+}
+
+func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (Request, error) {
+	if raw == nil {
+		raw = &struct{}{}
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	request := reflect.New(requestType).Interface()
+	err = json.Unmarshal(bytes, &request)
+	if err != nil {
+		return nil, err
+	}
+	result := request.(Request)
+	return result, nil
 }

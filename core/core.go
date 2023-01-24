@@ -1,7 +1,6 @@
-package ocpp
+package core
 
 import (
-	"encoding/json"
 	"reflect"
 )
 
@@ -21,21 +20,4 @@ type Feature interface {
 	GetFeatureName() string
 	GetRequestType() reflect.Type
 	GetResponseType() reflect.Type
-}
-
-func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (Request, error) {
-	if raw == nil {
-		raw = &struct{}{}
-	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return nil, err
-	}
-	request := reflect.New(requestType).Interface()
-	err = json.Unmarshal(bytes, &request)
-	if err != nil {
-		return nil, err
-	}
-	result := request.(Request)
-	return result, nil
 }
