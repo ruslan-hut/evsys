@@ -112,6 +112,7 @@ func ParseRequest(data []interface{}) (Request, error) {
 	}
 	request, err := ParseRawJsonRequest(data[3], requestType)
 	if err != nil {
+		log.Println(data[3])
 		return nil, err
 	}
 	callRequest := CallRequest{
@@ -131,6 +132,10 @@ func getRequestType(action string) (requestType reflect.Type, err error) {
 		requestType = reflect.TypeOf(ocpp.AuthorizeRequest{})
 	case ocpp.HeartbeatFeatureName:
 		requestType = reflect.TypeOf(ocpp.HeartbeatRequest{})
+	case ocpp.StartTransactionFeatureName:
+		requestType = reflect.TypeOf(ocpp.StartTransactionRequest{})
+	case ocpp.StopTransactionFeatureName:
+		requestType = reflect.TypeOf(ocpp.StopTransactionRequest{})
 	default:
 		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
 	}

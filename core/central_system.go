@@ -43,8 +43,17 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 	case ocpp.HeartbeatFeatureName:
 		heartbeatRequest := callRequest.Payload.(*ocpp.HeartbeatRequest)
 		confirmation, err = cs.coreHandler.OnHeartbeat(chargePointId, heartbeatRequest)
+	case ocpp.StartTransactionFeatureName:
+		startRequest := callRequest.Payload.(*ocpp.StartTransactionRequest)
+		confirmation, err = cs.coreHandler.OnStartTransaction(chargePointId, startRequest)
+	case ocpp.StopTransactionFeatureName:
+		stopRequest := callRequest.Payload.(*ocpp.StopTransactionRequest)
+		confirmation, err = cs.coreHandler.OnStopTransaction(chargePointId, stopRequest)
 	default:
 		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
+	}
+	if err != nil {
+		return err
 	}
 
 	err = cs.server.SendResponse(ws, &confirmation)
@@ -63,6 +72,6 @@ func NewCentralSystem() CentralSystem {
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
 	cs.server = wsServer
-	cs.SetCoreHandler(&ocpp.MessageHandler{})
+	cs.SetCoreHandler(&ocpp.SystemHandler{})
 	return cs
 }
