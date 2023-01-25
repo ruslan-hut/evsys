@@ -72,6 +72,6 @@ func NewCentralSystem() CentralSystem {
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
 	cs.server = wsServer
-	cs.SetCoreHandler(&ocpp.SystemHandler{})
+	cs.SetCoreHandler(ocpp.NewSystemHandler())
 	return cs
 }

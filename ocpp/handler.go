@@ -48,10 +48,14 @@ type SystemHandler struct {
 	chargePoints map[string]*ChargePointState
 }
 
-func (h *SystemHandler) addChargePoint(chargePointId string) {
-	if h.chargePoints == nil {
-		h.chargePoints = make(map[string]*ChargePointState)
+func NewSystemHandler() *SystemHandler {
+	handler := SystemHandler{
+		chargePoints: make(map[string]*ChargePointState),
 	}
+	return &handler
+}
+
+func (h *SystemHandler) addChargePoint(chargePointId string) {
 	h.chargePoints[chargePointId] = &ChargePointState{
 		connectors:   make(map[int]*ConnectorInfo),
 		transactions: make(map[int]*TransactionInfo),
@@ -64,7 +68,10 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *BootNo
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequest) (confirmation *AuthorizeResponse, err error) {
-	h.addChargePoint(chargePointId)
+	_, ok := h.chargePoints[chargePointId]
+	if !ok {
+		h.addChargePoint(chargePointId)
+	}
 	log.Printf("authorization accepted: ID %s", chargePointId)
 	return NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
 }
