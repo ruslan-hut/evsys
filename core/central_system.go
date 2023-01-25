@@ -37,6 +37,9 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 	case ocpp.BootNotificationFeatureName:
 		bootRequest := callRequest.Payload.(*ocpp.BootNotificationRequest)
 		confirmation, err = cs.coreHandler.OnBootNotification(chargePointId, bootRequest)
+	case ocpp.AuthorizeFeatureName:
+		authRequest := callRequest.Payload.(*ocpp.AuthorizeRequest)
+		confirmation, err = cs.coreHandler.OnAuthorize(chargePointId, authRequest)
 	default:
 		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
 	}

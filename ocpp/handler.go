@@ -15,3 +15,8 @@ func (h *MessageHandler) OnBootNotification(chargePointId string, request *BootN
 	log.Printf("boot confirmed: ID %s; Serial number: %s", chargePointId, request.ChargePointSerialNumber)
 	return NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, RegistrationStatusAccepted), nil
 }
+
+func (h *MessageHandler) OnAuthorize(chargePointId string, request *AuthorizeRequest) (confirmation *AuthorizeResponse, err error) {
+	log.Printf("authorization accepted: ID %s", chargePointId)
+	return NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
+}

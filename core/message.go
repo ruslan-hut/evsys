@@ -104,23 +104,35 @@ func ParseRequest(data []interface{}) (Request, error) {
 		return nil, utility.Err("invalid message unique id in request")
 	}
 	action := data[2].(string)
-	log.Printf("<<< got request %s (%s)", action, uniqueId)
+	log.Printf("<<< %s (%s)", action, uniqueId)
 
-	if action == ocpp.BootNotificationFeatureName {
-		bootRequest := ocpp.BootNotificationRequest{}
-		request, err := ParseRawJsonRequest(data[3], bootRequest.GetRequestType())
-		if err != nil {
-			return nil, err
-		}
-		callRequest := CallRequest{
-			TypeId:   typeId,
-			UniqueId: uniqueId,
-			feature:  action,
-			Payload:  request,
-		}
-		return &callRequest, nil
+	requestType, err := getRequestType(action)
+	if err != nil {
+		return nil, err
 	}
-	return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
+	request, err := ParseRawJsonRequest(data[3], requestType)
+	if err != nil {
+		return nil, err
+	}
+	callRequest := CallRequest{
+		TypeId:   typeId,
+		UniqueId: uniqueId,
+		feature:  action,
+		Payload:  request,
+	}
+	return &callRequest, nil
+}
+
+func getRequestType(action string) (requestType reflect.Type, err error) {
+	switch action {
+	case ocpp.BootNotificationFeatureName:
+		requestType = reflect.TypeOf(ocpp.BootNotificationRequest{})
+	case ocpp.AuthorizeFeatureName:
+		requestType = reflect.TypeOf(ocpp.AuthorizeRequest{})
+	default:
+		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
+	}
+	return requestType, nil
 }
 
 func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (Request, error) {
