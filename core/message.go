@@ -129,6 +129,8 @@ func getRequestType(action string) (requestType reflect.Type, err error) {
 		requestType = reflect.TypeOf(ocpp.BootNotificationRequest{})
 	case ocpp.AuthorizeFeatureName:
 		requestType = reflect.TypeOf(ocpp.AuthorizeRequest{})
+	case ocpp.HeartbeatFeatureName:
+		requestType = reflect.TypeOf(ocpp.HeartbeatRequest{})
 	default:
 		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
 	}

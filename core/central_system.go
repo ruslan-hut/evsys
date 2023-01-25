@@ -40,6 +40,9 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 	case ocpp.AuthorizeFeatureName:
 		authRequest := callRequest.Payload.(*ocpp.AuthorizeRequest)
 		confirmation, err = cs.coreHandler.OnAuthorize(chargePointId, authRequest)
+	case ocpp.HeartbeatFeatureName:
+		heartbeatRequest := callRequest.Payload.(*ocpp.HeartbeatRequest)
+		confirmation, err = cs.coreHandler.OnHeartbeat(chargePointId, heartbeatRequest)
 	default:
 		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
 	}

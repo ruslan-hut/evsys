@@ -20,3 +20,8 @@ func (h *MessageHandler) OnAuthorize(chargePointId string, request *AuthorizeReq
 	log.Printf("authorization accepted: ID %s", chargePointId)
 	return NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
 }
+
+func (h *MessageHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequest) (confirmation *HeartbeatResponse, err error) {
+	log.Printf("received heartbeat: ID %s", chargePointId)
+	return NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
+}
