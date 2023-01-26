@@ -55,6 +55,9 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 	case ocpp.StatusNotificationFeatureName:
 		statusRequest := callRequest.Payload.(*ocpp.StatusNotificationRequest)
 		confirmation, err = cs.coreHandler.OnStatusNotification(chargePointId, statusRequest)
+	case ocpp.DataTransferFeatureName:
+		dataRequest := callRequest.Payload.(*ocpp.DataTransferRequest)
+		confirmation, err = cs.coreHandler.OnDataTransfer(chargePointId, dataRequest)
 	default:
 		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
 	}

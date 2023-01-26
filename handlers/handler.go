@@ -10,4 +10,5 @@ type SystemHandler interface {
 	OnStopTransaction(chargePointId string, request *ocpp.StopTransactionRequest) (confirmation *ocpp.StopTransactionResponse, err error)
 	OnMeterValues(chargePointId string, request *ocpp.MeterValuesRequest) (confirmation *ocpp.MeterValuesResponse, err error)
 	OnStatusNotification(chargePointId string, request *ocpp.StatusNotificationRequest) (confirmation *ocpp.StatusNotificationResponse, err error)
+	OnDataTransfer(chargePointId string, request *ocpp.DataTransferRequest) (confirmation *ocpp.DataTransferResponse, err error)
 }

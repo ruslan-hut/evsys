@@ -151,3 +151,8 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 	}
 	return NewStatusNotificationResponse(), nil
 }
+
+func (h *SystemHandler) OnDataTransfer(chargePointId string, request *DataTransferRequest) (confirmation *DataTransferResponse, err error) {
+	log.Printf("[%s] recieved data #%v", chargePointId, request.Data)
+	return NewDataTransferResponse(DataTransferStatusAccepted), nil
+}
