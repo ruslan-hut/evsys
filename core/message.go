@@ -104,7 +104,6 @@ func ParseRequest(data []interface{}) (Request, error) {
 		return nil, utility.Err("invalid message unique id in request")
 	}
 	action := data[2].(string)
-	log.Printf("<<< %s (%s)", action, uniqueId)
 
 	requestType, err := getRequestType(action)
 	if err != nil {
@@ -112,7 +111,6 @@ func ParseRequest(data []interface{}) (Request, error) {
 	}
 	request, err := ParseRawJsonRequest(data[3], requestType)
 	if err != nil {
-		log.Println(data[3])
 		return nil, err
 	}
 	callRequest := CallRequest{
@@ -157,6 +155,7 @@ func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (Request, er
 	request := reflect.New(requestType).Interface()
 	err = json.Unmarshal(bytes, &request)
 	if err != nil {
+		log.Printf("bytes: %v", string(bytes))
 		return nil, err
 	}
 	result := request.(Request)

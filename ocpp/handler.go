@@ -63,7 +63,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 }
 
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *BootNotificationRequest) (confirmation *BootNotificationResponse, err error) {
-	log.Printf("boot confirmed: ID %s; Serial number: %s", chargePointId, request.ChargePointSerialNumber)
+	log.Printf("[%s] boot confirmed (serial number: %s)", chargePointId, request.ChargePointSerialNumber)
 	return NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, RegistrationStatusAccepted), nil
 }
 
@@ -72,23 +72,23 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequ
 	if !ok {
 		h.addChargePoint(chargePointId)
 	}
-	log.Printf("authorization accepted: ID %s", chargePointId)
+	log.Printf("[%s] authorization accepted", chargePointId)
 	return NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
 }
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequest) (confirmation *HeartbeatResponse, err error) {
-	log.Printf("received heartbeat: ID %s", chargePointId)
+	log.Printf("[%s] received heartbeat", chargePointId)
 	return NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
 }
 
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartTransactionRequest) (confirmation *StartTransactionResponse, err error) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
-		return nil, fmt.Errorf("unknown charging point %s", chargePointId)
+		return nil, fmt.Errorf("[%s] unknown charging point", chargePointId)
 	}
 	connector := state.getConnector(request.ConnectorId)
 	if connector.currentTransaction >= 0 {
-		return nil, fmt.Errorf("connector %v is now busy with another transaction", request.ConnectorId)
+		return nil, fmt.Errorf("[%s] connector %v is now busy with another transaction", chargePointId, request.ConnectorId)
 	}
 
 	transaction := &TransactionInfo{}
@@ -103,14 +103,14 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 
 	state.transactions[transaction.id] = transaction
 
-	log.Printf("ID %s started transaction #%v for connector %v", chargePointId, transaction.id, transaction.connectorId)
+	log.Printf("[%s] started transaction #%v for connector %v", chargePointId, transaction.id, transaction.connectorId)
 	return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.id), nil
 }
 
 func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTransactionRequest) (confirmation *StopTransactionResponse, err error) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
-		return nil, fmt.Errorf("unknown charging point %s", chargePointId)
+		return nil, fmt.Errorf("[%s] unknown charging point", chargePointId)
 	}
 	transaction, ok := state.transactions[request.TransactionId]
 	if ok {
@@ -120,7 +120,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 		transaction.endMeter = request.MeterStop
 		//TODO: bill clients
 	}
-	log.Printf("ID %s stopped transaction %v - %v", chargePointId, request.TransactionId, request.Reason)
+	log.Printf("[%s] stopped transaction %v %v", chargePointId, request.TransactionId, request.Reason)
 	for _, mv := range request.TransactionData {
 		log.Printf("%v", mv)
 	}
@@ -138,7 +138,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValues
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationResponse, err error) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
-		return nil, fmt.Errorf("unknown charging point %s", chargePointId)
+		return nil, fmt.Errorf("[%s] unknown charging point", chargePointId)
 	}
 	state.errorCode = request.ErrorCode
 	if request.ConnectorId > 0 {
@@ -147,8 +147,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 		log.Printf("[%s] updated connector #%v status to %v", chargePointId, request.ConnectorId, request.Status)
 	} else {
 		state.status = request.Status
-		log.Printf("[%s] updated all connectors status to %v", chargePointId, request.Status)
+		log.Printf("[%s] updated main controller status to %v", chargePointId, request.Status)
 	}
-	log.Printf("[%s] recieved meter values for connector #%v", chargePointId, request.ConnectorId)
 	return NewStatusNotificationResponse(), nil
 }

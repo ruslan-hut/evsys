@@ -72,7 +72,7 @@ func (s *Server) Register(router *httprouter.Router) {
 
 func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	id := params.ByName("id")
-	log.Printf("connection initiated by %s from remote %s", id, r.RemoteAddr)
+	log.Printf("connection initiated from remote %s", r.RemoteAddr)
 
 	s.upgrader.CheckOrigin = func(r *http.Request) bool {
 		return true
@@ -82,7 +82,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 	requestedProto := ""
 	for _, proto := range clientSubProto {
 		if len(s.upgrader.Subprotocols) == 0 {
-			// we support all protocols
+			// supporting all protocols
 			requestedProto = proto
 			break
 		}
@@ -102,7 +102,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 
-	log.Println("socket up, ready to receive messages")
+	log.Printf("[%s] socket up, ready to receive messages", id)
 	ws := WebSocket{
 		conn: conn,
 		id:   id,
@@ -116,13 +116,13 @@ func (s *Server) messageReader(ws *WebSocket) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("read message error; ID %s; %s", ws.id, err)
+			log.Printf("[%s] %s", ws.id, err)
 			return
 		}
 		if s.messageHandler != nil {
 			err = s.messageHandler(ws, message)
 			if err != nil {
-				log.Printf("handle message error; ID %s; %s", ws.id, err)
+				log.Printf("[%s] %s", ws.id, err)
 				continue
 			}
 		}
@@ -150,7 +150,6 @@ func (s *Server) SendResponse(ws *WebSocket, response *Response) error {
 		log.Println("error encoding response; ", err)
 		return err
 	}
-	log.Println(">>> sending response")
 	if err = ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		log.Println("error sending response; ", err)
 	}
