@@ -3,46 +3,47 @@ package server
 import (
 	"encoding/json"
 	"evsys/ocpp/core"
+	"evsys/ocpp/firmware"
 	"evsys/utility"
 	"fmt"
 	"log"
 	"reflect"
 )
 
-type MessageType string
-
-const (
-	BootNotification MessageType = "BootNotification"
-)
+//type MessageType string
+//
+//const (
+//	BootNotification MessageType = "BootNotification"
+//)
 
 type Message struct {
 	Fields []interface{}
 }
 
-func (m *Message) Type() (t MessageType, err error) {
-	if len(m.Fields) < 4 {
-		err = utility.Err("incompatible message structure")
-		return t, err
-	}
-	v := fmt.Sprintf("%v", m.Fields[2])
-	switch v {
-	case string(BootNotification):
-		t = BootNotification
+//func (m *Message) Type() (t MessageType, err error) {
+//	if len(m.Fields) < 4 {
+//		err = utility.Err("incompatible message structure")
+//		return t, err
+//	}
+//	v := fmt.Sprintf("%v", m.Fields[2])
+//	switch v {
+//	case string(BootNotification):
+//		t = BootNotification
+//
+//	default:
+//		err = utility.Err(fmt.Sprintf("unsupported message type %s", v))
+//	}
+//	return t, err
+//}
 
-	default:
-		err = utility.Err(fmt.Sprintf("unsupported message type %s", v))
-	}
-	return t, err
-}
-
-func (m *Message) UniqueId() (id string, err error) {
-	if len(m.Fields) < 4 {
-		err = utility.Err("incompatible message structure")
-		return id, err
-	}
-	id = fmt.Sprintf("%v", m.Fields[1])
-	return id, err
-}
+//func (m *Message) UniqueId() (id string, err error) {
+//	if len(m.Fields) < 4 {
+//		err = utility.Err("incompatible message structure")
+//		return id, err
+//	}
+//	id = fmt.Sprintf("%v", m.Fields[1])
+//	return id, err
+//}
 
 type CallType int
 
@@ -140,6 +141,10 @@ func getRequestType(action string) (requestType reflect.Type, err error) {
 		requestType = reflect.TypeOf(core.StatusNotificationRequest{})
 	case core.DataTransferFeatureName:
 		requestType = reflect.TypeOf(core.DataTransferRequest{})
+	case firmware.DiagnosticsStatusNotificationFeatureName:
+		requestType = reflect.TypeOf(firmware.DiagnosticsStatusNotificationRequest{})
+	case firmware.StatusNotificationFeatureName:
+		requestType = reflect.TypeOf(firmware.StatusNotificationRequest{})
 	default:
 		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
 	}

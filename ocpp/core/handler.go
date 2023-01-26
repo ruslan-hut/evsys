@@ -30,10 +30,10 @@ type ConnectorInfo struct {
 type ChargePointState struct {
 	status            ChargePointStatus
 	diagnosticsStatus firmware.DiagnosticsStatus
-	//firmwareStatus    firmware.FirmwareStatus
-	connectors   map[int]*ConnectorInfo // No assumptions about the # of connectors
-	transactions map[int]*TransactionInfo
-	errorCode    ChargePointErrorCode
+	firmwareStatus    firmware.Status
+	connectors        map[int]*ConnectorInfo // No assumptions about the # of connectors
+	transactions      map[int]*TransactionInfo
+	errorCode         ChargePointErrorCode
 }
 
 func (cps *ChargePointState) getConnector(id int) *ConnectorInfo {
@@ -166,4 +166,14 @@ func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, re
 	state.diagnosticsStatus = request.Status
 	log.Printf("[%s] updated diagnostic status to %v", chargePointId, request.Status)
 	return firmware.NewDiagnosticsStatusNotificationResponse(), nil
+}
+
+func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (confirmation *firmware.StatusNotificationResponse, err error) {
+	state, ok := h.chargePoints[chargePointId]
+	if !ok {
+		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
+	}
+	state.firmwareStatus = request.Status
+	log.Printf("[%s] updated firmware status to %v", chargePointId, request.Status)
+	return firmware.NewStatusNotificationResponse(), nil
 }

@@ -58,6 +58,8 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 		confirmation, err = cs.coreHandler.OnDataTransfer(chargePointId, request.(*core.DataTransferRequest))
 	case firmware.DiagnosticsStatusNotificationFeatureName:
 		confirmation, err = cs.firmwareHandler.OnDiagnosticsStatusNotification(chargePointId, request.(*firmware.DiagnosticsStatusNotificationRequest))
+	case firmware.StatusNotificationFeatureName:
+		confirmation, err = cs.firmwareHandler.OnFirmwareStatusNotification(chargePointId, request.(*firmware.StatusNotificationRequest))
 	default:
 		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
 	}
