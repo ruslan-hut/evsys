@@ -116,7 +116,15 @@ func (s *Server) messageReader(ws *WebSocket) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("[%s] error: %s; closing session", ws.id, err)
+			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
+				log.Printf("[%s] leaving session", ws.id)
+			} else {
+				log.Printf("[%s] %s; closing session", ws.id, err)
+			}
+			err = conn.Close()
+			if err != nil {
+				log.Printf("[%s] error while closing socket: %s", ws.id, err)
+			}
 			return
 		}
 		if s.messageHandler != nil {
