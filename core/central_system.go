@@ -49,6 +49,9 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 	case ocpp.StopTransactionFeatureName:
 		stopRequest := callRequest.Payload.(*ocpp.StopTransactionRequest)
 		confirmation, err = cs.coreHandler.OnStopTransaction(chargePointId, stopRequest)
+	case ocpp.MeterValuesFeatureName:
+		meterRequest := callRequest.Payload.(*ocpp.MeterValuesRequest)
+		confirmation, err = cs.coreHandler.OnMeterValues(chargePointId, meterRequest)
 	default:
 		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
 	}

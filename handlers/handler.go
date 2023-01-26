@@ -8,4 +8,6 @@ type SystemHandler interface {
 	OnHeartbeat(chargePointId string, request *ocpp.HeartbeatRequest) (confirmation *ocpp.HeartbeatResponse, err error)
 	OnStartTransaction(chargePointId string, request *ocpp.StartTransactionRequest) (confirmation *ocpp.StartTransactionResponse, err error)
 	OnStopTransaction(chargePointId string, request *ocpp.StopTransactionRequest) (confirmation *ocpp.StopTransactionResponse, err error)
+	OnMeterValues(chargePointId string, request *ocpp.MeterValuesRequest) (confirmation *ocpp.MeterValuesResponse, err error)
+	//OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationConfirmation, err error)
 }

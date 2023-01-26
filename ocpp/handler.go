@@ -126,3 +126,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 	}
 	return NewStopTransactionResponse(), nil
 }
+
+func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValuesRequest) (confirmation *MeterValuesResponse, err error) {
+	log.Printf("[%s] recieved meter values for connector #%v", chargePointId, request.ConnectorId)
+	for _, value := range request.MeterValue {
+		log.Printf("[%s] -- %v", chargePointId, value)
+	}
+	return NewMeterValuesResponse(), nil
+}
