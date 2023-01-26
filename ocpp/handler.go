@@ -22,17 +22,17 @@ type TransactionInfo struct {
 }
 
 type ConnectorInfo struct {
-	//status             core.ChargePointStatus
+	status             ChargePointStatus
 	currentTransaction int
 }
 
 type ChargePointState struct {
-	//status            core.ChargePointStatus
+	status ChargePointStatus
 	//diagnosticsStatus firmware.DiagnosticsStatus
 	//firmwareStatus    firmware.FirmwareStatus
 	connectors   map[int]*ConnectorInfo // No assumptions about the # of connectors
 	transactions map[int]*TransactionInfo
-	//errorCode         core.ChargePointErrorCode
+	errorCode    ChargePointErrorCode
 }
 
 func (cps *ChargePointState) getConnector(id int) *ConnectorInfo {
@@ -133,4 +133,22 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValues
 		log.Printf("[%s] -- %v", chargePointId, value)
 	}
 	return NewMeterValuesResponse(), nil
+}
+
+func (h *SystemHandler) OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationResponse, err error) {
+	state, ok := h.chargePoints[chargePointId]
+	if !ok {
+		return nil, fmt.Errorf("unknown charging point %s", chargePointId)
+	}
+	state.errorCode = request.ErrorCode
+	if request.ConnectorId > 0 {
+		connector := state.getConnector(request.ConnectorId)
+		connector.status = request.Status
+		log.Printf("[%s] updated connector #%v status to %v", chargePointId, request.ConnectorId, request.Status)
+	} else {
+		state.status = request.Status
+		log.Printf("[%s] updated all connectors status to %v", chargePointId, request.Status)
+	}
+	log.Printf("[%s] recieved meter values for connector #%v", chargePointId, request.ConnectorId)
+	return NewStatusNotificationResponse(), nil
 }

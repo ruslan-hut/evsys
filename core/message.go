@@ -138,6 +138,8 @@ func getRequestType(action string) (requestType reflect.Type, err error) {
 		requestType = reflect.TypeOf(ocpp.StopTransactionRequest{})
 	case ocpp.MeterValuesFeatureName:
 		requestType = reflect.TypeOf(ocpp.MeterValuesRequest{})
+	case ocpp.StatusNotificationFeatureName:
+		requestType = reflect.TypeOf(ocpp.StatusNotificationRequest{})
 	default:
 		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
 	}

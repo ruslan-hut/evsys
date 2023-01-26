@@ -9,5 +9,5 @@ type SystemHandler interface {
 	OnStartTransaction(chargePointId string, request *ocpp.StartTransactionRequest) (confirmation *ocpp.StartTransactionResponse, err error)
 	OnStopTransaction(chargePointId string, request *ocpp.StopTransactionRequest) (confirmation *ocpp.StopTransactionResponse, err error)
 	OnMeterValues(chargePointId string, request *ocpp.MeterValuesRequest) (confirmation *ocpp.MeterValuesResponse, err error)
-	//OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationConfirmation, err error)
+	OnStatusNotification(chargePointId string, request *ocpp.StatusNotificationRequest) (confirmation *ocpp.StatusNotificationResponse, err error)
 }
