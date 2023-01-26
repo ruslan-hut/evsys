@@ -116,13 +116,13 @@ func (s *Server) messageReader(ws *WebSocket) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("[%s] %s", ws.id, err)
+			log.Printf("[%s] error: %s; closing session", ws.id, err)
 			return
 		}
 		if s.messageHandler != nil {
 			err = s.messageHandler(ws, message)
 			if err != nil {
-				log.Printf("[%s] %s", ws.id, err)
+				log.Printf("[%s] error: %s", ws.id, err)
 				continue
 			}
 		}

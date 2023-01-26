@@ -84,11 +84,11 @@ func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequ
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartTransactionRequest) (confirmation *StartTransactionResponse, err error) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
-		return nil, fmt.Errorf("[%s] unknown charging point", chargePointId)
+		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
 	connector := state.getConnector(request.ConnectorId)
 	if connector.currentTransaction >= 0 {
-		return nil, fmt.Errorf("[%s] connector %v is now busy with another transaction", chargePointId, request.ConnectorId)
+		return nil, fmt.Errorf("connector %v is now busy with another transaction", request.ConnectorId)
 	}
 
 	transaction := &TransactionInfo{}
@@ -110,7 +110,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTransactionRequest) (confirmation *StopTransactionResponse, err error) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
-		return nil, fmt.Errorf("[%s] unknown charging point", chargePointId)
+		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
 	transaction, ok := state.transactions[request.TransactionId]
 	if ok {
@@ -138,7 +138,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValues
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationResponse, err error) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
-		return nil, fmt.Errorf("[%s] unknown charging point", chargePointId)
+		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
 	state.errorCode = request.ErrorCode
 	if request.ConnectorId > 0 {
