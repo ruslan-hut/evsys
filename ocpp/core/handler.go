@@ -1,6 +1,7 @@
-package ocpp
+package core
 
 import (
+	"evsys/ocpp/firmware"
 	"evsys/types"
 	"fmt"
 	"log"
@@ -27,8 +28,8 @@ type ConnectorInfo struct {
 }
 
 type ChargePointState struct {
-	status ChargePointStatus
-	//diagnosticsStatus firmware.DiagnosticsStatus
+	status            ChargePointStatus
+	diagnosticsStatus firmware.DiagnosticsStatus
 	//firmwareStatus    firmware.FirmwareStatus
 	connectors   map[int]*ConnectorInfo // No assumptions about the # of connectors
 	transactions map[int]*TransactionInfo
@@ -155,4 +156,14 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 func (h *SystemHandler) OnDataTransfer(chargePointId string, request *DataTransferRequest) (confirmation *DataTransferResponse, err error) {
 	log.Printf("[%s] recieved data #%v", chargePointId, request.Data)
 	return NewDataTransferResponse(DataTransferStatusAccepted), nil
+}
+
+func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (confirmation *firmware.DiagnosticsStatusNotificationResponse, err error) {
+	state, ok := h.chargePoints[chargePointId]
+	if !ok {
+		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
+	}
+	state.diagnosticsStatus = request.Status
+	log.Printf("[%s] updated diagnostic status to %v", chargePointId, request.Status)
+	return firmware.NewDiagnosticsStatusNotificationResponse(), nil
 }

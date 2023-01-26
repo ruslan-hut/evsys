@@ -1,4 +1,4 @@
-package ocpp
+package core
 
 import (
 	"evsys/types"

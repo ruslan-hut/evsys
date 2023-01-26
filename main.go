@@ -1,13 +1,13 @@
 package main
 
 import (
-	"evsys/core"
+	"evsys/server"
 	"log"
 )
 
 func main() {
 
-	centralSystem := core.NewCentralSystem()
+	centralSystem := server.NewCentralSystem()
 	if err := centralSystem.Start(); err != nil {
 		log.Println("start failed")
 	}

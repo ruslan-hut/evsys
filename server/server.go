@@ -1,4 +1,4 @@
-package core
+package server
 
 import (
 	"evsys/internal/config"

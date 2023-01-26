@@ -1,8 +1,8 @@
-package core
+package server
 
 import (
 	"encoding/json"
-	"evsys/ocpp"
+	"evsys/ocpp/core"
 	"evsys/utility"
 	"fmt"
 	"log"
@@ -87,7 +87,7 @@ func (callRequest *CallRequest) GetFeatureName() string {
 	return callRequest.feature
 }
 
-func ParseRequest(data []interface{}) (Request, error) {
+func ParseRequest(data []interface{}) (*CallRequest, error) {
 	if len(data) != 4 {
 		return nil, utility.Err("unsupported request format; expected length: 4 elements")
 	}
@@ -124,22 +124,22 @@ func ParseRequest(data []interface{}) (Request, error) {
 
 func getRequestType(action string) (requestType reflect.Type, err error) {
 	switch action {
-	case ocpp.BootNotificationFeatureName:
-		requestType = reflect.TypeOf(ocpp.BootNotificationRequest{})
-	case ocpp.AuthorizeFeatureName:
-		requestType = reflect.TypeOf(ocpp.AuthorizeRequest{})
-	case ocpp.HeartbeatFeatureName:
-		requestType = reflect.TypeOf(ocpp.HeartbeatRequest{})
-	case ocpp.StartTransactionFeatureName:
-		requestType = reflect.TypeOf(ocpp.StartTransactionRequest{})
-	case ocpp.StopTransactionFeatureName:
-		requestType = reflect.TypeOf(ocpp.StopTransactionRequest{})
-	case ocpp.MeterValuesFeatureName:
-		requestType = reflect.TypeOf(ocpp.MeterValuesRequest{})
-	case ocpp.StatusNotificationFeatureName:
-		requestType = reflect.TypeOf(ocpp.StatusNotificationRequest{})
-	case ocpp.DataTransferFeatureName:
-		requestType = reflect.TypeOf(ocpp.DataTransferRequest{})
+	case core.BootNotificationFeatureName:
+		requestType = reflect.TypeOf(core.BootNotificationRequest{})
+	case core.AuthorizeFeatureName:
+		requestType = reflect.TypeOf(core.AuthorizeRequest{})
+	case core.HeartbeatFeatureName:
+		requestType = reflect.TypeOf(core.HeartbeatRequest{})
+	case core.StartTransactionFeatureName:
+		requestType = reflect.TypeOf(core.StartTransactionRequest{})
+	case core.StopTransactionFeatureName:
+		requestType = reflect.TypeOf(core.StopTransactionRequest{})
+	case core.MeterValuesFeatureName:
+		requestType = reflect.TypeOf(core.MeterValuesRequest{})
+	case core.StatusNotificationFeatureName:
+		requestType = reflect.TypeOf(core.StatusNotificationRequest{})
+	case core.DataTransferFeatureName:
+		requestType = reflect.TypeOf(core.DataTransferRequest{})
 	default:
 		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
 	}
