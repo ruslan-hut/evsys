@@ -73,12 +73,16 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequ
 	if !ok {
 		h.addChargePoint(chargePointId)
 	}
-	log.Printf("[%s] authorization accepted", chargePointId)
+	id := request.IdTag
+	if id == "" {
+		return nil, fmt.Errorf("%s cannot authorize empty id %s", request.GetFeatureName(), id)
+	}
+	log.Printf("[%s] authorization accepted for %s", chargePointId, id)
 	return NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
 }
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequest) (confirmation *HeartbeatResponse, err error) {
-	log.Printf("[%s] received heartbeat", chargePointId)
+	log.Printf("[%s] %s", chargePointId, request.GetFeatureName())
 	return NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
 }
 
