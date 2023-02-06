@@ -142,12 +142,18 @@ func (s *Server) Start() error {
 		return utility.Err("configuration not loaded")
 	}
 	serverAddress := fmt.Sprintf("%s:%s", s.conf.Listen.BindIP, s.conf.Listen.Port)
-	log.Printf("starting server on %s", serverAddress)
+	log.Printf("initializing listener on %s", serverAddress)
 	listener, err := net.Listen("tcp", serverAddress)
 	if err != nil {
 		return err
 	}
-	err = s.httpServer.Serve(listener)
+	if s.conf.Listen.TLS {
+		log.Println("starting https TLS server")
+		err = s.httpServer.ServeTLS(listener, s.conf.Listen.CertFile, s.conf.Listen.KeyFile)
+	} else {
+		log.Println("starting http server")
+		err = s.httpServer.Serve(listener)
+	}
 	return err
 }
 
