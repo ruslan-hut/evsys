@@ -84,6 +84,8 @@ func NewCentralSystem() CentralSystem {
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
 	cs.server = wsServer
 	systemHandler := core.NewSystemHandler()
+	logger := utility.NewLogger()
+	systemHandler.SetLogger(logger)
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(systemHandler)
 	return cs
