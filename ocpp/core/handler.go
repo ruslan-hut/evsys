@@ -1,7 +1,7 @@
 package core
 
 import (
-	"evsys/handlers"
+	"evsys/internal"
 	"evsys/ocpp/firmware"
 	"evsys/types"
 	"fmt"
@@ -48,7 +48,7 @@ func (cps *ChargePointState) getConnector(id int) *ConnectorInfo {
 
 type SystemHandler struct {
 	chargePoints map[string]*ChargePointState
-	logger       handlers.LogHandler
+	logger       internal.LogHandler
 }
 
 func NewSystemHandler() *SystemHandler {
@@ -58,7 +58,7 @@ func NewSystemHandler() *SystemHandler {
 	return &handler
 }
 
-func (h *SystemHandler) SetLogger(logger handlers.LogHandler) {
+func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
 	h.logger = logger
 }
 

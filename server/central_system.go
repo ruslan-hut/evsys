@@ -1,9 +1,9 @@
 package server
 
 import (
-	"evsys/handlers"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
+	"evsys/ocpp/handlers"
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
