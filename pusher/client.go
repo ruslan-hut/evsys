@@ -1,6 +1,10 @@
 package pusher
 
-import "github.com/pusher/pusher-http-go/v5"
+import (
+	"evsys/internal"
+	"evsys/logger"
+	"github.com/pusher/pusher-http-go/v5"
+)
 
 type MessagePusher struct {
 	client pusher.Client
@@ -20,6 +24,12 @@ func NewPusher() *MessagePusher {
 	return &messagePusher
 }
 
-func (p *MessagePusher) Send(msg Message) error {
-	return p.client.Trigger(string(msg.Channel), string(msg.Event), msg.Data)
+func (p *MessagePusher) Send(msg internal.Message) error {
+	messageType := msg.MessageType()
+	switch messageType {
+	case logger.FeatureLogMessageType:
+		//payload := msg.(*utility.FeatureLogMessage)
+		return p.client.Trigger(string(SystemLog), string(Call), msg)
+	}
+	return nil
 }

@@ -7,9 +7,13 @@ import (
 
 func main() {
 
-	centralSystem := server.NewCentralSystem()
-	if err := centralSystem.Start(); err != nil {
-		log.Println("start failed")
+	centralSystem, err := server.NewCentralSystem()
+	if err != nil {
+		log.Println("central system initialization failed; ", err)
+		return
+	}
+	if err = centralSystem.Start(); err != nil {
+		log.Println("start failed; ", err)
 	}
 
 }

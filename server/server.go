@@ -38,8 +38,7 @@ func (ws *WebSocket) SetUniqueId(uniqueId string) {
 	ws.uniqueId = uniqueId
 }
 
-func NewServer() *Server {
-	conf, _ := config.GetConfig()
+func NewServer(conf *config.Config) *Server {
 	server := Server{
 		conf:     conf,
 		upgrader: websocket.Upgrader{Subprotocols: []string{}},

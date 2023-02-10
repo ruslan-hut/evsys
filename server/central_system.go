@@ -1,9 +1,12 @@
 package server
 
 import (
+	"evsys/internal/config"
+	"evsys/logger"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/handlers"
+	"evsys/pusher"
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
@@ -77,16 +80,30 @@ func (cs *CentralSystem) Start() error {
 	return err
 }
 
-func NewCentralSystem() CentralSystem {
+func NewCentralSystem() (CentralSystem, error) {
 	cs := CentralSystem{}
-	wsServer := NewServer()
+
+	conf, err := config.GetConfig()
+	if err != nil {
+		return cs, err
+	}
+
+	// websocket listener
+	wsServer := NewServer(conf)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
 	cs.server = wsServer
+
+	// message handler
 	systemHandler := core.NewSystemHandler()
-	logger := utility.NewLogger()
-	systemHandler.SetLogger(logger)
+
+	// logger with push service for the message handler
+	logService := logger.NewLogger()
+	pusherService := pusher.NewPusher()
+	logService.SetMessageService(pusherService)
+	systemHandler.SetLogger(logService)
+
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(systemHandler)
-	return cs
+	return cs, nil
 }
