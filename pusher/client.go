@@ -21,6 +21,5 @@ func NewPusher() *MessagePusher {
 }
 
 func (p *MessagePusher) Send(msg Message) error {
-	data := map[string]string{"message": msg.Text}
-	return p.client.Trigger(string(msg.Channel), string(msg.Event), data)
+	return p.client.Trigger(string(msg.Channel), string(msg.Event), msg.Data)
 }
