@@ -89,13 +89,12 @@ func NewCentralSystem() (CentralSystem, error) {
 
 	conf, err := config.GetConfig()
 	if err != nil {
-		return cs, err
+		return cs, utility.Err(fmt.Sprintf("loading configuration failed: %s", err))
 	}
 
 	database, err := mongodb.NewMongoClient(conf)
 	if conf.Mongo.Enabled && err != nil {
-		log.Println("failed to initialize mongodb")
-		return cs, err
+		return cs, utility.Err(fmt.Sprintf("mongodb setup failed: %s", err))
 	}
 	if database != nil {
 		log.Println("mongodb is configured and enabled")
@@ -117,14 +116,13 @@ func NewCentralSystem() (CentralSystem, error) {
 	logService := logger.NewLogger()
 	logService.SetDatabase(database)
 	pusherService, err := pusher.NewPusher(conf)
-	if err != nil {
-		log.Println("failed to initialize Pusher; ", err)
-		return cs, err
+	if conf.Pusher.Enabled && err != nil {
+		return cs, utility.Err(fmt.Sprintf("pusher setup failed: %s", err))
 	}
 	if pusherService != nil {
-		log.Println("Pusher service is configured and enabled")
+		log.Println("pusher service is configured and enabled")
 	} else {
-		log.Println("Pusher service is disabled")
+		log.Println("pusher service is disabled")
 	}
 	logService.SetMessageService(pusherService)
 	systemHandler.SetLogger(logService)
