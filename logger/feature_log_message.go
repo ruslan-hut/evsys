@@ -3,10 +3,10 @@ package logger
 const FeatureLogMessageType = "featureLogMessage"
 
 type FeatureLogMessage struct {
-	Time          string `json:"time"`
-	Feature       string `json:"feature"`
-	ChargePointId string `json:"id"`
-	Text          string `json:"text"`
+	Time          string `json:"time" bson:"time"`
+	Feature       string `json:"feature" bson:"feature"`
+	ChargePointId string `json:"id" bson:"chargePointId"`
+	Text          string `json:"text" bson:"text"`
 }
 
 func (fm *FeatureLogMessage) MessageType() string {
