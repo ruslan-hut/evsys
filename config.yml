@@ -10,7 +10,14 @@ listen:
   key_file: c:/cert/key.pem
 pusher:
   enabled: false
-  app_id: ""
-  key: ""
-  secret: ""
-  cluster: "eu"
+  app_id:
+  key:
+  secret:
+  cluster: eu
+mongo:
+  enabled: false
+  host: 127.0.0.1
+  port: 27017
+  user: admin
+  password: pass
+  database: evsys

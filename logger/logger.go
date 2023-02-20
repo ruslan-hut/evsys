@@ -9,6 +9,7 @@ import (
 
 type Logger struct {
 	messageService internal.MessageService
+	database       internal.Database
 }
 
 func NewLogger() *Logger {
@@ -17,6 +18,10 @@ func NewLogger() *Logger {
 
 func (l *Logger) SetMessageService(messageService internal.MessageService) {
 	l.messageService = messageService
+}
+
+func (l *Logger) SetDatabase(database internal.Database) {
+	l.database = database
 }
 
 func logTime(t time.Time) string {
@@ -28,15 +33,22 @@ func (l *Logger) FeatureEvent(feature, id, text string) {
 	messageText := fmt.Sprintf("[%s] %s: %s", id, feature, text)
 	log.Print(messageText)
 
+	logMessage := &FeatureLogMessage{
+		Time:          logTime(time.Now()),
+		Feature:       feature,
+		ChargePointId: id,
+		Text:          text,
+	}
+
 	if l.messageService != nil {
-		logMessage := &FeatureLogMessage{
-			Time:          logTime(time.Now()),
-			Feature:       feature,
-			ChargePointId: id,
-			Text:          text,
-		}
 		if err := l.messageService.Send(logMessage); err != nil {
-			log.Printf("error sending message; %s", err)
+			log.Println("error sending message;", err)
+		}
+	}
+
+	if l.database != nil {
+		if err := l.database.WriteLogMessage(logMessage); err != nil {
+			log.Println("write log to database failed;", err)
 		}
 	}
 }

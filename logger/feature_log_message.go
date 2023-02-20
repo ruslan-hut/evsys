@@ -12,3 +12,7 @@ type FeatureLogMessage struct {
 func (fm *FeatureLogMessage) MessageType() string {
 	return FeatureLogMessageType
 }
+
+func (fm *FeatureLogMessage) DataType() string {
+	return FeatureLogMessageType
+}

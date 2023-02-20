@@ -1,8 +1,10 @@
 package server
 
 import (
+	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/logger"
+	"evsys/mongodb"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/handlers"
@@ -15,6 +17,7 @@ import (
 
 type CentralSystem struct {
 	server            *Server
+	database          internal.Database
 	coreHandler       handlers.SystemHandler
 	firmwareHandler   firmware.SystemHandler
 	supportedProtocol []string
@@ -89,6 +92,18 @@ func NewCentralSystem() (CentralSystem, error) {
 		return cs, err
 	}
 
+	database, err := mongodb.NewMongoClient(conf)
+	if conf.Mongo.Enabled && err != nil {
+		log.Println("failed to initialize mongodb")
+		return cs, err
+	}
+	if database != nil {
+		log.Println("mongodb is configured and enabled")
+	} else {
+		log.Println("mongodb is disabled")
+	}
+	cs.database = database
+
 	// websocket listener
 	wsServer := NewServer(conf)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
@@ -100,6 +115,7 @@ func NewCentralSystem() (CentralSystem, error) {
 
 	// logger with push service for the message handler
 	logService := logger.NewLogger()
+	logService.SetDatabase(database)
 	pusherService, err := pusher.NewPusher(conf)
 	if err != nil {
 		log.Println("failed to initialize Pusher; ", err)
