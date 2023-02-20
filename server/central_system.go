@@ -10,6 +10,7 @@ import (
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
+	"log"
 )
 
 type CentralSystem struct {
@@ -99,7 +100,16 @@ func NewCentralSystem() (CentralSystem, error) {
 
 	// logger with push service for the message handler
 	logService := logger.NewLogger()
-	pusherService := pusher.NewPusher()
+	pusherService, err := pusher.NewPusher(conf)
+	if err != nil {
+		log.Println("failed to initialize Pusher; ", err)
+		return cs, err
+	}
+	if pusherService != nil {
+		log.Println("Pusher service is configured and enabled")
+	} else {
+		log.Println("Pusher service is disabled")
+	}
 	logService.SetMessageService(pusherService)
 	systemHandler.SetLogger(logService)
 

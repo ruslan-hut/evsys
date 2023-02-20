@@ -2,7 +2,9 @@ package pusher
 
 import (
 	"evsys/internal"
+	"evsys/internal/config"
 	"evsys/logger"
+	"evsys/utility"
 	"github.com/pusher/pusher-http-go/v5"
 )
 
@@ -10,18 +12,30 @@ type MessagePusher struct {
 	client pusher.Client
 }
 
-func NewPusher() *MessagePusher {
+func NewPusher(conf *config.Config) (*MessagePusher, error) {
+	if !conf.Pusher.Enabled {
+		return nil, nil
+	}
+	if conf.Pusher.AppID == "" {
+		return nil, utility.Err("missed AppID parameter in Pusher configuration")
+	}
+	if conf.Pusher.Key == "" {
+		return nil, utility.Err("missed Key parameter in Pusher configuration")
+	}
+	if conf.Pusher.Secret == "" {
+		return nil, utility.Err("missed Secret parameter in Pusher configuration")
+	}
 	client := pusher.Client{
-		AppID:   "1551169",
-		Key:     "a1f101fb40a32c47c791",
-		Secret:  "d2a4f3029920cd9265aa",
-		Cluster: "eu",
+		AppID:   conf.Pusher.AppID,
+		Key:     conf.Pusher.Key,
+		Secret:  conf.Pusher.Secret,
+		Cluster: conf.Pusher.Cluster,
 		Secure:  true,
 	}
 	messagePusher := MessagePusher{
 		client: client,
 	}
-	return &messagePusher
+	return &messagePusher, nil
 }
 
 func (p *MessagePusher) Send(msg internal.Message) error {

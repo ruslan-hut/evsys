@@ -16,6 +16,13 @@ type Config struct {
 		CertFile string `yaml:"cert_file" env-default:""`
 		KeyFile  string `yaml:"key_file" env-default:""`
 	}
+	Pusher struct {
+		Enabled bool   `yaml:"enabled" env-default:"false"`
+		AppID   string `yaml:"app_id" env-default:""`
+		Key     string `yaml:"key" env-default:""`
+		Secret  string `yaml:"secret" env-default:""`
+		Cluster string `yaml:"cluster" env-default:"eu"`
+	}
 }
 
 var instance *Config
@@ -33,8 +40,5 @@ func GetConfig() (*Config, error) {
 			instance = nil
 		}
 	})
-	//if instance == nil {
-	//	err = utility.Err("failed to read configuration file")
-	//}
 	return instance, err
 }
