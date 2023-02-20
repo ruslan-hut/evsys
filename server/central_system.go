@@ -92,16 +92,31 @@ func NewCentralSystem() (CentralSystem, error) {
 		return cs, utility.Err(fmt.Sprintf("loading configuration failed: %s", err))
 	}
 
-	database, err := mongodb.NewMongoClient(conf)
-	if conf.Mongo.Enabled && err != nil {
-		return cs, utility.Err(fmt.Sprintf("mongodb setup failed: %s", err))
-	}
-	if database != nil {
-		log.Println("mongodb is configured and enabled")
+	if conf.Mongo.Enabled {
+		database, err := mongodb.NewMongoClient(conf)
+		if err != nil {
+			return cs, utility.Err(fmt.Sprintf("mongodb setup failed: %s", err))
+		}
+		if database != nil {
+			log.Println("mongodb is configured and enabled")
+		}
+		cs.database = database
 	} else {
-		log.Println("mongodb is disabled")
+		log.Println("database is disabled")
 	}
-	cs.database = database
+
+	var messageService internal.MessageService
+	if conf.Pusher.Enabled {
+		messageService, err = pusher.NewPusher(conf)
+		if conf.Pusher.Enabled && err != nil {
+			return cs, utility.Err(fmt.Sprintf("pusher setup failed: %s", err))
+		}
+		if messageService != nil {
+			log.Println("pusher service is configured and enabled")
+		}
+	} else {
+		log.Println("message pushing service service is disabled")
+	}
 
 	// websocket listener
 	wsServer := NewServer(conf)
@@ -112,19 +127,10 @@ func NewCentralSystem() (CentralSystem, error) {
 	// message handler
 	systemHandler := core.NewSystemHandler()
 
-	// logger with push service for the message handler
+	// logger with database and push service for the message handling
 	logService := logger.NewLogger()
-	logService.SetDatabase(database)
-	pusherService, err := pusher.NewPusher(conf)
-	if conf.Pusher.Enabled && err != nil {
-		return cs, utility.Err(fmt.Sprintf("pusher setup failed: %s", err))
-	}
-	if pusherService != nil {
-		log.Println("pusher service is configured and enabled")
-	} else {
-		log.Println("pusher service is disabled")
-	}
-	logService.SetMessageService(pusherService)
+	logService.SetDatabase(cs.database)
+	logService.SetMessageService(messageService)
 	systemHandler.SetLogger(logService)
 
 	cs.SetCoreHandler(systemHandler)
