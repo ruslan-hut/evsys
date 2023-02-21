@@ -11,13 +11,26 @@ import (
 	"net/http"
 )
 
-const wsEndpoint = "/ws/:id"
+type ApiCallType string
+
+const (
+	wsEndpoint         = "/ws/:id"
+	apiReadLogEndpoint = "/api/v1/log"
+
+	ApiReadLog ApiCallType = "apiReadLog"
+)
 
 type Server struct {
 	conf           *config.Config
 	httpServer     *http.Server
 	upgrader       websocket.Upgrader
 	messageHandler func(ws *WebSocket, data []byte) error
+	apiHandler     func(ac *ApiCall) error
+}
+
+type ApiCall struct {
+	writer   *http.ResponseWriter
+	CallType ApiCallType
 }
 
 type WebSocket struct {
@@ -67,6 +80,7 @@ func (s *Server) SetMessageHandler(handler func(ws *WebSocket, data []byte) erro
 
 func (s *Server) Register(router *httprouter.Router) {
 	router.GET(wsEndpoint, s.handleWsRequest)
+	router.GET(apiReadLogEndpoint, s.readLog)
 }
 
 func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
@@ -132,6 +146,23 @@ func (s *Server) messageReader(ws *WebSocket) {
 				log.Printf("[%s] error: %s", ws.id, err)
 				continue
 			}
+		}
+	}
+}
+
+func (s *Server) readLog(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	log.Printf("api call received from remote %s", r.RemoteAddr)
+	ac := &ApiCall{
+		writer:   &w,
+		CallType: ApiReadLog,
+	}
+	go s.handleApiRequest(ac)
+}
+
+func (s *Server) handleApiRequest(ac *ApiCall) {
+	if s.apiHandler != nil {
+		if err := s.apiHandler(ac); err != nil {
+			log.Println("error handling api request;", err)
 		}
 	}
 }
