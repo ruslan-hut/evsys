@@ -3,7 +3,6 @@ package pusher
 import (
 	"evsys/internal"
 	"evsys/internal/config"
-	"evsys/logger"
 	"evsys/utility"
 	"github.com/pusher/pusher-http-go/v5"
 )
@@ -41,7 +40,7 @@ func NewPusher(conf *config.Config) (*MessagePusher, error) {
 func (p *MessagePusher) Send(msg internal.Message) error {
 	messageType := msg.MessageType()
 	switch messageType {
-	case logger.FeatureLogMessageType:
+	case internal.FeatureLogMessageType:
 		//payload := msg.(*utility.FeatureLogMessage)
 		return p.client.Trigger(string(SystemLog), string(Call), msg)
 	}

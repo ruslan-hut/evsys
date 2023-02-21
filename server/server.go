@@ -1,6 +1,7 @@
 package server
 
 import (
+	"evsys/api"
 	"evsys/internal/config"
 	"evsys/utility"
 	"fmt"
@@ -11,13 +12,9 @@ import (
 	"net/http"
 )
 
-type ApiCallType string
-
 const (
 	wsEndpoint         = "/ws/:id"
 	apiReadLogEndpoint = "/api/v1/log"
-
-	ApiReadLog ApiCallType = "apiReadLog"
 )
 
 type Server struct {
@@ -25,12 +22,7 @@ type Server struct {
 	httpServer     *http.Server
 	upgrader       websocket.Upgrader
 	messageHandler func(ws *WebSocket, data []byte) error
-	apiHandler     func(ac *ApiCall) error
-}
-
-type ApiCall struct {
-	writer   *http.ResponseWriter
-	CallType ApiCallType
+	apiHandler     func(ac *api.Call) []byte
 }
 
 type WebSocket struct {
@@ -76,6 +68,10 @@ func (s *Server) AddSupportedSupProtocol(proto string) {
 
 func (s *Server) SetMessageHandler(handler func(ws *WebSocket, data []byte) error) {
 	s.messageHandler = handler
+}
+
+func (s *Server) SetApiHandler(handler func(ac *api.Call) []byte) {
+	s.apiHandler = handler
 }
 
 func (s *Server) Register(router *httprouter.Router) {
@@ -151,19 +147,26 @@ func (s *Server) messageReader(ws *WebSocket) {
 }
 
 func (s *Server) readLog(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	log.Printf("api call received from remote %s", r.RemoteAddr)
-	ac := &ApiCall{
-		writer:   &w,
-		CallType: ApiReadLog,
+	ac := &api.Call{
+		CallType: api.ReadLog,
+		Remote:   r.RemoteAddr,
 	}
-	go s.handleApiRequest(ac)
+	s.handleApiRequest(w, ac)
 }
 
-func (s *Server) handleApiRequest(ac *ApiCall) {
+func (s *Server) handleApiRequest(w http.ResponseWriter, ac *api.Call) {
 	if s.apiHandler != nil {
-		if err := s.apiHandler(ac); err != nil {
-			log.Println("error handling api request;", err)
+		data := s.apiHandler(ac)
+		if data != nil {
+			s.sendApiResponse(w, data)
 		}
+	}
+}
+
+func (s *Server) sendApiResponse(w http.ResponseWriter, data []byte) {
+	_, err := w.Write(data)
+	if err != nil {
+		log.Println("api response write failed;", err)
 	}
 }
 

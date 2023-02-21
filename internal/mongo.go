@@ -1,8 +1,7 @@
-package mongodb
+package internal
 
 import (
 	"context"
-	"evsys/internal"
 	"evsys/internal/config"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
@@ -40,7 +39,7 @@ func NewMongoClient(conf *config.Config) (*MongoDB, error) {
 	return client, nil
 }
 
-func (m *MongoDB) Write(table string, data internal.Data) error {
+func (m *MongoDB) Write(table string, data Data) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -54,7 +53,7 @@ func (m *MongoDB) Write(table string, data internal.Data) error {
 	return nil
 }
 
-func (m *MongoDB) WriteLogMessage(data internal.Data) error {
+func (m *MongoDB) WriteLogMessage(data Data) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -68,26 +67,25 @@ func (m *MongoDB) WriteLogMessage(data internal.Data) error {
 	return nil
 }
 
-func (m *MongoDB) ReadLog() ([]internal.Data, error) {
+func (m *MongoDB) ReadLog() (interface{}, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
 	}
 	defer m.disconnect(connection)
 
-	var data []internal.Data
-
+	var logMessages []FeatureLogMessage
 	collection := connection.Database(m.database).Collection(collectionLog)
 	filter := bson.D{}
-	opts := options.Find().SetSort(bson.D{{"time", 1}}).SetLimit(1000)
+	opts := options.Find().SetSort(bson.D{{"time", -1}}).SetLimit(1000)
 	cursor, err := collection.Find(m.ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err = cursor.All(m.ctx, &data); err != nil {
+	if err = cursor.All(m.ctx, &logMessages); err != nil {
 		return nil, err
 	}
-	return data, nil
+	return logMessages, nil
 }
 
 func (m *MongoDB) connect() (*mongo.Client, error) {

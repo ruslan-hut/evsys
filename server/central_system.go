@@ -1,10 +1,9 @@
 package server
 
 import (
+	"evsys/api"
 	"evsys/internal"
 	"evsys/internal/config"
-	"evsys/logger"
-	"evsys/mongodb"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/handlers"
@@ -93,7 +92,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	}
 
 	if conf.Mongo.Enabled {
-		database, err := mongodb.NewMongoClient(conf)
+		database, err := internal.NewMongoClient(conf)
 		if err != nil {
 			return cs, utility.Err(fmt.Sprintf("mongodb setup failed: %s", err))
 		}
@@ -118,19 +117,26 @@ func NewCentralSystem() (CentralSystem, error) {
 		log.Println("message pushing service service is disabled")
 	}
 
+	// logger with database and push service for the message handling
+	logService := internal.NewLogger()
+	logService.SetDatabase(cs.database)
+	logService.SetMessageService(messageService)
+
 	// websocket listener
 	wsServer := NewServer(conf)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
+
+	// handler for api requests
+	apiHandler := api.NewApiHandler()
+	apiHandler.SetLogger(logService)
+	apiHandler.SetDatabase(cs.database)
+	wsServer.SetApiHandler(apiHandler.HandleApiCall)
+
 	cs.server = wsServer
 
 	// message handler
 	systemHandler := core.NewSystemHandler()
-
-	// logger with database and push service for the message handling
-	logService := logger.NewLogger()
-	logService.SetDatabase(cs.database)
-	logService.SetMessageService(messageService)
 	systemHandler.SetLogger(logService)
 
 	cs.SetCoreHandler(systemHandler)
