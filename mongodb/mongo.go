@@ -5,10 +5,13 @@ import (
 	"evsys/internal"
 	"evsys/internal/config"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 )
+
+const collectionLog = "sys_log"
 
 type MongoDB struct {
 	ctx           context.Context
@@ -57,12 +60,34 @@ func (m *MongoDB) WriteLogMessage(data internal.Data) error {
 		return err
 	}
 	defer m.disconnect(connection)
-	collection := connection.Database(m.database).Collection("sys_log")
+	collection := connection.Database(m.database).Collection(collectionLog)
 	_, err = collection.InsertOne(m.ctx, data)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (m *MongoDB) ReadLog() ([]internal.Data, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	var data []internal.Data
+
+	collection := connection.Database(m.database).Collection(collectionLog)
+	filter := bson.D{}
+	opts := options.Find().SetSort(bson.D{{"time", 1}}).SetLimit(1000)
+	cursor, err := collection.Find(m.ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err = cursor.All(m.ctx, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (m *MongoDB) connect() (*mongo.Client, error) {
