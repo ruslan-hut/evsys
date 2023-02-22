@@ -164,6 +164,9 @@ func (s *Server) handleApiRequest(w http.ResponseWriter, ac *api.Call) {
 }
 
 func (s *Server) sendApiResponse(w http.ResponseWriter, data []byte) {
+	//w.WriteHeader(200)
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Content-Type", "application/json; charset=utf-8")
 	_, err := w.Write(data)
 	if err != nil {
 		log.Println("api response write failed;", err)
