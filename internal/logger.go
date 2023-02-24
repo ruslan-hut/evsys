@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+type Importance string
+
+const (
+	Info    Importance = " "
+	Warning Importance = "?"
+	Error   Importance = "!"
+)
+
 type Logger struct {
 	messageService MessageService
 	database       Database
@@ -29,40 +37,58 @@ func logTime(t time.Time) string {
 }
 
 func (l *Logger) FeatureEvent(feature, id, text string) {
-	messageText := fmt.Sprintf("[%s] %s: %s", id, feature, text)
-	l.Debug(messageText)
-
-	logMessage := &FeatureLogMessage{
+	l.logEvent(Info, &FeatureLogMessage{
 		Time:          logTime(time.Now()),
+		Text:          text,
 		Feature:       feature,
 		ChargePointId: id,
-		Text:          text,
+	})
+}
+
+func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
+	if message.ChargePointId == "" {
+		message.ChargePointId = "*"
 	}
+	messageText := fmt.Sprintf("[%s] %s: %s", message.ChargePointId, message.Feature, message.Text)
+	logLine(importance, messageText)
 
 	if l.messageService != nil {
-		if err := l.messageService.Send(logMessage); err != nil {
-			l.Error("error sending message;", err)
+		if err := l.messageService.Send(message); err != nil {
+			logLine(Error, fmt.Sprintln("error sending message:", err))
 		}
 	}
 
 	if l.database != nil {
-		if err := l.database.WriteLogMessage(logMessage); err != nil {
-			l.Error("write log to database failed;", err)
+		if err := l.database.WriteLogMessage(message); err != nil {
+			logLine(Error, fmt.Sprintln("write log to database failed:", err))
 		}
 	}
 }
 
 func (l *Logger) Debug(text string) {
-	logLine("", text)
+	l.logEvent(Info, &FeatureLogMessage{
+		Time:    logTime(time.Now()),
+		Text:    text,
+		Feature: "info",
+	})
+}
+
+func (l *Logger) Warn(text string) {
+	l.logEvent(Warning, &FeatureLogMessage{
+		Time:    logTime(time.Now()),
+		Text:    text,
+		Feature: "warning",
+	})
 }
 
 func (l *Logger) Error(text string, err error) {
-	logLine("!", fmt.Sprintln(text, ":", err))
+	l.logEvent(Error, &FeatureLogMessage{
+		Time:    logTime(time.Now()),
+		Text:    fmt.Sprintln(text, ":", err),
+		Feature: "error",
+	})
 }
 
-func logLine(flag, text string) {
-	if flag == "" {
-		flag = " "
-	}
-	log.Printf("%s %s", flag, text)
+func logLine(importance Importance, text string) {
+	log.Printf("%s %s", importance, text)
 }

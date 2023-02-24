@@ -2,12 +2,12 @@ package server
 
 import (
 	"evsys/api"
+	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/utility"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
-	"log"
 	"net"
 	"net/http"
 )
@@ -23,6 +23,7 @@ type Server struct {
 	upgrader       websocket.Upgrader
 	messageHandler func(ws *WebSocket, data []byte) error
 	apiHandler     func(ac *api.Call) []byte
+	logger         internal.LogHandler
 }
 
 type WebSocket struct {
@@ -74,6 +75,10 @@ func (s *Server) SetApiHandler(handler func(ac *api.Call) []byte) {
 	s.apiHandler = handler
 }
 
+func (s *Server) SetLogger(logger internal.LogHandler) {
+	s.logger = logger
+}
+
 func (s *Server) Register(router *httprouter.Router) {
 	router.GET(wsEndpoint, s.handleWsRequest)
 	router.GET(apiReadLogEndpoint, s.readLog)
@@ -81,7 +86,7 @@ func (s *Server) Register(router *httprouter.Router) {
 
 func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	id := params.ByName("id")
-	log.Printf("connection initiated from remote %s", r.RemoteAddr)
+	s.logger.Debug(fmt.Sprintf("connection initiated from remote %s", r.RemoteAddr))
 
 	s.upgrader.CheckOrigin = func(r *http.Request) bool {
 		return true
@@ -107,11 +112,11 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 
 	conn, err := s.upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
-		log.Println("upgrade failed: ", err)
+		s.logger.Error("upgrade failed: ", err)
 		return
 	}
 
-	log.Printf("[%s] socket up, ready to receive messages", id)
+	s.logger.Debug(fmt.Sprintf("upgraded socket for %s and ready to receive data", id))
 	ws := WebSocket{
 		conn: conn,
 		id:   id,
@@ -126,20 +131,20 @@ func (s *Server) messageReader(ws *WebSocket) {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
-				log.Printf("[%s] leaving session", ws.id)
+				s.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
 			} else {
-				log.Printf("[%s] %s; closing session", ws.id, err)
+				s.logger.Debug(fmt.Sprintf("id %s is closing session %s", ws.id, err))
 			}
 			err = conn.Close()
 			if err != nil {
-				log.Printf("[%s] error while closing socket: %s", ws.id, err)
+				s.logger.Warn(fmt.Sprintf("error while closing socket %s %s", ws.id, err))
 			}
 			return
 		}
 		if s.messageHandler != nil {
 			err = s.messageHandler(ws, message)
 			if err != nil {
-				log.Printf("[%s] error: %s", ws.id, err)
+				s.logger.Error(fmt.Sprintf("error handling message from %s", ws.id), err)
 				continue
 			}
 		}
@@ -164,12 +169,11 @@ func (s *Server) handleApiRequest(w http.ResponseWriter, ac *api.Call) {
 }
 
 func (s *Server) sendApiResponse(w http.ResponseWriter, data []byte) {
-	//w.WriteHeader(200)
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Content-Type", "application/json; charset=utf-8")
 	_, err := w.Write(data)
 	if err != nil {
-		log.Println("api response write failed;", err)
+		s.logger.Error("api response write failed;", err)
 	}
 }
 
@@ -178,16 +182,16 @@ func (s *Server) Start() error {
 		return utility.Err("configuration not loaded")
 	}
 	serverAddress := fmt.Sprintf("%s:%s", s.conf.Listen.BindIP, s.conf.Listen.Port)
-	log.Printf("initializing listener on %s", serverAddress)
+	s.logger.Debug(fmt.Sprintf("starting server on %s", serverAddress))
 	listener, err := net.Listen("tcp", serverAddress)
 	if err != nil {
 		return err
 	}
 	if s.conf.Listen.TLS {
-		log.Println("starting https TLS server")
+		s.logger.Debug("starting https TLS server")
 		err = s.httpServer.ServeTLS(listener, s.conf.Listen.CertFile, s.conf.Listen.KeyFile)
 	} else {
-		log.Println("starting http server")
+		s.logger.Debug("starting http server")
 		err = s.httpServer.Serve(listener)
 	}
 	return err
@@ -197,11 +201,11 @@ func (s *Server) SendResponse(ws *WebSocket, response *Response) error {
 	callResult, _ := CreateCallResult(response, ws.UniqueId())
 	data, err := callResult.MarshalJSON()
 	if err != nil {
-		log.Println("error encoding response; ", err)
+		s.logger.Error("error encoding response", err)
 		return err
 	}
 	if err = ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		log.Println("error sending response; ", err)
+		s.logger.Error("error sending response", err)
 	}
 	return err
 }

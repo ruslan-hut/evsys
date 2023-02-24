@@ -141,7 +141,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValuesRequest) (confirmation *MeterValuesResponse, err error) {
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("recieved meter values for connector #%v", request.ConnectorId))
 	for _, value := range request.MeterValue {
-		log.Printf("[%s] -- %v", chargePointId, value)
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v --> %v", request.ConnectorId, value))
 	}
 	return NewMeterValuesResponse(), nil
 }

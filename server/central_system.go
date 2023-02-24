@@ -126,6 +126,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	wsServer := NewServer(conf)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
+	wsServer.SetLogger(logService)
 
 	// handler for api requests
 	apiHandler := api.NewApiHandler()
