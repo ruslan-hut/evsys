@@ -1,6 +1,6 @@
 ---
 
-is_debug: true
+is_debug: false
 listen:
   type: port
   bind_ip: 0.0.0.0

@@ -119,6 +119,7 @@ func NewCentralSystem() (CentralSystem, error) {
 
 	// logger with database and push service for the message handling
 	logService := internal.NewLogger()
+	logService.SetDebugMode(conf.IsDebug)
 	logService.SetDatabase(cs.database)
 	logService.SetMessageService(messageService)
 

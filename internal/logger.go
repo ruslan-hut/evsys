@@ -12,15 +12,23 @@ const (
 	Info    Importance = " "
 	Warning Importance = "?"
 	Error   Importance = "!"
+	Raw     Importance = "-"
 )
 
 type Logger struct {
 	messageService MessageService
 	database       Database
+	debugMode      bool
 }
 
 func NewLogger() *Logger {
-	return &Logger{}
+	return &Logger{
+		debugMode: false,
+	}
+}
+
+func (l *Logger) SetDebugMode(debugMode bool) {
+	l.debugMode = debugMode
 }
 
 func (l *Logger) SetMessageService(messageService MessageService) {
@@ -50,17 +58,17 @@ func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
 		message.ChargePointId = "*"
 	}
 	messageText := fmt.Sprintf("[%s] %s: %s", message.ChargePointId, message.Feature, message.Text)
-	logLine(importance, messageText)
+	l.logLine(importance, messageText)
 
 	if l.messageService != nil {
 		if err := l.messageService.Send(message); err != nil {
-			logLine(Error, fmt.Sprintln("error sending message:", err))
+			l.logLine(Error, fmt.Sprintln("error sending message:", err))
 		}
 	}
 
 	if l.database != nil {
 		if err := l.database.WriteLogMessage(message); err != nil {
-			logLine(Error, fmt.Sprintln("write log to database failed:", err))
+			l.logLine(Error, fmt.Sprintln("write log to database failed:", err))
 		}
 	}
 }
@@ -89,6 +97,22 @@ func (l *Logger) Error(text string, err error) {
 	})
 }
 
-func logLine(importance Importance, text string) {
+func (l *Logger) RawDataEvent(direction, data string) {
+	if l.debugMode {
+		l.logEvent(Raw, &FeatureLogMessage{
+			Time:    logTime(time.Now()),
+			Text:    fmt.Sprintf("%s: %s", direction, data),
+			Feature: "raw",
+		})
+	}
+}
+
+func (l *Logger) logLine(importance Importance, text string) {
+	if importance == Raw {
+		return
+	}
+	if importance == Info && !l.debugMode && l.database != nil {
+		return
+	}
 	log.Printf("%s %s", importance, text)
 }
