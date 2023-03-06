@@ -49,6 +49,7 @@ func (cps *ChargePointState) getConnector(id int) *ConnectorInfo {
 type SystemHandler struct {
 	chargePoints map[string]*ChargePointState
 	logger       internal.LogHandler
+	debug        bool
 }
 
 func NewSystemHandler() *SystemHandler {
@@ -56,6 +57,11 @@ func NewSystemHandler() *SystemHandler {
 		chargePoints: make(map[string]*ChargePointState),
 	}
 	return &handler
+}
+
+// SetDebugMode setting debug mode, used for registering unknown charge points
+func (h *SystemHandler) SetDebugMode(debug bool) {
+	h.debug = debug
 }
 
 func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
@@ -69,13 +75,25 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 	}
 }
 
+// select charge point
+func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState, bool) {
+	state, ok := h.chargePoints[chargePointId]
+	if !ok {
+		if h.debug {
+			h.addChargePoint(chargePointId)
+			state, ok = h.chargePoints[chargePointId]
+		}
+	}
+	return state, ok
+}
+
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *BootNotificationRequest) (confirmation *BootNotificationResponse, err error) {
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("boot confirmed (serial number: %s)", request.ChargePointSerialNumber))
 	return NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, RegistrationStatusAccepted), nil
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequest) (confirmation *AuthorizeResponse, err error) {
-	_, ok := h.chargePoints[chargePointId]
+	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		h.addChargePoint(chargePointId)
 	}
@@ -93,7 +111,7 @@ func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequ
 }
 
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartTransactionRequest) (confirmation *StartTransactionResponse, err error) {
-	state, ok := h.chargePoints[chargePointId]
+	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
@@ -119,7 +137,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 }
 
 func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTransactionRequest) (confirmation *StopTransactionResponse, err error) {
-	state, ok := h.chargePoints[chargePointId]
+	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
@@ -147,7 +165,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValues
 }
 
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationResponse, err error) {
-	state, ok := h.chargePoints[chargePointId]
+	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
@@ -169,7 +187,7 @@ func (h *SystemHandler) OnDataTransfer(chargePointId string, request *DataTransf
 }
 
 func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (confirmation *firmware.DiagnosticsStatusNotificationResponse, err error) {
-	state, ok := h.chargePoints[chargePointId]
+	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}
@@ -179,7 +197,7 @@ func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, re
 }
 
 func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (confirmation *firmware.StatusNotificationResponse, err error) {
-	state, ok := h.chargePoints[chargePointId]
+	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
 	}

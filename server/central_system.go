@@ -90,6 +90,9 @@ func NewCentralSystem() (CentralSystem, error) {
 	if err != nil {
 		return cs, utility.Err(fmt.Sprintf("loading configuration failed: %s", err))
 	}
+	if conf.IsDebug {
+		log.Println("debug mode is enabled")
+	}
 
 	if conf.Mongo.Enabled {
 		database, err := internal.NewMongoClient(conf)
@@ -140,6 +143,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	// message handler
 	systemHandler := core.NewSystemHandler()
 	systemHandler.SetLogger(logService)
+	systemHandler.SetDebugMode(conf.IsDebug)
 
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(systemHandler)

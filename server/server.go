@@ -145,7 +145,7 @@ func (s *Server) messageReader(ws *WebSocket) {
 		if s.messageHandler != nil {
 			err = s.messageHandler(ws, message)
 			if err != nil {
-				s.logger.Error(fmt.Sprintf("error handling message from %s", ws.id), err)
+				s.logger.Error(fmt.Sprintf("handling message from %s", ws.id), err)
 				continue
 			}
 		}
