@@ -3,7 +3,7 @@ package pusher
 import (
 	"evsys/internal"
 	"evsys/internal/config"
-	"evsys/utility"
+	"fmt"
 	"github.com/pusher/pusher-http-go/v5"
 )
 
@@ -16,13 +16,13 @@ func NewPusher(conf *config.Config) (*MessagePusher, error) {
 		return nil, nil
 	}
 	if conf.Pusher.AppID == "" {
-		return nil, utility.Err("missed AppID parameter in Pusher configuration")
+		return nil, fmt.Errorf("missed AppID parameter in Pusher configuration")
 	}
 	if conf.Pusher.Key == "" {
-		return nil, utility.Err("missed Key parameter in Pusher configuration")
+		return nil, fmt.Errorf("missed Key parameter in Pusher configuration")
 	}
 	if conf.Pusher.Secret == "" {
-		return nil, utility.Err("missed Secret parameter in Pusher configuration")
+		return nil, fmt.Errorf("missed Secret parameter in Pusher configuration")
 	}
 	client := pusher.Client{
 		AppID:   conf.Pusher.AppID,

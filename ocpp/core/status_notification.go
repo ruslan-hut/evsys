@@ -60,3 +60,67 @@ func (c StatusNotificationResponse) GetFeatureName() string {
 func NewStatusNotificationResponse() *StatusNotificationResponse {
 	return &StatusNotificationResponse{}
 }
+
+func GetStatus(status string) ChargePointStatus {
+	switch status {
+	case "Available":
+		return ChargePointStatusAvailable
+	case "Preparing":
+		return ChargePointStatusPreparing
+	case "Charging":
+		return ChargePointStatusCharging
+	case "SuspendedEVSE":
+		return ChargePointStatusSuspendedEVSE
+	case "SuspendedEV":
+		return ChargePointStatusSuspendedEV
+	case "Finishing":
+		return ChargePointStatusFinishing
+	case "Reserved":
+		return ChargePointStatusReserved
+	case "Unavailable":
+		return ChargePointStatusUnavailable
+	case "Faulted":
+		return ChargePointStatusFaulted
+	default:
+		return ChargePointStatusAvailable
+	}
+}
+
+func GetErrorCode(errorCode string) ChargePointErrorCode {
+	switch errorCode {
+	case "ConnectorLockFailure":
+		return ConnectorLockFailure
+	case "EVCommunicationError":
+		return EVCommunicationError
+	case "GroundFailure":
+		return GroundFailure
+	case "HighTemperature":
+		return HighTemperature
+	case "InternalError":
+		return InternalError
+	case "LocalListConflict":
+		return LocalListConflict
+	case "NoError":
+		return NoError
+	case "OtherError":
+		return OtherError
+	case "OverCurrentFailure":
+		return OverCurrentFailure
+	case "OverVoltage":
+		return OverVoltage
+	case "PowerMeterFailure":
+		return PowerMeterFailure
+	case "PowerSwitchFailure":
+		return PowerSwitchFailure
+	case "ReaderFailure":
+		return ReaderFailure
+	case "ResetFailure":
+		return ResetFailure
+	case "UnderVoltage":
+		return UnderVoltage
+	case "WeakSignal":
+		return WeakSignal
+	default:
+		return NoError
+	}
+}

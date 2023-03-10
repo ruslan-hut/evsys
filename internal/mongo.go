@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"evsys/internal/config"
+	"evsys/models"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -11,6 +12,8 @@ import (
 )
 
 const collectionLog = "sys_log"
+const collectionChargePoints = "charge_points"
+const collectionConnectors = "connectors"
 
 type MongoDB struct {
 	ctx           context.Context
@@ -86,6 +89,100 @@ func (m *MongoDB) ReadLog() (interface{}, error) {
 		return nil, err
 	}
 	return logMessages, nil
+}
+
+func (m *MongoDB) GetChargePoints() ([]models.ChargePoint, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	var chargePoints []models.ChargePoint
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	filter := bson.D{}
+	//opts := options.Find()
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err = cursor.All(m.ctx, &chargePoints); err != nil {
+		return nil, err
+	}
+	return chargePoints, nil
+}
+
+func (m *MongoDB) GetConnectors() ([]models.Connector, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	var connectors []models.Connector
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	filter := bson.D{}
+	//opts := options.Find()
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err = cursor.All(m.ctx, &connectors); err != nil {
+		return nil, err
+	}
+	return connectors, nil
+}
+
+func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"charge_point_id", chargePoint.Id}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"charge_point_id", chargePoint.Id},
+			{"vendor", chargePoint.Vendor},
+			{"model", chargePoint.Model},
+			{"serial_number", chargePoint.SerialNumber},
+			{"firmware_version", chargePoint.FirmwareVersion},
+			{"status", chargePoint.Status},
+			{"is_enabled", chargePoint.IsEnabled},
+			{"error_code", chargePoint.ErrorCode},
+		}},
+	}
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"connector_id", connector.Id}, {"charge_point_id", connector.ChargePointId}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"charge_point_id", connector.ChargePointId},
+			{"connector_id", connector.Id},
+			{"status", connector.Status},
+			{"is_enabled", connector.IsEnabled},
+		}},
+	}
+	collection := connection.Database(m.database).Collection(collectionConnectors)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *MongoDB) connect() (*mongo.Client, error) {

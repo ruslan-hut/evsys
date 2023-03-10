@@ -1,7 +1,6 @@
 package server
 
 import (
-	"evsys/api"
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/utility"
@@ -13,8 +12,7 @@ import (
 )
 
 const (
-	wsEndpoint         = "/ws/:id"
-	apiReadLogEndpoint = "/api/v1/log"
+	wsEndpoint = "/ws/:id"
 )
 
 type Server struct {
@@ -22,7 +20,6 @@ type Server struct {
 	httpServer     *http.Server
 	upgrader       websocket.Upgrader
 	messageHandler func(ws *WebSocket, data []byte) error
-	apiHandler     func(ac *api.Call) []byte
 	logger         internal.LogHandler
 }
 
@@ -71,17 +68,12 @@ func (s *Server) SetMessageHandler(handler func(ws *WebSocket, data []byte) erro
 	s.messageHandler = handler
 }
 
-func (s *Server) SetApiHandler(handler func(ac *api.Call) []byte) {
-	s.apiHandler = handler
-}
-
 func (s *Server) SetLogger(logger internal.LogHandler) {
 	s.logger = logger
 }
 
 func (s *Server) Register(router *httprouter.Router) {
 	router.GET(wsEndpoint, s.handleWsRequest)
-	router.GET(apiReadLogEndpoint, s.readLog)
 }
 
 func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
@@ -149,32 +141,6 @@ func (s *Server) messageReader(ws *WebSocket) {
 				continue
 			}
 		}
-	}
-}
-
-func (s *Server) readLog(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	ac := &api.Call{
-		CallType: api.ReadLog,
-		Remote:   r.RemoteAddr,
-	}
-	s.handleApiRequest(w, ac)
-}
-
-func (s *Server) handleApiRequest(w http.ResponseWriter, ac *api.Call) {
-	if s.apiHandler != nil {
-		data := s.apiHandler(ac)
-		if data != nil {
-			s.sendApiResponse(w, data)
-		}
-	}
-}
-
-func (s *Server) sendApiResponse(w http.ResponseWriter, data []byte) {
-	w.Header().Add("Access-Control-Allow-Origin", "*")
-	w.Header().Add("Content-Type", "application/json; charset=utf-8")
-	_, err := w.Write(data)
-	if err != nil {
-		s.logger.Error("api response write failed;", err)
 	}
 }
 

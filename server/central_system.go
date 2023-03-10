@@ -1,7 +1,6 @@
 package server
 
 import (
-	"evsys/api"
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/ocpp/core"
@@ -16,7 +15,6 @@ import (
 
 type CentralSystem struct {
 	server            *Server
-	database          internal.Database
 	coreHandler       handlers.SystemHandler
 	firmwareHandler   firmware.SystemHandler
 	supportedProtocol []string
@@ -67,7 +65,7 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 	case firmware.StatusNotificationFeatureName:
 		confirmation, err = cs.firmwareHandler.OnFirmwareStatusNotification(chargePointId, request.(*firmware.StatusNotificationRequest))
 	default:
-		err = utility.Err(fmt.Sprintf("feature not supported: %s", action))
+		err = fmt.Errorf("feature not supported: %s", action)
 	}
 	if err != nil {
 		return err
@@ -85,24 +83,24 @@ func (cs *CentralSystem) Start() error {
 
 func NewCentralSystem() (CentralSystem, error) {
 	cs := CentralSystem{}
+	var database internal.Database
 
 	conf, err := config.GetConfig()
 	if err != nil {
-		return cs, utility.Err(fmt.Sprintf("loading configuration failed: %s", err))
+		return cs, fmt.Errorf("loading configuration failed: %s", err)
 	}
 	if conf.IsDebug {
 		log.Println("debug mode is enabled")
 	}
 
 	if conf.Mongo.Enabled {
-		database, err := internal.NewMongoClient(conf)
+		database, err = internal.NewMongoClient(conf)
 		if err != nil {
-			return cs, utility.Err(fmt.Sprintf("mongodb setup failed: %s", err))
+			return cs, fmt.Errorf("mongodb setup failed: %s", err)
 		}
 		if database != nil {
 			log.Println("mongodb is configured and enabled")
 		}
-		cs.database = database
 	} else {
 		log.Println("database is disabled")
 	}
@@ -111,7 +109,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	if conf.Pusher.Enabled {
 		messageService, err = pusher.NewPusher(conf)
 		if conf.Pusher.Enabled && err != nil {
-			return cs, utility.Err(fmt.Sprintf("pusher setup failed: %s", err))
+			return cs, fmt.Errorf("pusher setup failed: %s", err)
 		}
 		if messageService != nil {
 			log.Println("pusher service is configured and enabled")
@@ -123,7 +121,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	// logger with database and push service for the message handling
 	logService := internal.NewLogger()
 	logService.SetDebugMode(conf.IsDebug)
-	logService.SetDatabase(cs.database)
+	logService.SetDatabase(database)
 	logService.SetMessageService(messageService)
 
 	// websocket listener
@@ -132,18 +130,18 @@ func NewCentralSystem() (CentralSystem, error) {
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
 	wsServer.SetLogger(logService)
 
-	// handler for api requests
-	apiHandler := api.NewApiHandler()
-	apiHandler.SetLogger(logService)
-	apiHandler.SetDatabase(cs.database)
-	wsServer.SetApiHandler(apiHandler.HandleApiCall)
-
 	cs.server = wsServer
 
 	// message handler
 	systemHandler := core.NewSystemHandler()
+	systemHandler.SetDatabase(database)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetDebugMode(conf.IsDebug)
+
+	err = systemHandler.OnStart()
+	if err != nil {
+		return cs, err
+	}
 
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(systemHandler)

@@ -2,6 +2,7 @@ package core
 
 import (
 	"evsys/internal"
+	"evsys/models"
 	"evsys/ocpp/firmware"
 	"evsys/types"
 	"fmt"
@@ -26,6 +27,7 @@ type TransactionInfo struct {
 type ConnectorInfo struct {
 	status             ChargePointStatus
 	currentTransaction int
+	model              *models.Connector
 }
 
 type ChargePointState struct {
@@ -35,12 +37,20 @@ type ChargePointState struct {
 	connectors        map[int]*ConnectorInfo // No assumptions about the # of connectors
 	transactions      map[int]*TransactionInfo
 	errorCode         ChargePointErrorCode
+	model             *models.ChargePoint
 }
 
 func (cps *ChargePointState) getConnector(id int) *ConnectorInfo {
 	ci, ok := cps.connectors[id]
 	if !ok {
-		ci = &ConnectorInfo{currentTransaction: -1}
+		ci = &ConnectorInfo{
+			currentTransaction: -1,
+			model: &models.Connector{
+				Id:            id,
+				ChargePointId: cps.model.Id,
+				IsEnabled:     true,
+			},
+		}
 		cps.connectors[id] = ci
 	}
 	return ci
@@ -48,6 +58,7 @@ func (cps *ChargePointState) getConnector(id int) *ConnectorInfo {
 
 type SystemHandler struct {
 	chargePoints map[string]*ChargePointState
+	database     internal.Database
 	logger       internal.LogHandler
 	debug        bool
 }
@@ -59,6 +70,10 @@ func NewSystemHandler() *SystemHandler {
 	return &handler
 }
 
+func (h *SystemHandler) SetDatabase(database internal.Database) {
+	h.database = database
+}
+
 // SetDebugMode setting debug mode, used for registering unknown charge points
 func (h *SystemHandler) SetDebugMode(debug bool) {
 	h.debug = debug
@@ -68,10 +83,56 @@ func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
 	h.logger = logger
 }
 
+func (h *SystemHandler) OnStart() error {
+	if h.database != nil {
+
+		// load charge points from database
+		chargePoints, err := h.database.GetChargePoints()
+		if err != nil {
+			return fmt.Errorf("failed to load charge points from database: %s", err)
+		}
+
+		// load connectors from database
+		connectors, err := h.database.GetConnectors()
+		if err != nil {
+			return fmt.Errorf("failed to load connectors from database: %s", err)
+		}
+		for _, cp := range chargePoints {
+			h.addChargePoint(cp.Id)
+			state, _ := h.chargePoints[cp.Id]
+			state.model = &cp
+			state.status = GetStatus(cp.Status)
+			state.errorCode = GetErrorCode(cp.ErrorCode)
+			if !cp.IsEnabled {
+				state.status = ChargePointStatusUnavailable
+			}
+			for _, c := range connectors {
+				if c.ChargePointId == cp.Id {
+					ci := state.getConnector(c.Id)
+					ci.status = GetStatus(c.Status)
+					ci.model = &c
+				}
+			}
+		}
+
+		// load transactions from database
+		// load firmware status from database
+		// load diagnostics status from database
+	}
+	return nil
+}
+
 func (h *SystemHandler) addChargePoint(chargePointId string) {
+	cp := &models.ChargePoint{
+		Id:        chargePointId,
+		IsEnabled: true,
+		Status:    string(ChargePointStatusAvailable),
+		ErrorCode: string(NoError),
+	}
 	h.chargePoints[chargePointId] = &ChargePointState{
 		connectors:   make(map[int]*ConnectorInfo),
 		transactions: make(map[int]*TransactionInfo),
+		model:        cp,
 	}
 }
 
@@ -80,6 +141,7 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
 		if h.debug {
+			h.logger.Debug("registering new charge point in debug mode")
 			h.addChargePoint(chargePointId)
 			state, ok = h.chargePoints[chargePointId]
 		}
@@ -88,21 +150,47 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 }
 
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *BootNotificationRequest) (confirmation *BootNotificationResponse, err error) {
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("boot confirmed (serial number: %s)", request.ChargePointSerialNumber))
-	return NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, RegistrationStatusAccepted), nil
+	regStatus := RegistrationStatusAccepted
+
+	state, ok := h.getChargePoint(chargePointId)
+	if ok {
+		if h.database != nil {
+			if state.model.SerialNumber != request.ChargePointSerialNumber || state.model.FirmwareVersion != request.FirmwareVersion {
+				state.model.SerialNumber = request.ChargePointSerialNumber
+				state.model.FirmwareVersion = request.FirmwareVersion
+				state.model.Model = request.ChargePointModel
+				state.model.Vendor = request.ChargePointVendor
+				err := h.database.UpdateChargePoint(state.model)
+				if err != nil {
+					h.logger.Error("update charge point", err)
+				}
+			}
+		}
+	} else {
+		regStatus = RegistrationStatusRejected
+		h.logger.Debug(fmt.Sprintf("charge point %s not registered", chargePointId))
+	}
+
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, string(regStatus))
+	return NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, regStatus), nil
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequest) (confirmation *AuthorizeResponse, err error) {
-	_, ok := h.getChargePoint(chargePointId)
-	if !ok {
-		h.addChargePoint(chargePointId)
+	authStatus := types.AuthorizationStatusAccepted
+	state, ok := h.getChargePoint(chargePointId)
+	if ok {
+		if state.status != ChargePointStatusAvailable {
+			authStatus = types.AuthorizationStatusBlocked
+		}
+	} else {
+		authStatus = types.AuthorizationStatusBlocked
 	}
 	id := request.IdTag
 	if id == "" {
-		return nil, fmt.Errorf("%s cannot authorize empty id %s", request.GetFeatureName(), id)
+		authStatus = types.AuthorizationStatusInvalid
 	}
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("authorization accepted for %s", id))
-	return NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", id, authStatus))
+	return NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequest) (confirmation *HeartbeatResponse, err error) {
@@ -174,9 +262,23 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 		connector := state.getConnector(request.ConnectorId)
 		connector.status = request.Status
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
+		connector.model.Status = string(request.Status)
+		if h.database != nil {
+			err = h.database.UpdateConnector(connector.model)
+			if err != nil {
+				h.logger.Error("update status", err)
+			}
+		}
 	} else {
 		state.status = request.Status
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
+		state.model.Status = string(request.Status)
+		if h.database != nil {
+			err = h.database.UpdateChargePoint(state.model)
+			if err != nil {
+				h.logger.Error("update status", err)
+			}
+		}
 	}
 	return NewStatusNotificationResponse(), nil
 }
