@@ -6,10 +6,16 @@ type Database interface {
 	Write(table string, data Data) error
 	WriteLogMessage(data Data) error
 	ReadLog() (interface{}, error)
+
 	GetChargePoints() ([]models.ChargePoint, error)
-	GetConnectors() ([]models.Connector, error)
 	UpdateChargePoint(chargePoint *models.ChargePoint) error
+	AddChargePoint(chargePoint *models.ChargePoint) error
+	GetChargePoint(id string) (*models.ChargePoint, error)
+
+	GetConnectors() ([]models.Connector, error)
 	UpdateConnector(connector *models.Connector) error
+	AddConnector(connector *models.Connector) error
+	GetConnector(id int, chargePointId string) (*models.Connector, error)
 }
 
 type Data interface {

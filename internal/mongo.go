@@ -161,6 +161,43 @@ func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
 	return nil
 }
 
+func (m *MongoDB) AddChargePoint(chargePoint *models.ChargePoint) error {
+	existedChargePoint, _ := m.GetChargePoint(chargePoint.Id)
+	if existedChargePoint != nil {
+		return fmt.Errorf("charge point with id %s already exists", chargePoint.Id)
+	}
+
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	_, err = collection.InsertOne(m.ctx, chargePoint)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) GetChargePoint(id string) (*models.ChargePoint, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"charge_point_id", id}}
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	var chargePoint models.ChargePoint
+	err = collection.FindOne(m.ctx, filter).Decode(&chargePoint)
+	if err != nil {
+		return nil, err
+	}
+	return &chargePoint, nil
+}
+
 func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 	connection, err := m.connect()
 	if err != nil {
@@ -183,6 +220,43 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 		return err
 	}
 	return nil
+}
+
+func (m *MongoDB) AddConnector(connector *models.Connector) error {
+	existedConnector, _ := m.GetConnector(connector.Id, connector.ChargePointId)
+	if existedConnector != nil {
+		return fmt.Errorf("connector with id %v@%s already exists", existedConnector.Id, existedConnector.ChargePointId)
+	}
+
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionConnectors)
+	_, err = collection.InsertOne(m.ctx, connector)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"connector_id", id}, {"charge_point_id", chargePointId}}
+	collection := connection.Database(m.database).Collection(collectionConnectors)
+	var connector models.Connector
+	err = collection.FindOne(m.ctx, filter).Decode(&connector)
+	if err != nil {
+		return nil, err
+	}
+	return &connector, nil
 }
 
 func (m *MongoDB) connect() (*mongo.Client, error) {
