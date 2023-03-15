@@ -45,12 +45,7 @@ func logTime(t time.Time) string {
 }
 
 func (l *Logger) FeatureEvent(feature, id, text string) {
-	l.logEvent(Info, &FeatureLogMessage{
-		Time:          logTime(time.Now()),
-		Text:          text,
-		Feature:       feature,
-		ChargePointId: id,
-	})
+	l.logEvent(Info, NewFeatureLogMessage(feature, id, text))
 }
 
 func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
@@ -74,36 +69,20 @@ func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
 }
 
 func (l *Logger) Debug(text string) {
-	l.logEvent(Info, &FeatureLogMessage{
-		Time:    logTime(time.Now()),
-		Text:    text,
-		Feature: "info",
-	})
+	l.logEvent(Info, NewFeatureLogMessage("info", "", text))
 }
 
 func (l *Logger) Warn(text string) {
-	l.logEvent(Warning, &FeatureLogMessage{
-		Time:    logTime(time.Now()),
-		Text:    text,
-		Feature: "warning",
-	})
+	l.logEvent(Warning, NewFeatureLogMessage("warning", "", text))
 }
 
 func (l *Logger) Error(text string, err error) {
-	l.logEvent(Error, &FeatureLogMessage{
-		Time:    logTime(time.Now()),
-		Text:    fmt.Sprintln(text, ":", err),
-		Feature: "error",
-	})
+	l.logEvent(Error, NewFeatureLogMessage("error", "", fmt.Sprintf("%s: %s", text, err)))
 }
 
 func (l *Logger) RawDataEvent(direction, data string) {
 	if l.debugMode {
-		l.logEvent(Raw, &FeatureLogMessage{
-			Time:    logTime(time.Now()),
-			Text:    fmt.Sprintf("%s: %s", direction, data),
-			Feature: "raw",
-		})
+		l.logEvent(Raw, NewFeatureLogMessage("raw", "", fmt.Sprintf("%s: %s", direction, data)))
 	}
 }
 

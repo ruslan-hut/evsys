@@ -1,12 +1,15 @@
 package internal
 
+import "time"
+
 const FeatureLogMessageType = "featureLogMessage"
 
 type FeatureLogMessage struct {
-	Time          string `json:"time" bson:"time"`
-	Feature       string `json:"feature" bson:"feature"`
-	ChargePointId string `json:"id" bson:"charge_point_id"`
-	Text          string `json:"text" bson:"text"`
+	Time          string    `json:"time" bson:"time"`
+	TimeStamp     time.Time `json:"timestamp" bson:"timestamp"`
+	Feature       string    `json:"feature" bson:"feature"`
+	ChargePointId string    `json:"id" bson:"charge_point_id"`
+	Text          string    `json:"text" bson:"text"`
 }
 
 func (fm *FeatureLogMessage) MessageType() string {
@@ -15,4 +18,14 @@ func (fm *FeatureLogMessage) MessageType() string {
 
 func (fm *FeatureLogMessage) DataType() string {
 	return FeatureLogMessageType
+}
+
+func NewFeatureLogMessage(feature, id, text string) *FeatureLogMessage {
+	return &FeatureLogMessage{
+		Time:          logTime(time.Now()),
+		TimeStamp:     time.Now(),
+		Text:          text,
+		Feature:       feature,
+		ChargePointId: id,
+	}
 }
