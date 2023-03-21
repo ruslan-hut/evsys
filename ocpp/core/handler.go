@@ -295,6 +295,9 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 		connector.status = request.Status
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
 		connector.model.Status = string(request.Status)
+		connector.model.Info = request.Info
+		connector.model.VendorId = request.VendorId
+		connector.model.ErrorCode = string(request.ErrorCode)
 		if h.database != nil {
 			err = h.database.UpdateConnector(connector.model)
 			if err != nil {

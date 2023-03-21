@@ -212,6 +212,9 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 			{"connector_id", connector.Id},
 			{"status", connector.Status},
 			{"is_enabled", connector.IsEnabled},
+			{"info", connector.Info},
+			{"vendor_id", connector.VendorId},
+			{"error_code", connector.ErrorCode},
 		}},
 	}
 	collection := connection.Database(m.database).Collection(collectionConnectors)
