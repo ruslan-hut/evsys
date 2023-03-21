@@ -212,28 +212,29 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequ
 	id := request.IdTag
 	if id == "" {
 		authStatus = types.AuthorizationStatusInvalid
-	}
-	// auth logic with database
-	if h.database != nil && authStatus == types.AuthorizationStatusAccepted {
-		// status will be changed if user tag is found and enabled
-		authStatus = types.AuthorizationStatusBlocked
-		userTag, err := h.database.GetUserTag(id)
-		if err != nil {
-			h.logger.Error("failed to get user tag from database", err)
-		}
-		// add user tag if not found, new tag is enabled if debug mode is on
-		if userTag == nil {
-			userTag = &models.UserTag{
-				IdTag:     id,
-				IsEnabled: h.debug,
-			}
-			err = h.database.AddUserTag(userTag)
+	} else {
+		// auth logic with database
+		if h.database != nil && authStatus == types.AuthorizationStatusAccepted {
+			// status will be changed if user tag is found and enabled
+			authStatus = types.AuthorizationStatusBlocked
+			userTag, err := h.database.GetUserTag(id)
 			if err != nil {
-				h.logger.Error("failed to add user tag to database", err)
+				h.logger.Error("failed to get user tag from database", err)
 			}
-		}
-		if userTag.IsEnabled {
-			authStatus = types.AuthorizationStatusAccepted
+			// add user tag if not found, new tag is enabled if debug mode is on
+			if userTag == nil {
+				userTag = &models.UserTag{
+					IdTag:     id,
+					IsEnabled: h.debug,
+				}
+				err = h.database.AddUserTag(userTag)
+				if err != nil {
+					h.logger.Error("failed to add user tag to database", err)
+				}
+			}
+			if userTag.IsEnabled {
+				authStatus = types.AuthorizationStatusAccepted
+			}
 		}
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", id, authStatus))
