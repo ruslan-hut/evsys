@@ -16,6 +16,9 @@ type Database interface {
 	UpdateConnector(connector *models.Connector) error
 	AddConnector(connector *models.Connector) error
 	GetConnector(id int, chargePointId string) (*models.Connector, error)
+
+	GetUserTag(idTag string) (*models.UserTag, error)
+	AddUserTag(userTag *models.UserTag) error
 }
 
 type Data interface {

@@ -11,9 +11,12 @@ import (
 	"log"
 )
 
-const collectionLog = "sys_log"
-const collectionChargePoints = "charge_points"
-const collectionConnectors = "connectors"
+const (
+	collectionLog          = "sys_log"
+	collectionUserTags     = "user_tags"
+	collectionChargePoints = "charge_points"
+	collectionConnectors   = "connectors"
+)
 
 type MongoDB struct {
 	ctx           context.Context
@@ -230,7 +233,6 @@ func (m *MongoDB) AddConnector(connector *models.Connector) error {
 	if existedConnector != nil {
 		return fmt.Errorf("connector with id %v@%s already exists", existedConnector.Id, existedConnector.ChargePointId)
 	}
-
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -239,10 +241,7 @@ func (m *MongoDB) AddConnector(connector *models.Connector) error {
 
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	_, err = collection.InsertOne(m.ctx, connector)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector, error) {
@@ -260,6 +259,39 @@ func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector,
 		return nil, err
 	}
 	return &connector, nil
+}
+
+func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"id_tag", id}}
+	collection := connection.Database(m.database).Collection(collectionUserTags)
+	var userTag models.UserTag
+	err = collection.FindOne(m.ctx, filter).Decode(&userTag)
+	if err != nil {
+		return nil, err
+	}
+	return &userTag, nil
+}
+
+func (m *MongoDB) AddUserTag(userTag *models.UserTag) error {
+	existedTag, _ := m.GetUserTag(userTag.IdTag)
+	if existedTag != nil {
+		return fmt.Errorf("ID tag %s is already registered", existedTag.IdTag)
+	}
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUserTags)
+	_, err = collection.InsertOne(m.ctx, userTag)
+	return err
 }
 
 func (m *MongoDB) connect() (*mongo.Client, error) {
