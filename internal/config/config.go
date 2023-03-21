@@ -1,7 +1,6 @@
 package config
 
 import (
-	"evsys/utility"
 	"fmt"
 	"github.com/ilyakaznacheev/cleanenv"
 	"sync"
@@ -43,7 +42,7 @@ func GetConfig() (*Config, error) {
 		instance = &Config{}
 		if err = cleanenv.ReadConfig("config.yml", instance); err != nil {
 			desc, _ := cleanenv.GetDescription(instance, nil)
-			err = utility.Err(fmt.Sprintf("%s; %s", err, desc))
+			err = fmt.Errorf("%s; %s", err, desc)
 			instance = nil
 		}
 	})

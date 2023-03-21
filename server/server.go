@@ -146,7 +146,7 @@ func (s *Server) messageReader(ws *WebSocket) {
 
 func (s *Server) Start() error {
 	if s.conf == nil {
-		return utility.Err("configuration not loaded")
+		return fmt.Errorf("configuration not loaded")
 	}
 	serverAddress := fmt.Sprintf("%s:%s", s.conf.Listen.BindIP, s.conf.Listen.Port)
 	s.logger.Debug(fmt.Sprintf("starting server on %s", serverAddress))

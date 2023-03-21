@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
-	"evsys/utility"
 	"fmt"
 	"log"
 	"reflect"
@@ -90,19 +89,19 @@ func (callRequest *CallRequest) GetFeatureName() string {
 
 func ParseRequest(data []interface{}) (*CallRequest, error) {
 	if len(data) != 4 {
-		return nil, utility.Err("unsupported request format; expected length: 4 elements")
+		return nil, fmt.Errorf("unsupported request format; expected length: 4 elements")
 	}
 	rawTypeId, ok := data[0].(float64)
 	if !ok {
-		return nil, utility.Err("invalid message type in request")
+		return nil, fmt.Errorf("invalid message type in request")
 	}
 	typeId := CallType(rawTypeId)
 	if typeId != CallTypeRequest {
-		return nil, utility.Err(fmt.Sprintf("invalid request type id: %v", typeId))
+		return nil, fmt.Errorf("invalid request type id: %v", typeId)
 	}
 	uniqueId := data[1].(string)
 	if !ok {
-		return nil, utility.Err("invalid message unique id in request")
+		return nil, fmt.Errorf("invalid message unique id in request")
 	}
 	action := data[2].(string)
 
@@ -146,7 +145,7 @@ func getRequestType(action string) (requestType reflect.Type, err error) {
 	case firmware.StatusNotificationFeatureName:
 		requestType = reflect.TypeOf(firmware.StatusNotificationRequest{})
 	default:
-		return nil, utility.Err(fmt.Sprintf("unsupported action requested: %s", action))
+		return nil, fmt.Errorf("unsupported action requested: %s", action)
 	}
 	return requestType, nil
 }
