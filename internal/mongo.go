@@ -16,6 +16,7 @@ const (
 	collectionUserTags     = "user_tags"
 	collectionChargePoints = "charge_points"
 	collectionConnectors   = "connectors"
+	collectionTransactions = "transactions"
 )
 
 type MongoDB struct {
@@ -292,6 +293,66 @@ func (m *MongoDB) AddUserTag(userTag *models.UserTag) error {
 	collection := connection.Database(m.database).Collection(collectionUserTags)
 	_, err = collection.InsertOne(m.ctx, userTag)
 	return err
+}
+
+func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	opts := options.FindOne().SetSort(bson.D{{"transaction_id", -1}})
+	var transaction models.Transaction
+	err = collection.FindOne(m.ctx, filter, opts).Decode(&transaction)
+	if err != nil {
+		return nil, err
+	}
+	return &transaction, nil
+}
+
+func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	_, err = collection.InsertOne(m.ctx, transaction)
+	return err
+}
+
+func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", transaction.Id}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"transaction_id", transaction.Id},
+			{"charge_point_id", transaction.ChargePointId},
+			{"connector_id", transaction.ConnectorId},
+			{"id_tag", transaction.IdTag},
+			{"time_start", transaction.TimeStart},
+			{"time_stop", transaction.TimeStop},
+			{"meter_start", transaction.MeterStart},
+			{"meter_stop", transaction.MeterStop},
+			{"reservation_id", transaction.ReservationId},
+			{"reason", transaction.Reason},
+		}},
+	}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *MongoDB) connect() (*mongo.Client, error) {

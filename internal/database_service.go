@@ -19,6 +19,10 @@ type Database interface {
 
 	GetUserTag(idTag string) (*models.UserTag, error)
 	AddUserTag(userTag *models.UserTag) error
+
+	GetLastTransaction() (*models.Transaction, error)
+	AddTransaction(transaction *models.Transaction) error
+	UpdateTransaction(transaction *models.Transaction) error
 }
 
 type Data interface {

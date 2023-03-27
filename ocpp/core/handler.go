@@ -6,7 +6,6 @@ import (
 	"evsys/ocpp/firmware"
 	"evsys/types"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -35,7 +34,7 @@ type ChargePointState struct {
 	diagnosticsStatus firmware.DiagnosticsStatus
 	firmwareStatus    firmware.Status
 	connectors        map[int]*ConnectorInfo // No assumptions about the # of connectors
-	transactions      map[int]*TransactionInfo
+	transactions      map[int]*models.Transaction
 	errorCode         ChargePointErrorCode
 	model             *models.ChargePoint
 }
@@ -103,6 +102,14 @@ func (h *SystemHandler) OnStart() error {
 		}
 
 		// load transactions from database
+		transaction, err := h.database.GetLastTransaction()
+		if err != nil {
+			h.logger.Error("failed to load last transaction from database", err)
+		}
+		if transaction != nil {
+			newTransactionId = transaction.Id + 1
+		}
+
 		// load firmware status from database
 		// load diagnostics status from database
 	}
@@ -132,7 +139,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string, model *models.Charg
 	}
 	h.chargePoints[chargePointId] = &ChargePointState{
 		connectors:   make(map[int]*ConnectorInfo),
-		transactions: make(map[int]*TransactionInfo),
+		transactions: make(map[int]*models.Transaction),
 		model:        cp,
 	}
 }
@@ -164,6 +171,7 @@ func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *ConnectorIn
 func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState, bool) {
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
+		h.logger.Warn(fmt.Sprintf("unknown charging point: %s", chargePointId))
 		if h.debug {
 			h.logger.Debug("registering new charge point in debug mode")
 			h.addChargePoint(chargePointId, nil)
@@ -242,10 +250,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequ
 }
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequest) (confirmation *HeartbeatResponse, err error) {
-	_, ok := h.getChargePoint(chargePointId)
-	if !ok {
-		return nil, fmt.Errorf("unknown charging point: %s", chargePointId)
-	}
+	_, _ = h.getChargePoint(chargePointId)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", time.Now()))
 	return NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
 }
@@ -253,53 +258,67 @@ func (h *SystemHandler) OnHeartbeat(chargePointId string, request *HeartbeatRequ
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartTransactionRequest) (confirmation *StartTransactionResponse, err error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
-		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
+		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
 	}
 	connector := h.getConnector(state, request.ConnectorId)
 	if connector.currentTransaction >= 0 {
-		return nil, fmt.Errorf("connector %v is now busy with another transaction", request.ConnectorId)
+		h.logger.Warn(fmt.Sprintf("connector %v@%s is now busy with another transaction", request.ConnectorId, chargePointId))
+		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), 0), nil
 	}
 
-	transaction := &TransactionInfo{}
-	transaction.idTag = request.IdTag
-	transaction.connectorId = request.ConnectorId
-	transaction.startMeter = request.MeterStart
-	transaction.startTime = request.Timestamp
-	transaction.id = newTransactionId
+	transaction := &models.Transaction{}
+	transaction.IdTag = request.IdTag
+	transaction.ConnectorId = request.ConnectorId
+	transaction.MeterStart = request.MeterStart
+	transaction.TimeStart = request.Timestamp.Time
+	transaction.ReservationId = request.ReservationId
+	transaction.Id = newTransactionId
 	newTransactionId += 1
 
-	connector.currentTransaction = transaction.id
+	connector.currentTransaction = transaction.Id
+	state.transactions[transaction.Id] = transaction
 
-	state.transactions[transaction.id] = transaction
+	if h.database != nil {
+		err := h.database.AddTransaction(transaction)
+		if err != nil {
+			h.logger.Error("add transaction", err)
+		}
+	}
 
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("started transaction #%v for connector %v", transaction.id, transaction.connectorId))
-	return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.id), nil
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("started transaction #%v for connector %v", transaction.Id, transaction.ConnectorId))
+	return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.Id), nil
 }
 
 func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTransactionRequest) (confirmation *StopTransactionResponse, err error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
-		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
+		return NewStopTransactionResponse(), nil
 	}
 	transaction, ok := state.transactions[request.TransactionId]
 	if ok {
-		connector := h.getConnector(state, transaction.connectorId)
+		connector := h.getConnector(state, transaction.ConnectorId)
 		connector.currentTransaction = -1
-		transaction.endTime = request.Timestamp
-		transaction.endMeter = request.MeterStop
+		transaction.TimeStop = request.Timestamp.Time
+		transaction.MeterStop = request.MeterStop
+		transaction.Reason = string(request.Reason)
 		//TODO: bill clients
+		if h.database != nil {
+			err := h.database.UpdateTransaction(transaction)
+			if err != nil {
+				h.logger.Error("update transaction", err)
+			}
+		}
+	} else {
+		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %v %v", request.TransactionId, request.Reason))
-	for _, mv := range request.TransactionData {
-		log.Printf("%v", mv)
-	}
 	return NewStopTransactionResponse(), nil
 }
 
 func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValuesRequest) (confirmation *MeterValuesResponse, err error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
-		return nil, fmt.Errorf("unknown charging point: %s", chargePointId)
+		return NewMeterValuesResponse(), nil
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("recieved meter values for connector #%v", request.ConnectorId))
 	for _, value := range request.MeterValue {
@@ -311,7 +330,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *MeterValues
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *StatusNotificationRequest) (confirmation *StatusNotificationResponse, err error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
-		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
+		return NewStatusNotificationResponse(), nil
 	}
 	state.errorCode = request.ErrorCode
 	if request.ConnectorId > 0 {
@@ -345,7 +364,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 func (h *SystemHandler) OnDataTransfer(chargePointId string, request *DataTransferRequest) (confirmation *DataTransferResponse, err error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
-		return nil, fmt.Errorf("unknown charging point: %s", chargePointId)
+		return NewDataTransferResponse(DataTransferStatusRejected), nil
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("recieved data #%v", request.Data))
 	return NewDataTransferResponse(DataTransferStatusAccepted), nil
@@ -353,20 +372,18 @@ func (h *SystemHandler) OnDataTransfer(chargePointId string, request *DataTransf
 
 func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (confirmation *firmware.DiagnosticsStatusNotificationResponse, err error) {
 	state, ok := h.getChargePoint(chargePointId)
-	if !ok {
-		return nil, fmt.Errorf("%v; unknown charging point: %s", request.GetFeatureName(), chargePointId)
+	if ok {
+		state.diagnosticsStatus = request.Status
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated diagnostic status to %v", request.Status))
 	}
-	state.diagnosticsStatus = request.Status
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated diagnostic status to %v", request.Status))
 	return firmware.NewDiagnosticsStatusNotificationResponse(), nil
 }
 
 func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (confirmation *firmware.StatusNotificationResponse, err error) {
 	state, ok := h.getChargePoint(chargePointId)
-	if !ok {
-		return nil, fmt.Errorf("unknown charging point: %s", chargePointId)
+	if ok {
+		state.firmwareStatus = request.Status
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated firmware status to %v", request.Status))
 	}
-	state.firmwareStatus = request.Status
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated firmware status to %v", request.Status))
 	return firmware.NewStatusNotificationResponse(), nil
 }
