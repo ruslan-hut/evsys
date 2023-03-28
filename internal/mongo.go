@@ -313,6 +313,23 @@ func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
 	return &transaction, nil
 }
 
+func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", id}}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	var transaction models.Transaction
+	err = collection.FindOne(m.ctx, filter).Decode(&transaction)
+	if err != nil {
+		return nil, err
+	}
+	return &transaction, nil
+}
+
 func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {
 	connection, err := m.connect()
 	if err != nil {

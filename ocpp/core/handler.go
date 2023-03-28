@@ -269,6 +269,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 	transaction := &models.Transaction{}
 	transaction.IdTag = request.IdTag
 	transaction.ConnectorId = request.ConnectorId
+	transaction.ChargePointId = chargePointId
 	transaction.MeterStart = request.MeterStart
 	transaction.TimeStart = request.Timestamp.Time
 	transaction.ReservationId = request.ReservationId
@@ -295,6 +296,13 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 		return NewStopTransactionResponse(), nil
 	}
 	transaction, ok := state.transactions[request.TransactionId]
+	if !ok && h.database != nil {
+		transaction, err = h.database.GetTransaction(request.TransactionId)
+		if err != nil {
+			h.logger.Error("get transaction", err)
+		}
+		ok = transaction != nil
+	}
 	if ok {
 		connector := h.getConnector(state, transaction.ConnectorId)
 		connector.currentTransaction = -1
