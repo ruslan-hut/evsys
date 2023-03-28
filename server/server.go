@@ -19,14 +19,62 @@ type Server struct {
 	conf           *config.Config
 	httpServer     *http.Server
 	upgrader       websocket.Upgrader
+	pool           *Pool
 	messageHandler func(ws *WebSocket, data []byte) error
 	logger         internal.LogHandler
 }
 
 type WebSocket struct {
-	conn     *websocket.Conn
-	id       string
-	uniqueId string
+	conn           *websocket.Conn
+	send           chan []byte
+	pool           *Pool
+	id             string
+	uniqueId       string
+	messageHandler func(ws *WebSocket, data []byte) error
+	logger         internal.LogHandler
+}
+
+type Pool struct {
+	register   chan *WebSocket
+	unregister chan *WebSocket
+	clients    map[*WebSocket]bool
+	broadcast  chan []byte
+	logger     internal.LogHandler
+}
+
+func NewPool(logger internal.LogHandler) *Pool {
+	return &Pool{
+		register:   make(chan *WebSocket),
+		unregister: make(chan *WebSocket),
+		clients:    make(map[*WebSocket]bool),
+		broadcast:  make(chan []byte),
+		logger:     logger,
+	}
+}
+
+func (pool *Pool) Start() {
+	for {
+		select {
+		case client := <-pool.register:
+			pool.clients[client] = true
+			pool.logger.Debug(fmt.Sprintf("socket %s registered; total connections %v", client.id, len(pool.clients)))
+		case client := <-pool.unregister:
+			if _, ok := pool.clients[client]; ok {
+				delete(pool.clients, client)
+				close(client.send)
+				pool.logger.Debug(fmt.Sprintf("socket %s unregistered; total connections %v", client.id, len(pool.clients)))
+			}
+		case message := <-pool.broadcast:
+			for client := range pool.clients {
+				select {
+				case client.send <- message:
+				default:
+					close(client.send)
+					delete(pool.clients, client)
+				}
+			}
+		}
+	}
 }
 
 func (ws *WebSocket) ID() string {
@@ -41,11 +89,18 @@ func (ws *WebSocket) SetUniqueId(uniqueId string) {
 	ws.uniqueId = uniqueId
 }
 
-func NewServer(conf *config.Config) *Server {
+func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
+	// initialize and start the pool for sending and receiving messages
+	pool := NewPool(logger)
+	go pool.Start()
+
 	server := Server{
 		conf:     conf,
 		upgrader: websocket.Upgrader{Subprotocols: []string{}},
+		pool:     pool,
+		logger:   logger,
 	}
+
 	// register itself as a router for httpServer handler
 	router := httprouter.New()
 	server.Register(router)
@@ -66,10 +121,6 @@ func (s *Server) AddSupportedSupProtocol(proto string) {
 
 func (s *Server) SetMessageHandler(handler func(ws *WebSocket, data []byte) error) {
 	s.messageHandler = handler
-}
-
-func (s *Server) SetLogger(logger internal.LogHandler) {
-	s.logger = logger
 }
 
 func (s *Server) Register(router *httprouter.Router) {
@@ -110,38 +161,72 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 
 	s.logger.Debug(fmt.Sprintf("upgraded socket for %s and ready to receive data", id))
 	ws := WebSocket{
-		conn: conn,
-		id:   id,
+		conn:           conn,
+		id:             id,
+		pool:           s.pool,
+		send:           make(chan []byte, 256),
+		logger:         s.logger,
+		messageHandler: s.messageHandler,
 	}
+	s.pool.register <- &ws
 
-	go s.messageReader(&ws)
+	go ws.readPump()
+	go ws.writePump()
 }
 
-func (s *Server) messageReader(ws *WebSocket) {
+func (ws *WebSocket) readPump() {
+	defer func() {
+		ws.close()
+	}()
 	conn := ws.conn
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
-				s.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
+				ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
 			} else {
-				s.logger.Debug(fmt.Sprintf("id %s is closing session %s", ws.id, err))
+				ws.logger.Debug(fmt.Sprintf("id %s is closing session %s", ws.id, err))
 			}
-			err = conn.Close()
-			if err != nil {
-				s.logger.Warn(fmt.Sprintf("error while closing socket %s %s", ws.id, err))
-			}
-			return
+			break
 		}
-		s.logger.RawDataEvent("IN", string(message))
-		if s.messageHandler != nil {
-			err = s.messageHandler(ws, message)
+		ws.logger.RawDataEvent("IN", string(message))
+		if ws.messageHandler != nil {
+			err = ws.messageHandler(ws, message)
 			if err != nil {
-				s.logger.Error(fmt.Sprintf("handling message from %s", ws.id), err)
+				ws.logger.Error(fmt.Sprintf("handling message from %s", ws.id), err)
 				continue
 			}
 		}
 	}
+}
+
+func (ws *WebSocket) writePump() {
+	defer func() {
+		ws.close()
+	}()
+	conn := ws.conn
+	for {
+		select {
+		case message, ok := <-ws.send:
+			if !ok {
+				ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
+				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			ws.logger.RawDataEvent("OUT", string(message))
+			err := conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				ws.logger.Warn(fmt.Sprintf("error while writing to socket %s %s", ws.id, err))
+				return
+			}
+		}
+	}
+}
+
+// close closing the websocket connection
+func (ws *WebSocket) close() {
+	ws.pool.unregister <- ws
+	_ = ws.conn.Close()
 }
 
 func (s *Server) Start() error {
@@ -172,8 +257,10 @@ func (s *Server) SendResponse(ws *WebSocket, response *Response) error {
 		s.logger.Error("error encoding response", err)
 		return err
 	}
-	if err = ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		s.logger.Error("error sending response", err)
-	}
-	return err
+	//if err = ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	//	s.logger.Error("error sending response", err)
+	//}
+	//return err
+	ws.send <- data
+	return nil
 }

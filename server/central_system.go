@@ -125,10 +125,9 @@ func NewCentralSystem() (CentralSystem, error) {
 	logService.SetMessageService(messageService)
 
 	// websocket listener
-	wsServer := NewServer(conf)
+	wsServer := NewServer(conf, logService)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
 	wsServer.SetMessageHandler(cs.handleIncomingRequest)
-	wsServer.SetLogger(logService)
 
 	cs.server = wsServer
 
