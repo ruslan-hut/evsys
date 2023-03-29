@@ -362,6 +362,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 		state.status = request.Status
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
 		state.model.Status = string(request.Status)
+		state.model.Info = request.Info
 		if h.database != nil {
 			err = h.database.UpdateChargePoint(state.model)
 			if err != nil {

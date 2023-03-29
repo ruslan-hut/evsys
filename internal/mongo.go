@@ -153,6 +153,7 @@ func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
 			{"serial_number", chargePoint.SerialNumber},
 			{"firmware_version", chargePoint.FirmwareVersion},
 			{"status", chargePoint.Status},
+			{"info", chargePoint.Info},
 			{"is_enabled", chargePoint.IsEnabled},
 			{"error_code", chargePoint.ErrorCode},
 		}},
