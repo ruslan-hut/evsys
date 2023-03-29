@@ -306,6 +306,9 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 	if ok {
 		connector := h.getConnector(state, transaction.ConnectorId)
 		connector.currentTransaction = -1
+		transaction.ConnectorId = connector.model.Id
+		transaction.IdTag = request.IdTag
+		transaction.ChargePointId = chargePointId
 		transaction.TimeStop = request.Timestamp.Time
 		transaction.MeterStop = request.MeterStop
 		transaction.Reason = string(request.Reason)
