@@ -13,27 +13,11 @@ var newTransactionId = 0
 
 const defaultHeartbeatInterval = 600
 
-type TransactionInfo struct {
-	id          int
-	startTime   *types.DateTime
-	endTime     *types.DateTime
-	startMeter  int
-	endMeter    int
-	connectorId int
-	idTag       string
-}
-
-type ConnectorInfo struct {
-	status             ChargePointStatus
-	currentTransaction int
-	model              *models.Connector
-}
-
 type ChargePointState struct {
 	status            ChargePointStatus
 	diagnosticsStatus firmware.DiagnosticsStatus
 	firmwareStatus    firmware.Status
-	connectors        map[int]*ConnectorInfo // No assumptions about the # of connectors
+	connectors        map[int]*models.Connector // No assumptions about the # of connectors
 	transactions      map[int]*models.Transaction
 	errorCode         ChargePointErrorCode
 	model             *models.ChargePoint
@@ -91,12 +75,7 @@ func (h *SystemHandler) OnStart() error {
 			}
 			for _, c := range connectors {
 				if c.ChargePointId == cp.Id {
-					ci := &ConnectorInfo{
-						currentTransaction: -1,
-						model:              &c,
-						status:             GetStatus(c.Status),
-					}
-					state.connectors[c.Id] = ci
+					state.connectors[c.Id] = &c
 				}
 			}
 		}
@@ -138,33 +117,30 @@ func (h *SystemHandler) addChargePoint(chargePointId string, model *models.Charg
 		cp = model
 	}
 	h.chargePoints[chargePointId] = &ChargePointState{
-		connectors:   make(map[int]*ConnectorInfo),
+		connectors:   make(map[int]*models.Connector),
 		transactions: make(map[int]*models.Transaction),
 		model:        cp,
 	}
 }
 
-func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *ConnectorInfo {
-	ci, ok := cps.connectors[id]
+func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
+	connector, ok := cps.connectors[id]
 	if !ok {
-		co := &models.Connector{
-			Id:            id,
-			ChargePointId: cps.model.Id,
-			IsEnabled:     true,
+		connector := &models.Connector{
+			Id:                   id,
+			ChargePointId:        cps.model.Id,
+			IsEnabled:            true,
+			CurrentTransactionId: -1,
 		}
-		ci = &ConnectorInfo{
-			currentTransaction: -1,
-			model:              co,
-		}
-		cps.connectors[id] = ci
+		cps.connectors[id] = connector
 		if h.database != nil {
-			err := h.database.AddConnector(co)
+			err := h.database.AddConnector(connector)
 			if err != nil {
 				h.logger.Error("failed to add connector to database", err)
 			}
 		}
 	}
-	return ci
+	return connector
 }
 
 // select charge point
@@ -261,7 +237,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
 	}
 	connector := h.getConnector(state, request.ConnectorId)
-	if connector.currentTransaction >= 0 {
+	if connector.CurrentTransactionId >= 0 {
 		h.logger.Warn(fmt.Sprintf("connector %v@%s is now busy with another transaction", request.ConnectorId, chargePointId))
 		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), 0), nil
 	}
@@ -276,7 +252,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 	transaction.Id = newTransactionId
 	newTransactionId += 1
 
-	connector.currentTransaction = transaction.Id
+	connector.CurrentTransactionId = transaction.Id
 	state.transactions[transaction.Id] = transaction
 
 	if h.database != nil {
@@ -305,8 +281,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 	}
 	if ok {
 		connector := h.getConnector(state, transaction.ConnectorId)
-		connector.currentTransaction = -1
-		transaction.ConnectorId = connector.model.Id
+		connector.CurrentTransactionId = -1
+		transaction.ConnectorId = connector.Id
 		transaction.IdTag = request.IdTag
 		transaction.ChargePointId = chargePointId
 		transaction.TimeStop = request.Timestamp.Time
@@ -346,21 +322,19 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 	state.errorCode = request.ErrorCode
 	if request.ConnectorId > 0 {
 		connector := h.getConnector(state, request.ConnectorId)
-		connector.status = request.Status
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
-		connector.model.Status = string(request.Status)
-		connector.model.Info = request.Info
-		connector.model.VendorId = request.VendorId
-		connector.model.ErrorCode = string(request.ErrorCode)
+		connector.Status = string(request.Status)
+		connector.Info = request.Info
+		connector.VendorId = request.VendorId
+		connector.ErrorCode = string(request.ErrorCode)
 		if h.database != nil {
-			err = h.database.UpdateConnector(connector.model)
+			err = h.database.UpdateConnector(connector)
 			if err != nil {
 				h.logger.Error("update status", err)
 			}
 		}
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
 	} else {
 		state.status = request.Status
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
 		state.model.Status = string(request.Status)
 		state.model.Info = request.Info
 		if h.database != nil {
@@ -369,6 +343,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 				h.logger.Error("update status", err)
 			}
 		}
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
 	}
 	return NewStatusNotificationResponse(), nil
 }
