@@ -253,7 +253,6 @@ func (s *Server) Start() error {
 func (s *Server) SendResponse(ws *WebSocket, response *Response) error {
 	callResult, _ := CreateCallResult(response, ws.UniqueId())
 	data, err := callResult.MarshalJSON()
-	s.logger.RawDataEvent("OUT", string(data))
 	if err != nil {
 		s.logger.Error("error encoding response", err)
 		return err
