@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	wsEndpoint = "/ws/:id"
+	wsEndpoint           = "/ws/:id"
+	featureNameWebSocket = "WebSocket"
 )
 
 type Server struct {
@@ -57,12 +58,12 @@ func (pool *Pool) Start() {
 		select {
 		case client := <-pool.register:
 			pool.clients[client] = true
-			pool.logger.Debug(fmt.Sprintf("socket %s registered; total connections %v", client.id, len(pool.clients)))
+			pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("registered new connection: total connections %v", len(pool.clients)))
 		case client := <-pool.unregister:
 			if _, ok := pool.clients[client]; ok {
 				delete(pool.clients, client)
 				close(client.send)
-				pool.logger.Debug(fmt.Sprintf("socket %s unregistered; total connections %v", client.id, len(pool.clients)))
+				pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("unregistered: total connections %v", len(pool.clients)))
 			}
 		case message := <-pool.broadcast:
 			for client := range pool.clients {
@@ -129,7 +130,7 @@ func (s *Server) Register(router *httprouter.Router) {
 
 func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	id := params.ByName("id")
-	s.logger.Debug(fmt.Sprintf("connection initiated from remote %s", r.RemoteAddr))
+	//s.logger.Debug(fmt.Sprintf("connection initiated from remote %s", r.RemoteAddr))
 
 	s.upgrader.CheckOrigin = func(r *http.Request) bool {
 		return true
@@ -159,7 +160,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 
-	s.logger.Debug(fmt.Sprintf("upgraded socket for %s and ready to receive data", id))
+	//s.logger.Debug(fmt.Sprintf("upgraded socket for %s and ready to receive data", id))
 	ws := WebSocket{
 		conn:           conn,
 		id:             id,
@@ -183,9 +184,9 @@ func (ws *WebSocket) readPump() {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
-				ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
+				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
 			} else {
-				ws.logger.Debug(fmt.Sprintf("id %s is closing session %s", ws.id, err))
+				ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("read error: %s", err))
 			}
 			break
 		}
@@ -209,14 +210,14 @@ func (ws *WebSocket) writePump() {
 		select {
 		case message, ok := <-ws.send:
 			if !ok {
-				ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
+				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
 				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 			ws.logger.RawDataEvent("OUT", string(message))
 			err := conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
-				ws.logger.Warn(fmt.Sprintf("error while writing to socket %s %s", ws.id, err))
+				ws.logger.Warn(fmt.Sprintf("socket %s: %s", ws.id, err))
 				return
 			}
 		}
@@ -257,10 +258,6 @@ func (s *Server) SendResponse(ws *WebSocket, response *Response) error {
 		s.logger.Error("error encoding response", err)
 		return err
 	}
-	//if err = ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-	//	s.logger.Error("error sending response", err)
-	//}
-	//return err
 	ws.send <- data
 	return nil
 }
