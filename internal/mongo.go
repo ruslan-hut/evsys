@@ -124,7 +124,7 @@ func (m *MongoDB) GetConnectors() ([]models.Connector, error) {
 	defer m.disconnect(connection)
 
 	var connectors []models.Connector
-	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	collection := connection.Database(m.database).Collection(collectionConnectors)
 	filter := bson.D{}
 	//opts := options.Find()
 	cursor, err := collection.Find(m.ctx, filter)
@@ -147,7 +147,7 @@ func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
 	filter := bson.D{{"charge_point_id", chargePoint.Id}}
 	update := bson.D{
 		{"$set", bson.D{
-			{"charge_point_id", chargePoint.Id},
+			//{"charge_point_id", chargePoint.Id},
 			{"vendor", chargePoint.Vendor},
 			{"model", chargePoint.Model},
 			{"serial_number", chargePoint.SerialNumber},
@@ -213,8 +213,8 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 	filter := bson.D{{"connector_id", connector.Id}, {"charge_point_id", connector.ChargePointId}}
 	update := bson.D{
 		{"$set", bson.D{
-			{"charge_point_id", connector.ChargePointId},
-			{"connector_id", connector.Id},
+			//{"charge_point_id", connector.ChargePointId},
+			//{"connector_id", connector.Id},
 			{"status", connector.Status},
 			{"is_enabled", connector.IsEnabled},
 			{"info", connector.Info},
@@ -353,7 +353,7 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 	filter := bson.D{{"transaction_id", transaction.Id}}
 	update := bson.D{
 		{"$set", bson.D{
-			{"transaction_id", transaction.Id},
+			//{"transaction_id", transaction.Id},
 			{"charge_point_id", transaction.ChargePointId},
 			{"connector_id", transaction.ConnectorId},
 			{"id_tag", transaction.IdTag},

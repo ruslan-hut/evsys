@@ -79,6 +79,7 @@ func (h *SystemHandler) OnStart() error {
 				}
 			}
 		}
+		h.logger.Debug(fmt.Sprintf("loaded %d charge points, %d connectors from database", len(chargePoints), len(connectors)))
 
 		// load transactions from database
 		transaction, err := h.database.GetLastTransaction()
@@ -126,7 +127,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string, model *models.Charg
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
 	connector, ok := cps.connectors[id]
 	if !ok {
-		connector := &models.Connector{
+		connector = &models.Connector{
 			Id:                   id,
 			ChargePointId:        cps.model.Id,
 			IsEnabled:            true,
