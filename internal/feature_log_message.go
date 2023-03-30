@@ -10,6 +10,7 @@ type FeatureLogMessage struct {
 	Feature       string    `json:"feature" bson:"feature"`
 	ChargePointId string    `json:"id" bson:"charge_point_id"`
 	Text          string    `json:"text" bson:"text"`
+	Importance    string    `json:"importance" bson:"importance"`
 }
 
 func (fm *FeatureLogMessage) MessageType() string {
