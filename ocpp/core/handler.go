@@ -238,9 +238,10 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
 	}
 	connector := h.getConnector(state, request.ConnectorId)
-	if connector.CurrentTransactionId >= 0 {
-		h.logger.Warn(fmt.Sprintf("connector %v@%s is now busy with another transaction", request.ConnectorId, chargePointId))
-		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), 0), nil
+	// zero is a valid number for the first transaction !
+	if connector.CurrentTransactionId > 0 {
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("connector %d is now busy with transaction %d", request.ConnectorId, connector.CurrentTransactionId))
+		return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 	}
 
 	transaction := &models.Transaction{}
