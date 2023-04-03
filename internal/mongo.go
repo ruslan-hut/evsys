@@ -357,6 +357,8 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 			{"charge_point_id", transaction.ChargePointId},
 			{"connector_id", transaction.ConnectorId},
 			{"id_tag", transaction.IdTag},
+			{"id_tag_note", transaction.IdTagNote},
+			{"username", transaction.Username},
 			{"time_start", transaction.TimeStart},
 			{"time_stop", transaction.TimeStop},
 			{"meter_start", transaction.MeterStart},

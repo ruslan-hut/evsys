@@ -13,4 +13,6 @@ type Transaction struct {
 	TimeStart     time.Time `json:"time_start" bson:"time_start"`
 	TimeStop      time.Time `json:"time_stop" bson:"time_stop"`
 	Reason        string    `json:"reason" bson:"reason"`
+	IdTagNote     string    `json:"id_tag_note" bson:"id_tag_note"`
+	Username      string    `json:"username" bson:"username"`
 }
