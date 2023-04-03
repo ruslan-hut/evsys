@@ -258,8 +258,14 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 	state.transactions[transaction.Id] = transaction
 
 	if h.database != nil {
+		err := h.database.UpdateConnector(connector)
+		if err != nil {
+			h.logger.Error("update connector", err)
+		}
 		idTag, err := h.database.GetUserTag(transaction.IdTag)
-		if err == nil {
+		if err != nil {
+			h.logger.Error("get user tag", err)
+		} else {
 			transaction.IdTagNote = idTag.Note
 			transaction.Username = idTag.Username
 		}
