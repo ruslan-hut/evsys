@@ -81,18 +81,28 @@ func (b *TgBot) EventPump() {
 }
 
 func (b *TgBot) OnStatusNotification(event *internal.EventMessage) {
-	msg := fmt.Sprintf("ChargePoint %v: Connector %v: %v", event.ChargePointId, event.ConnectorId, event.Status)
+	msg := fmt.Sprintf("*%v*: Connector %v: `%v`", event.ChargePointId, event.ConnectorId, event.Status)
 	b.event <- msg
 }
 
 func (b *TgBot) OnTransactionStart(event *internal.EventMessage) {
-
+	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
+	msg += fmt.Sprintf("Transaction ID: %v START\n", event.TransactionId)
+	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	b.event <- msg
 }
 
 func (b *TgBot) OnTransactionStop(event *internal.EventMessage) {
-
+	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
+	msg += fmt.Sprintf("Transaction ID: %v STOP\n", event.TransactionId)
+	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	b.event <- msg
 }
 
 func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
-
+	msg := fmt.Sprintf("*%v*: user: `%v`\n", event.ChargePointId, event.IdTag)
+	msg += fmt.Sprintf("Auth status: %v\n", event.Status)
+	b.event <- msg
 }
