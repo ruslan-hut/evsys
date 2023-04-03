@@ -31,6 +31,10 @@ type Config struct {
 		Password string `yaml:"password" env-default:"pass"`
 		Database string `yaml:"database" env-default:"evsys"`
 	}
+	Telegram struct {
+		Enabled bool   `yaml:"enabled" env-default:"false"`
+		ApiKey  string `yaml:"telegram_api_key" env-default:""`
+	}
 }
 
 var instance *Config

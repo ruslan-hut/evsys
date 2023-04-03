@@ -27,6 +27,7 @@ type SystemHandler struct {
 	chargePoints map[string]*ChargePointState
 	database     internal.Database
 	logger       internal.LogHandler
+	eventHandler internal.EventHandler
 	debug        bool
 }
 
@@ -48,6 +49,10 @@ func (h *SystemHandler) SetDebugMode(debug bool) {
 
 func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
 	h.logger = logger
+}
+
+func (h *SystemHandler) SetEventHandler(eventHandler internal.EventHandler) {
+	h.eventHandler = eventHandler
 }
 
 func (h *SystemHandler) OnStart() error {
@@ -194,6 +199,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequ
 	} else {
 		authStatus = types.AuthorizationStatusBlocked
 	}
+	username := ""
 	id := request.IdTag
 	if id == "" {
 		authStatus = types.AuthorizationStatusInvalid
@@ -220,8 +226,24 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *AuthorizeRequ
 			if userTag.IsEnabled {
 				authStatus = types.AuthorizationStatusAccepted
 			}
+			username = userTag.Username
 		}
 	}
+
+	if h.eventHandler != nil {
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   0,
+			Time:          time.Now(),
+			Username:      username,
+			IdTag:         id,
+			Status:        string(authStatus),
+			TransactionId: 0,
+			Payload:       request,
+		}
+		h.eventHandler.OnAuthorize(eventMessage)
+	}
+
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", id, authStatus))
 	return NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
@@ -258,7 +280,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 	state.transactions[transaction.Id] = transaction
 
 	if h.database != nil {
-		err := h.database.UpdateConnector(connector)
+		err = h.database.UpdateConnector(connector)
 		if err != nil {
 			h.logger.Error("update connector", err)
 		}
@@ -275,6 +297,20 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *StartT
 		}
 	}
 
+	if h.eventHandler != nil {
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			Time:          transaction.TimeStart,
+			Username:      transaction.Username,
+			IdTag:         transaction.IdTag,
+			Status:        connector.Status,
+			TransactionId: transaction.Id,
+			Payload:       request,
+		}
+		h.eventHandler.OnTransactionStart(eventMessage)
+	}
+
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("started transaction #%v for connector %v", transaction.Id, transaction.ConnectorId))
 	return NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.Id), nil
 }
@@ -284,33 +320,52 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 	if !ok {
 		return NewStopTransactionResponse(), nil
 	}
+
 	transaction, ok := state.transactions[request.TransactionId]
 	if !ok && h.database != nil {
 		transaction, err = h.database.GetTransaction(request.TransactionId)
 		if err != nil {
 			h.logger.Error("get transaction", err)
 		}
-		ok = transaction != nil
 	}
-	if ok {
-		connector := h.getConnector(state, transaction.ConnectorId)
-		connector.CurrentTransactionId = -1
-		//transaction.ConnectorId = connector.Id
-		//transaction.IdTag = request.IdTag
-		//transaction.ChargePointId = chargePointId
-		transaction.TimeStop = request.Timestamp.Time
-		transaction.MeterStop = request.MeterStop
-		transaction.Reason = string(request.Reason)
-		//TODO: bill clients
-		if h.database != nil {
-			err := h.database.UpdateTransaction(transaction)
-			if err != nil {
-				h.logger.Error("update transaction", err)
-			}
-		}
-	} else {
+
+	if transaction == nil {
 		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
+		return NewStopTransactionResponse(), nil
 	}
+
+	connector := h.getConnector(state, transaction.ConnectorId)
+	connector.CurrentTransactionId = -1
+	err = h.database.UpdateConnector(connector)
+	if err != nil {
+		h.logger.Error("update connector", err)
+	}
+
+	transaction.TimeStop = request.Timestamp.Time
+	transaction.MeterStop = request.MeterStop
+	transaction.Reason = string(request.Reason)
+	//TODO: bill clients
+	if h.database != nil {
+		err = h.database.UpdateTransaction(transaction)
+		if err != nil {
+			h.logger.Error("update transaction", err)
+		}
+	}
+
+	if h.eventHandler != nil {
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			Time:          transaction.TimeStart,
+			Username:      transaction.Username,
+			IdTag:         transaction.IdTag,
+			Status:        connector.Status,
+			TransactionId: transaction.Id,
+			Payload:       request,
+		}
+		h.eventHandler.OnTransactionStop(eventMessage)
+	}
+
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %v %v", request.TransactionId, request.Reason))
 	return NewStopTransactionResponse(), nil
 }
@@ -358,6 +413,21 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *Stat
 		}
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
 	}
+
+	if h.eventHandler != nil {
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   request.ConnectorId,
+			Time:          time.Now(),
+			Username:      "",
+			IdTag:         "",
+			Status:        string(request.Status),
+			TransactionId: 0,
+			Payload:       request,
+		}
+		h.eventHandler.OnStatusNotification(eventMessage)
+	}
+
 	return NewStatusNotificationResponse(), nil
 }
 

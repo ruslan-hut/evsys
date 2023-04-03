@@ -7,6 +7,7 @@ import (
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/handlers"
 	"evsys/pusher"
+	"evsys/telegram"
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
@@ -136,6 +137,16 @@ func NewCentralSystem() (CentralSystem, error) {
 	systemHandler.SetDatabase(database)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetDebugMode(conf.IsDebug)
+
+	if conf.Telegram.Enabled {
+		telegramBot, err := telegram.NewBot(conf.Telegram.ApiKey)
+		if err != nil {
+			return cs, fmt.Errorf("telegram bot setup failed: %s", err)
+		} else {
+			log.Println("telegram bot is configured and enabled")
+			systemHandler.SetEventHandler(telegramBot)
+		}
+	}
 
 	err = systemHandler.OnStart()
 	if err != nil {

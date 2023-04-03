@@ -21,3 +21,6 @@ mongo:
   user: admin
   password: pass
   database: evsys
+telegram:
+  enabled: false
+  telegram_api_key: YOUR_TELEGRAM_API_KEY
