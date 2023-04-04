@@ -161,19 +161,20 @@ func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
 	defer m.disconnect(connection)
 
 	filter := bson.D{{"charge_point_id", chargePoint.Id}}
-	update := bson.D{
-		{"$set", bson.D{
-			//{"charge_point_id", chargePoint.Id},
-			{"vendor", chargePoint.Vendor},
-			{"model", chargePoint.Model},
-			{"serial_number", chargePoint.SerialNumber},
-			{"firmware_version", chargePoint.FirmwareVersion},
-			{"status", chargePoint.Status},
-			{"info", chargePoint.Info},
-			{"is_enabled", chargePoint.IsEnabled},
-			{"error_code", chargePoint.ErrorCode},
-		}},
-	}
+	update := bson.M{"$set": chargePoint}
+	//update := bson.D{
+	//	{"$set", bson.D{
+	//		//{"charge_point_id", chargePoint.Id},
+	//		{"vendor", chargePoint.Vendor},
+	//		{"model", chargePoint.Model},
+	//		{"serial_number", chargePoint.SerialNumber},
+	//		{"firmware_version", chargePoint.FirmwareVersion},
+	//		{"status", chargePoint.Status},
+	//		{"info", chargePoint.Info},
+	//		{"is_enabled", chargePoint.IsEnabled},
+	//		{"error_code", chargePoint.ErrorCode},
+	//	}},
+	//}
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
@@ -227,18 +228,19 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 	defer m.disconnect(connection)
 
 	filter := bson.D{{"connector_id", connector.Id}, {"charge_point_id", connector.ChargePointId}}
-	update := bson.D{
-		{"$set", bson.D{
-			//{"charge_point_id", connector.ChargePointId},
-			//{"connector_id", connector.Id},
-			{"status", connector.Status},
-			{"is_enabled", connector.IsEnabled},
-			{"info", connector.Info},
-			{"vendor_id", connector.VendorId},
-			{"error_code", connector.ErrorCode},
-			{"current_transaction_id", connector.CurrentTransactionId},
-		}},
-	}
+	update := bson.M{"$set": connector}
+	//update := bson.D{
+	//	{"$set", bson.D{
+	//		//{"charge_point_id", connector.ChargePointId},
+	//		//{"connector_id", connector.Id},
+	//		{"status", connector.Status},
+	//		{"is_enabled", connector.IsEnabled},
+	//		{"info", connector.Info},
+	//		{"vendor_id", connector.VendorId},
+	//		{"error_code", connector.ErrorCode},
+	//		{"current_transaction_id", connector.CurrentTransactionId},
+	//	}},
+	//}
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
@@ -368,22 +370,23 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 	defer m.disconnect(connection)
 
 	filter := bson.D{{"transaction_id", transaction.Id}}
-	update := bson.D{
-		{"$set", bson.D{
-			//{"transaction_id", transaction.Id},
-			{"charge_point_id", transaction.ChargePointId},
-			{"connector_id", transaction.ConnectorId},
-			{"id_tag", transaction.IdTag},
-			{"id_tag_note", transaction.IdTagNote},
-			{"username", transaction.Username},
-			{"time_start", transaction.TimeStart},
-			{"time_stop", transaction.TimeStop},
-			{"meter_start", transaction.MeterStart},
-			{"meter_stop", transaction.MeterStop},
-			{"reservation_id", transaction.ReservationId},
-			{"reason", transaction.Reason},
-		}},
-	}
+	update := bson.M{"$set": transaction}
+	//update := bson.D{
+	//	{"$set", bson.D{
+	//		//{"transaction_id", transaction.Id},
+	//		{"charge_point_id", transaction.ChargePointId},
+	//		{"connector_id", transaction.ConnectorId},
+	//		{"id_tag", transaction.IdTag},
+	//		{"id_tag_note", transaction.IdTagNote},
+	//		{"username", transaction.Username},
+	//		{"time_start", transaction.TimeStart},
+	//		{"time_stop", transaction.TimeStop},
+	//		{"meter_start", transaction.MeterStart},
+	//		{"meter_stop", transaction.MeterStop},
+	//		{"reservation_id", transaction.ReservationId},
+	//		{"reason", transaction.Reason},
+	//	}},
+	//}
 	collection := connection.Database(m.database).Collection(collectionTransactions)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
@@ -471,12 +474,13 @@ func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) erro
 	defer m.disconnect(connection)
 
 	filter := bson.D{{"user_id", subscription.UserID}}
-	update := bson.D{
-		{"$set", bson.D{
-			{"user", subscription.User},
-			{"subscription_type", subscription.SubscriptionType},
-		}},
-	}
+	update := bson.M{"$set": subscription}
+	//update := bson.D{
+	//	{"$set", bson.D{
+	//		{"user", subscription.User},
+	//		{"subscription_type", subscription.SubscriptionType},
+	//	}},
+	//}
 	collection := connection.Database(m.database).Collection(collectionSubscriptions)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
