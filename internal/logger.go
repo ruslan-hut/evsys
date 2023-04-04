@@ -32,32 +32,30 @@ func NewLogger() *Logger {
 		debugMode: false,
 		writer:    make(chan *Event, 100),
 	}
-	logger.StartWriter()
+	go logger.startWriter()
 	return logger
 }
 
-func (l *Logger) StartWriter() {
-	go func() {
-		for {
-			event := <-l.writer
+func (l *Logger) startWriter() {
+	for {
+		event := <-l.writer
 
-			message := event.Message
-			messageText := fmt.Sprintf("[%s] %s: %s", message.ChargePointId, message.Feature, message.Text)
-			l.logLine(event.Importance, messageText)
+		message := event.Message
+		messageText := fmt.Sprintf("[%s] %s: %s", message.ChargePointId, message.Feature, message.Text)
+		l.logLine(event.Importance, messageText)
 
-			if l.messageService != nil {
-				if err := l.messageService.Send(message); err != nil {
-					l.logLine(Error, fmt.Sprintln("error sending message:", err))
-				}
-			}
-
-			if l.database != nil {
-				if err := l.database.WriteLogMessage(message); err != nil {
-					l.logLine(Error, fmt.Sprintln("write log to database failed:", err))
-				}
+		if l.messageService != nil {
+			if err := l.messageService.Send(message); err != nil {
+				l.logLine(Error, fmt.Sprintln("error sending message:", err))
 			}
 		}
-	}()
+
+		if l.database != nil {
+			if err := l.database.WriteLogMessage(message); err != nil {
+				l.logLine(Error, fmt.Sprintln("write log to database failed:", err))
+			}
+		}
+	}
 }
 
 func (l *Logger) SetDebugMode(debugMode bool) {
