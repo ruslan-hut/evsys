@@ -143,8 +143,10 @@ func NewCentralSystem() (CentralSystem, error) {
 		if err != nil {
 			return cs, fmt.Errorf("telegram bot setup failed: %s", err)
 		} else {
-			log.Println("telegram bot is configured and enabled")
+			telegramBot.SetDatabase(database)
+			telegramBot.Start()
 			systemHandler.SetEventHandler(telegramBot)
+			log.Println("telegram bot is configured and enabled")
 		}
 	}
 

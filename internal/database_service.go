@@ -24,6 +24,11 @@ type Database interface {
 	GetTransaction(id int) (*models.Transaction, error)
 	AddTransaction(transaction *models.Transaction) error
 	UpdateTransaction(transaction *models.Transaction) error
+
+	GetSubscriptions() ([]models.UserSubscription, error)
+	AddSubscription(subscription *models.UserSubscription) error
+	UpdateSubscription(subscription *models.UserSubscription) error
+	DeleteSubscription(subscription *models.UserSubscription) error
 }
 
 type Data interface {

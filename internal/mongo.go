@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	collectionLog          = "sys_log"
-	collectionUserTags     = "user_tags"
-	collectionChargePoints = "charge_points"
-	collectionConnectors   = "connectors"
-	collectionTransactions = "transactions"
+	collectionLog           = "sys_log"
+	collectionUserTags      = "user_tags"
+	collectionChargePoints  = "charge_points"
+	collectionConnectors    = "connectors"
+	collectionTransactions  = "transactions"
+	collectionSubscriptions = "subscriptions"
 )
 
 type MongoDB struct {
@@ -44,6 +45,21 @@ func NewMongoClient(conf *config.Config) (*MongoDB, error) {
 		database:      conf.Mongo.Database,
 	}
 	return client, nil
+}
+
+func (m *MongoDB) connect() (*mongo.Client, error) {
+	connection, err := mongo.Connect(m.ctx, m.clientOptions)
+	if err != nil {
+		return nil, err
+	}
+	return connection, nil
+}
+
+func (m *MongoDB) disconnect(connection *mongo.Client) {
+	err := connection.Disconnect(m.ctx)
+	if err != nil {
+		log.Println("mongodb disconnect error;", err)
+	}
 }
 
 func (m *MongoDB) Write(table string, data Data) error {
@@ -376,17 +392,95 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 	return nil
 }
 
-func (m *MongoDB) connect() (*mongo.Client, error) {
-	connection, err := mongo.Connect(m.ctx, m.clientOptions)
+// GetSubscriptions returns all subscriptions
+func (m *MongoDB) GetSubscriptions() ([]models.UserSubscription, error) {
+	connection, err := m.connect()
 	if err != nil {
 		return nil, err
 	}
-	return connection, nil
+	defer m.disconnect(connection)
+
+	filter := bson.D{}
+	collection := connection.Database(m.database).Collection(collectionSubscriptions)
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	var subscriptions []models.UserSubscription
+	if err = cursor.All(m.ctx, &subscriptions); err != nil {
+		return nil, err
+	}
+	return subscriptions, nil
 }
 
-func (m *MongoDB) disconnect(connection *mongo.Client) {
-	err := connection.Disconnect(m.ctx)
+// GetSubscription returns a subscription by user id
+func (m *MongoDB) GetSubscription(id int) (*models.UserSubscription, error) {
+	connection, err := m.connect()
 	if err != nil {
-		log.Println("mongodb disconnect error;", err)
+		return nil, err
 	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"user_id", id}}
+	collection := connection.Database(m.database).Collection(collectionSubscriptions)
+	var subscription models.UserSubscription
+	err = collection.FindOne(m.ctx, filter).Decode(&subscription)
+	if err != nil {
+		return nil, err
+	}
+	return &subscription, nil
+}
+
+// AddSubscription adds a new subscription
+func (m *MongoDB) AddSubscription(subscription *models.UserSubscription) error {
+	existedSubscription, _ := m.GetSubscription(subscription.UserID)
+	if existedSubscription != nil {
+		return fmt.Errorf("user is already subscribed")
+	}
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionSubscriptions)
+	_, err = collection.InsertOne(m.ctx, subscription)
+	return err
+}
+
+// DeleteSubscription deletes a subscription
+func (m *MongoDB) DeleteSubscription(subscription *models.UserSubscription) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"user_id", subscription.UserID}}
+	collection := connection.Database(m.database).Collection(collectionSubscriptions)
+	_, err = collection.DeleteOne(m.ctx, filter)
+	return err
+}
+
+// UpdateSubscription updates a subscription
+func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"user_id", subscription.UserID}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"user", subscription.User},
+			{"subscription_type", subscription.SubscriptionType},
+		}},
+	}
+	collection := connection.Database(m.database).Collection(collectionSubscriptions)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
 }
