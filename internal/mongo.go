@@ -488,3 +488,79 @@ func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) erro
 	}
 	return nil
 }
+
+type pipeResult struct {
+	ChargePointID string `bson:"_id"`
+	Info          string `bson:"info"`
+}
+
+// GetLastStatus returns the last status
+func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	var status []models.ChargePointStatus
+	collection := connection.Database(m.database).Collection(collectionLog)
+
+	pipeline := bson.A{
+		bson.D{{"$match", bson.D{{"feature", "Heartbeat"}}}},
+		bson.D{{"$sort", bson.D{{"time", -1}}}},
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$charge_point_id"},
+					{"info", bson.D{{"$first", "$time"}}},
+				},
+			},
+		},
+		bson.D{{"$sort", bson.D{{"_id", 1}}}},
+	}
+	var pipeResult []pipeResult
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate Heartbeat: %v", err)
+	}
+	if err = cursor.All(m.ctx, &pipeResult); err != nil {
+		return nil, fmt.Errorf("decode Heartbeat: %v", err)
+	}
+
+	for _, heartbeat := range pipeResult {
+		status = append(status, models.ChargePointStatus{
+			ChargePointID: heartbeat.ChargePointID,
+			Time:          heartbeat.Info,
+		})
+	}
+
+	pipeline = bson.A{
+		bson.D{{"$match", bson.D{{"feature", "StatusNotification"}}}},
+		bson.D{{"$sort", bson.D{{"time", -1}}}},
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$charge_point_id"},
+					{"info", bson.D{{"$first", "$text"}}},
+				},
+			},
+		},
+	}
+	cursor, err = collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate StatusNotification: %v", err)
+	}
+	if err = cursor.All(m.ctx, &pipeResult); err != nil {
+		return nil, fmt.Errorf("decode StatusNotification: %v", err)
+	}
+
+	for _, statusInfo := range pipeResult {
+		for i, s := range status {
+			if s.ChargePointID == statusInfo.ChargePointID {
+				status[i].Status = statusInfo.Info
+			}
+		}
+	}
+
+	return status, nil
+}

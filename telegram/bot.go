@@ -4,9 +4,10 @@ import (
 	"evsys/internal"
 	"evsys/models"
 	"fmt"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
+	"strings"
 )
-import tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 
 // TgBot implements EventHandler
 type TgBot struct {
@@ -104,7 +105,7 @@ func (b *TgBot) updatesPump() {
 			msg := fmt.Sprintf("*%v*: Connector %v: `%v`", "ChargePointId", 1, "Status")
 			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: msg}
 		case "status":
-			msg := fmt.Sprintf("Active subscriptions: %v", len(b.subscriptions))
+			msg := b.composeStatusMessage()
 			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: msg}
 		}
 	}
@@ -170,4 +171,45 @@ func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: user: `%v`\n", event.ChargePointId, event.IdTag)
 	msg += fmt.Sprintf("Auth status: %v\n", event.Status)
 	b.event <- MessageContent{Text: msg}
+}
+
+// compose status message
+func (b *TgBot) composeStatusMessage() string {
+	msg := "Status info:\n"
+	msg += "\n"
+	if b.database != nil {
+		status, err := b.database.GetLastStatus()
+		if err != nil {
+			log.Printf("bot: error getting last status: %v", err)
+			msg += fmt.Sprintf("Error getting last status:\n `%v`", err)
+		} else {
+			for _, s := range status {
+				msg += fmt.Sprintf("*%v*: `%v`\n", s.ChargePointID, sanitize(s.Time))
+				msg += fmt.Sprintf("`%v`\n", s.Status)
+				msg += "\n"
+			}
+		}
+	}
+	msg += fmt.Sprintf("Active subscriptions: %v", len(b.subscriptions))
+	return msg
+}
+
+func sanitize(input string) string {
+	// Define a list of reserved characters that need to be escaped
+	reservedChars := "\\`*_{}[]()#+-.!|"
+
+	// Loop through each character in the input string
+	sanitized := ""
+	for _, char := range input {
+		// Check if the character is reserved
+		if strings.ContainsRune(reservedChars, char) {
+			// Escape the character with a backslash
+			sanitized += "\\" + string(char)
+		} else {
+			// Add the character to the sanitized string
+			sanitized += string(char)
+		}
+	}
+
+	return sanitized
 }
