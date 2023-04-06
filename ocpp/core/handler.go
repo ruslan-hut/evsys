@@ -353,6 +353,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 	}
 
 	if h.eventHandler != nil {
+		consumed := float32((transaction.MeterStop - transaction.MeterStart) / 1000)
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   transaction.ConnectorId,
@@ -361,6 +362,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *StopTra
 			IdTag:         transaction.IdTag,
 			Status:        connector.Status,
 			TransactionId: transaction.Id,
+			Info:          fmt.Sprintf("consumed %0.1f kW", consumed),
 			Payload:       request,
 		}
 		h.eventHandler.OnTransactionStop(eventMessage)
