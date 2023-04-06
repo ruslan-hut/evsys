@@ -116,12 +116,7 @@ func (b *TgBot) eventPump() {
 	for {
 		if event, ok := <-b.event; ok {
 			for _, subscription := range b.subscriptions {
-				msg := tgbotapi.NewMessage(int64(subscription.UserID), event.Text)
-				msg.ParseMode = "MarkdownV2"
-				_, err := b.api.Send(msg)
-				if err != nil {
-					log.Printf("bot: error sending message: %v", err)
-				}
+				b.sendMessage(int64(subscription.UserID), event.Text)
 			}
 		}
 	}
@@ -131,12 +126,23 @@ func (b *TgBot) eventPump() {
 func (b *TgBot) sendPump() {
 	for {
 		if event, ok := <-b.send; ok {
-			msg := tgbotapi.NewMessage(event.ChatID, event.Text)
-			msg.ParseMode = "MarkdownV2"
-			_, err := b.api.Send(msg)
-			if err != nil {
-				log.Printf("bot: error sending message: %v", err)
-			}
+			b.sendMessage(event.ChatID, event.Text)
+		}
+	}
+}
+
+// sendMessage common routine to send a message via bot API
+func (b *TgBot) sendMessage(id int64, text string) {
+	msg := tgbotapi.NewMessage(id, text)
+	msg.ParseMode = "MarkdownV2"
+	_, err := b.api.Send(msg)
+	if err != nil {
+		//log.Printf( "bot: error sending parsed message: %v", err)
+		// maybe error was while parsing, so we can send a message about this error
+		msg = tgbotapi.NewMessage(id, fmt.Sprintf("Error: %v", err))
+		_, err = b.api.Send(msg)
+		if err != nil {
+			log.Printf("bot: error sending message: %v", err)
 		}
 	}
 }
