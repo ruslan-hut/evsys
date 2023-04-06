@@ -164,7 +164,7 @@ func (b *TgBot) OnTransactionStop(event *internal.EventMessage) {
 	msg += fmt.Sprintf("Transaction ID: %v STOP\n", event.TransactionId)
 	msg += fmt.Sprintf("User: %v\n", event.Username)
 	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
-	msg += fmt.Sprintf("Info: %v\n", event.Info)
+	msg += fmt.Sprintf("Info: %v\n", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
 }
 
