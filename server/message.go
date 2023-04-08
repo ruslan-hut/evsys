@@ -7,7 +7,6 @@ import (
 	"evsys/ocpp/firmware"
 	"fmt"
 	"log"
-	"math/rand"
 	"reflect"
 )
 
@@ -187,8 +186,4 @@ func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (ocpp.Reques
 	}
 	result := request.(ocpp.Request)
 	return result, nil
-}
-
-var messageIdGenerator = func() string {
-	return fmt.Sprintf("%v", rand.Uint32())
 }
