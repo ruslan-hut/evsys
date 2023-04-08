@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"evsys/ocpp"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"fmt"
 	"log"
+	"math/rand"
 	"reflect"
 )
 
@@ -56,7 +58,7 @@ const (
 type CallResult struct {
 	TypeId   CallType
 	UniqueId string
-	Payload  *Response
+	Payload  *ocpp.Response
 }
 
 func (callResult *CallResult) MarshalJSON() ([]byte, error) {
@@ -67,7 +69,7 @@ func (callResult *CallResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func CreateCallResult(confirmation *Response, uniqueId string) (*CallResult, error) {
+func CreateCallResult(confirmation *ocpp.Response, uniqueId string) (*CallResult, error) {
 	callResult := CallResult{
 		TypeId:   CallTypeResult,
 		UniqueId: uniqueId,
@@ -80,14 +82,33 @@ type CallRequest struct {
 	TypeId   CallType
 	UniqueId string
 	feature  string
-	Payload  Request
+	Payload  ocpp.Request
+}
+
+func CreateCallRequest(request ocpp.Request) (CallRequest, error) {
+	callRequest := CallRequest{
+		TypeId:   CallTypeRequest,
+		UniqueId: "",
+		feature:  request.GetFeatureName(),
+		Payload:  request,
+	}
+	return callRequest, nil
 }
 
 func (callRequest *CallRequest) GetFeatureName() string {
 	return callRequest.feature
 }
 
-func ParseRequest(data []interface{}) (*CallRequest, error) {
+func (callRequest *CallRequest) MarshalJSON() ([]byte, error) {
+	fields := make([]interface{}, 3)
+	fields[0] = int(callRequest.TypeId)
+	fields[1] = callRequest.UniqueId
+	fields[2] = callRequest.feature
+	fields[3] = callRequest.Payload
+	return json.Marshal(fields)
+}
+
+func ParseMessage(data []interface{}) (*CallRequest, error) {
 	if len(data) != 4 {
 		return nil, fmt.Errorf("unsupported request format; expected length: 4 elements")
 	}
@@ -105,7 +126,7 @@ func ParseRequest(data []interface{}) (*CallRequest, error) {
 	}
 	action := data[2].(string)
 
-	requestType, err := getRequestType(action)
+	requestType, err := getMessageType(action)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +143,7 @@ func ParseRequest(data []interface{}) (*CallRequest, error) {
 	return &callRequest, nil
 }
 
-func getRequestType(action string) (requestType reflect.Type, err error) {
+func getMessageType(action string) (requestType reflect.Type, err error) {
 	switch action {
 	case core.BootNotificationFeatureName:
 		requestType = reflect.TypeOf(core.BootNotificationRequest{})
@@ -150,7 +171,7 @@ func getRequestType(action string) (requestType reflect.Type, err error) {
 	return requestType, nil
 }
 
-func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (Request, error) {
+func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (ocpp.Request, error) {
 	if raw == nil {
 		raw = &struct{}{}
 	}
@@ -164,6 +185,10 @@ func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (Request, er
 		log.Printf("bytes: %v", string(bytes))
 		return nil, err
 	}
-	result := request.(Request)
+	result := request.(ocpp.Request)
 	return result, nil
+}
+
+var messageIdGenerator = func() string {
+	return fmt.Sprintf("%v", rand.Uint32())
 }

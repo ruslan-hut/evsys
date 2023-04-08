@@ -3,6 +3,7 @@ package server
 import (
 	"evsys/internal"
 	"evsys/internal/config"
+	"evsys/ocpp"
 	"evsys/utility"
 	"fmt"
 	"github.com/gorilla/websocket"
@@ -15,6 +16,11 @@ const (
 	wsEndpoint           = "/ws/:id"
 	featureNameWebSocket = "WebSocket"
 )
+
+type envelope struct {
+	recipient string
+	message   CallRequest
+}
 
 type Server struct {
 	conf           *config.Config
@@ -40,6 +46,7 @@ type Pool struct {
 	unregister chan *WebSocket
 	clients    map[*WebSocket]bool
 	broadcast  chan []byte
+	send       chan *envelope
 	logger     internal.LogHandler
 }
 
@@ -72,6 +79,25 @@ func (pool *Pool) Start() {
 				default:
 					close(client.send)
 					delete(pool.clients, client)
+				}
+			}
+		case envelope := <-pool.send:
+			for client := range pool.clients {
+				if client.id == envelope.recipient {
+					request := envelope.message
+					request.UniqueId = client.uniqueId
+					data, err := request.MarshalJSON()
+					if err != nil {
+						pool.logger.Error("encode request:", err)
+						break
+					}
+					select {
+					case client.send <- data:
+					default:
+						close(client.send)
+						delete(pool.clients, client)
+					}
+					break
 				}
 			}
 		}
@@ -250,13 +276,26 @@ func (s *Server) Start() error {
 	return err
 }
 
-func (s *Server) SendResponse(ws *WebSocket, response *Response) error {
+func (s *Server) SendResponse(ws *WebSocket, response *ocpp.Response) error {
 	callResult, _ := CreateCallResult(response, ws.UniqueId())
 	data, err := callResult.MarshalJSON()
 	if err != nil {
-		s.logger.Error("error encoding response", err)
-		return err
+		return fmt.Errorf("error encoding response: %s", err)
 	}
 	ws.send <- data
+	return nil
+}
+
+// SendRequest send request to the websocket
+func (s *Server) SendRequest(clientId string, request ocpp.Request) error {
+	callRequest, err := CreateCallRequest(request)
+	if err != nil {
+		return fmt.Errorf("error creating call request: %s", err)
+	}
+	envelope := &envelope{
+		recipient: clientId,
+		message:   callRequest,
+	}
+	s.pool.send <- envelope
 	return nil
 }

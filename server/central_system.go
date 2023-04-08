@@ -3,9 +3,10 @@ package server
 import (
 	"evsys/internal"
 	"evsys/internal/config"
+	"evsys/ocpp"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
-	"evsys/ocpp/handlers"
+	"evsys/ocpp/remotetrigger"
 	"evsys/pusher"
 	"evsys/telegram"
 	"evsys/types"
@@ -16,12 +17,13 @@ import (
 
 type CentralSystem struct {
 	server            *Server
-	coreHandler       handlers.SystemHandler
+	coreHandler       SystemHandler
 	firmwareHandler   firmware.SystemHandler
+	remoteTrigger     remotetrigger.SystemHandler
 	supportedProtocol []string
 }
 
-func (cs *CentralSystem) SetCoreHandler(handler handlers.SystemHandler) {
+func (cs *CentralSystem) SetCoreHandler(handler SystemHandler) {
 	cs.coreHandler = handler
 }
 
@@ -29,13 +31,13 @@ func (cs *CentralSystem) SetFirmwareHandler(handler firmware.SystemHandler) {
 	cs.firmwareHandler = handler
 }
 
-func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error {
+func (cs *CentralSystem) handleIncomingMessage(ws *WebSocket, data []byte) error {
 	chargePointId := ws.ID()
 	message, err := utility.ParseJson(data)
 	if err != nil {
 		return err
 	}
-	callRequest, err := ParseRequest(message)
+	callRequest, err := ParseMessage(message)
 	if err != nil {
 		return err
 	}
@@ -43,7 +45,7 @@ func (cs *CentralSystem) handleIncomingRequest(ws *WebSocket, data []byte) error
 
 	request := callRequest.Payload
 	action := request.GetFeatureName()
-	var confirmation Response
+	var confirmation ocpp.Response
 	switch action {
 	case core.BootNotificationFeatureName:
 		confirmation, err = cs.coreHandler.OnBootNotification(chargePointId, request.(*core.BootNotificationRequest))
@@ -128,12 +130,12 @@ func NewCentralSystem() (CentralSystem, error) {
 	// websocket listener
 	wsServer := NewServer(conf, logService)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
-	wsServer.SetMessageHandler(cs.handleIncomingRequest)
+	wsServer.SetMessageHandler(cs.handleIncomingMessage)
 
 	cs.server = wsServer
 
 	// message handler
-	systemHandler := core.NewSystemHandler()
+	systemHandler := NewSystemHandler()
 	systemHandler.SetDatabase(database)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetDebugMode(conf.IsDebug)
@@ -156,6 +158,6 @@ func NewCentralSystem() (CentralSystem, error) {
 	}
 
 	cs.SetCoreHandler(systemHandler)
-	cs.SetFirmwareHandler(systemHandler)
+	cs.SetFirmwareHandler(&systemHandler)
 	return cs, nil
 }
