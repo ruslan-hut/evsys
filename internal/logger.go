@@ -113,7 +113,7 @@ func (l *Logger) logLine(importance Importance, text string) {
 	if importance == Raw {
 		return
 	}
-	if importance == Info && !l.debugMode && l.database != nil {
+	if importance == Info && l.database != nil {
 		return
 	}
 	log.Printf("%s %s", importance, text)
