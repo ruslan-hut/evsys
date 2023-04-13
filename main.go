@@ -12,8 +12,6 @@ func main() {
 		log.Println("central system initialization failed", err)
 		return
 	}
-	if err = centralSystem.Start(); err != nil {
-		log.Println("start failed", err)
-	}
+	centralSystem.Start()
 
 }

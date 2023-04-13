@@ -8,6 +8,12 @@ listen:
   tls_enabled: true
   cert_file: c:/cert/cert.pem
   key_file: c:/cert/key.pem
+api:
+  bind_ip: 0.0.0.0
+  port: 5001
+  tls_enabled: true
+  cert_file: c:/cert/cert.pem
+  key_file: c:/cert/key.pem
 pusher:
   enabled: false
   app_id:

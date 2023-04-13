@@ -17,6 +17,8 @@ import (
 
 type CentralSystem struct {
 	server            *Server
+	api               *Api
+	logger            internal.LogHandler
 	coreHandler       SystemHandler
 	firmwareHandler   firmware.SystemHandler
 	remoteTrigger     remotetrigger.SystemHandler
@@ -78,10 +80,21 @@ func (cs *CentralSystem) handleIncomingMessage(ws *WebSocket, data []byte) error
 	return err
 }
 
-func (cs *CentralSystem) Start() error {
-	err := cs.server.Start()
+func (cs *CentralSystem) Start() {
 
-	return err
+	go func() {
+		if err := cs.server.Start(); err != nil {
+			cs.logger.Error("websocket server failed", err)
+		}
+	}()
+
+	go func() {
+		if err := cs.api.Start(); err != nil {
+			cs.logger.Error("api server failed", err)
+		}
+	}()
+
+	select {}
 }
 
 func NewCentralSystem() (CentralSystem, error) {
@@ -127,6 +140,8 @@ func NewCentralSystem() (CentralSystem, error) {
 	logService.SetDatabase(database)
 	logService.SetMessageService(messageService)
 
+	cs.logger = logService
+
 	// websocket listener
 	wsServer := NewServer(conf, logService)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
@@ -159,5 +174,10 @@ func NewCentralSystem() (CentralSystem, error) {
 
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(&systemHandler)
+
+	// api server
+	apiServer := NewServerApi(conf, logService)
+	cs.api = apiServer
+
 	return cs, nil
 }

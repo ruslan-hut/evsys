@@ -16,6 +16,13 @@ type Config struct {
 		CertFile string `yaml:"cert_file" env-default:""`
 		KeyFile  string `yaml:"key_file" env-default:""`
 	}
+	Api struct {
+		BindIP   string `yaml:"bind_ip" env-default:"0.0.0.0"`
+		Port     string `yaml:"port" env-default:"5001"`
+		TLS      bool   `yaml:"tls_enabled" env-default:"false"`
+		CertFile string `yaml:"cert_file" env-default:""`
+		KeyFile  string `yaml:"key_file" env-default:""`
+	}
 	Pusher struct {
 		Enabled bool   `yaml:"enabled" env-default:"false"`
 		AppID   string `yaml:"app_id" env-default:""`
