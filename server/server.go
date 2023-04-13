@@ -158,6 +158,14 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 	id := params.ByName("id")
 	//s.logger.Debug(fmt.Sprintf("connection initiated from remote %s", r.RemoteAddr))
 
+	// check id above existed connections
+	for client := range s.pool.clients {
+		if client.id == id {
+			s.logger.Warn(fmt.Sprintf("connection from %s already exists", id))
+			s.pool.unregister <- client
+		}
+	}
+
 	s.upgrader.CheckOrigin = func(r *http.Request) bool {
 		return true
 	}
