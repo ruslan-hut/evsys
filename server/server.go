@@ -83,10 +83,8 @@ func (pool *Pool) Start() {
 				}
 			}
 		case envelope := <-pool.send:
-			pool.logger.FeatureEvent(featureNameWebSocket, envelope.recipient, fmt.Sprintf("got message to client"))
 			for client := range pool.clients {
 				if client.id == envelope.recipient {
-					pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("sending message to client"))
 					request := envelope.message
 					request.UniqueId = client.uniqueId
 					data, err := request.MarshalJSON()

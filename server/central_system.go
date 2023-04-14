@@ -47,6 +47,10 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	if err != nil {
 		return err
 	}
+	if callType == CallTypeError {
+		cs.logger.Warn(fmt.Sprintf("error message received from charge point %s: %s", chargePointId, string(data)))
+		return nil
+	}
 	if callType != CallTypeRequest {
 		// silent exit, we only handle requests
 		return nil
