@@ -7,6 +7,7 @@ import (
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/remotetrigger"
 	"evsys/types"
+	"evsys/utility"
 	"fmt"
 	"time"
 )
@@ -346,6 +347,25 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	transaction.TimeStop = request.Timestamp.Time
 	transaction.MeterStop = request.MeterStop
 	transaction.Reason = string(request.Reason)
+
+	// request data may contain meter values of begin and end of transaction
+	if request.TransactionData != nil {
+		for _, data := range request.TransactionData {
+			if data.SampledValue != nil {
+				for _, value := range data.SampledValue {
+					if value.Context == types.ReadingContextTransactionBegin {
+						transaction.MeterStart = utility.ToInt(value.Value)
+						transaction.TimeStart = data.Timestamp.Time
+					}
+					if value.Context == types.ReadingContextTransactionEnd {
+						transaction.MeterStop = utility.ToInt(value.Value)
+						transaction.TimeStop = data.Timestamp.Time
+					}
+				}
+			}
+		}
+	}
+
 	//TODO: bill clients
 	if h.database != nil {
 		err = h.database.UpdateTransaction(transaction)
