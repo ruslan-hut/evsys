@@ -33,11 +33,23 @@ func (cs *CentralSystem) SetFirmwareHandler(handler firmware.SystemHandler) {
 	cs.firmwareHandler = handler
 }
 
+func (cs *CentralSystem) SetRemoteTriggerHandler(handler remotetrigger.SystemHandler) {
+	cs.remoteTrigger = handler
+}
+
 func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) error {
 	chargePointId := ws.ID()
 	message, err := utility.ParseJson(data)
 	if err != nil {
 		return err
+	}
+	callType, err := MessageType(message)
+	if err != nil {
+		return err
+	}
+	if callType != CallTypeRequest {
+		// silent exit, we only handle requests
+		return nil
 	}
 	callRequest, err := ParseMessage(message)
 	if err != nil {
@@ -77,6 +89,25 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	}
 
 	err = cs.server.SendResponse(ws, confirmation)
+	return err
+}
+
+func (cs *CentralSystem) handleApiRequest(chargePointId string, connectorId int, feature string, payload string) error {
+	if feature == "" {
+		return fmt.Errorf("feature name is empty")
+	}
+	var request ocpp.Request
+	var err error
+	switch feature {
+	case remotetrigger.TriggerMessageFeatureName:
+		request, err = cs.remoteTrigger.OnTriggerMessage(chargePointId, connectorId, payload)
+	default:
+		err = fmt.Errorf("feature not supported: %s", feature)
+	}
+	if err != nil {
+		return err
+	}
+	err = cs.server.SendRequest(chargePointId, request)
 	return err
 }
 
@@ -174,9 +205,11 @@ func NewCentralSystem() (CentralSystem, error) {
 
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(&systemHandler)
+	cs.SetRemoteTriggerHandler(&systemHandler)
 
 	// api server
 	apiServer := NewServerApi(conf, logService)
+	apiServer.SetRequestHandler(cs.handleApiRequest)
 	cs.api = apiServer
 
 	return cs, nil

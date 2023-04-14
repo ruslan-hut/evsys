@@ -1,5 +1,5 @@
 package remotetrigger
 
 type SystemHandler interface {
-	OnTriggerMessage(chargePointId, messageTrigger string) (*TriggerMessageRequest, error)
+	OnTriggerMessage(chargePointId string, connectorId int, messageTrigger string) (*TriggerMessageRequest, error)
 }

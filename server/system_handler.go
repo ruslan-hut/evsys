@@ -462,12 +462,12 @@ func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, reque
 	return firmware.NewStatusNotificationResponse(), nil
 }
 
-func (h *SystemHandler) OnTriggerMessage(chargePointId, message string) (*remotetrigger.TriggerMessageRequest, error) {
+func (h *SystemHandler) OnTriggerMessage(chargePointId string, connectorId int, message string) (*remotetrigger.TriggerMessageRequest, error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("charge point not found")
 	}
-	request := remotetrigger.NewTriggerMessageRequest(remotetrigger.MessageTrigger(message))
+	request := remotetrigger.NewTriggerMessageRequest(remotetrigger.MessageTrigger(message), connectorId)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("message: %v", message))
 	return request, nil
 }

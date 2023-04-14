@@ -10,40 +10,9 @@ import (
 	"reflect"
 )
 
-//type MessageType string
-//
-//const (
-//	BootNotification MessageType = "BootNotification"
-//)
-
 type Message struct {
 	Fields []interface{}
 }
-
-//func (m *Message) Type() (t MessageType, err error) {
-//	if len(m.Fields) < 4 {
-//		err = utility.Err("incompatible message structure")
-//		return t, err
-//	}
-//	v := fmt.Sprintf("%v", m.Fields[2])
-//	switch v {
-//	case string(BootNotification):
-//		t = BootNotification
-//
-//	default:
-//		err = utility.Err(fmt.Sprintf("unsupported message type %s", v))
-//	}
-//	return t, err
-//}
-
-//func (m *Message) UniqueId() (id string, err error) {
-//	if len(m.Fields) < 4 {
-//		err = utility.Err("incompatible message structure")
-//		return id, err
-//	}
-//	id = fmt.Sprintf("%v", m.Fields[1])
-//	return id, err
-//}
 
 type CallType int
 
@@ -99,7 +68,7 @@ func (callRequest *CallRequest) GetFeatureName() string {
 }
 
 func (callRequest *CallRequest) MarshalJSON() ([]byte, error) {
-	fields := make([]interface{}, 3)
+	fields := make([]interface{}, 4)
 	fields[0] = int(callRequest.TypeId)
 	fields[1] = callRequest.UniqueId
 	fields[2] = callRequest.feature
@@ -107,24 +76,37 @@ func (callRequest *CallRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func ParseMessage(data []interface{}) (*CallRequest, error) {
-	if len(data) != 4 {
-		return nil, fmt.Errorf("unsupported request format; expected length: 4 elements")
+func MessageType(data []interface{}) (CallType, error) {
+	if len(data) == 0 {
+		return 0, fmt.Errorf("invalid message format: no elements")
 	}
 	rawTypeId, ok := data[0].(float64)
 	if !ok {
-		return nil, fmt.Errorf("invalid message type in request")
+		return 0, fmt.Errorf("invalid message type")
 	}
 	typeId := CallType(rawTypeId)
+	if typeId != CallTypeRequest && typeId != CallTypeResult && typeId != CallTypeError {
+		return 0, fmt.Errorf("unsupported message type: %v", typeId)
+	}
+	return typeId, nil
+}
+
+func ParseMessage(data []interface{}) (*CallRequest, error) {
+	typeId, err := MessageType(data)
+	if err != nil {
+		return nil, err
+	}
 	if typeId != CallTypeRequest {
 		return nil, fmt.Errorf("invalid request type id: %v", typeId)
 	}
-	uniqueId := data[1].(string)
+	if len(data) != 4 {
+		return nil, fmt.Errorf("unsupported request format; expected length: 4 elements")
+	}
+	uniqueId, ok := data[1].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid message unique id in request")
 	}
 	action := data[2].(string)
-
 	requestType, err := getMessageType(action)
 	if err != nil {
 		return nil, err

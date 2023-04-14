@@ -2,10 +2,11 @@ package server
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"evsys/internal"
 	"evsys/internal/config"
-	"evsys/ocpp"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -13,11 +14,20 @@ const (
 	apiEndpoint = "/api"
 )
 
+type SupportedFeature string
+
 type Api struct {
-	conf       *config.Config
-	httpServer *http.Server
-	wsServer   ocpp.WebSocketServer
-	logger     internal.LogHandler
+	conf           *config.Config
+	httpServer     *http.Server
+	requestHandler func(chargePointId string, connectorId int, featureName string, payload string) error
+	logger         internal.LogHandler
+}
+
+type command struct {
+	ChargePointId string
+	ConnectorId   int
+	FeatureName   string
+	Payload       string
 }
 
 func NewServerApi(conf *config.Config, logger internal.LogHandler) *Api {
@@ -50,8 +60,8 @@ func (s *Api) Start() error {
 	return err
 }
 
-func (s *Api) SetWebSocketServer(wsServer ocpp.WebSocketServer) {
-	s.wsServer = wsServer
+func (s *Api) SetRequestHandler(handler func(chargePointId string, connectorId int, featureName string, payload string) error) {
+	s.requestHandler = handler
 }
 
 // handle requests to the root path
@@ -66,6 +76,26 @@ func (s *Api) handleRoot(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Warn(fmt.Sprintf("api: error reading body from %s: %s", r.RemoteAddr, err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	// cast body to command
+	var cmd command
+	err = json.Unmarshal(body, &cmd)
+	if err != nil {
+		s.logger.Warn(fmt.Sprintf("api: error parsing command from %s: %s", r.RemoteAddr, err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	// send command to websocket
+	err = s.requestHandler(cmd.ChargePointId, cmd.ConnectorId, cmd.FeatureName, cmd.Payload)
+	if err != nil {
+		s.logger.Warn(fmt.Sprintf("api: error sending command %s to %s: %s", cmd.FeatureName, cmd.ChargePointId, err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("hello world"))
 }

@@ -21,8 +21,12 @@ func (f TriggerMessageRequest) GetFeatureName() string {
 	return TriggerMessageFeatureName
 }
 
-func NewTriggerMessageRequest(requestedMessage MessageTrigger) *TriggerMessageRequest {
-	return &TriggerMessageRequest{RequestedMessage: requestedMessage}
+func NewTriggerMessageRequest(requestedMessage MessageTrigger, connectorId int) *TriggerMessageRequest {
+	request := &TriggerMessageRequest{RequestedMessage: requestedMessage}
+	if connectorId >= 0 {
+		request.ConnectorId = &connectorId
+	}
+	return request
 }
 
 type TriggerMessageConfirmation struct {
