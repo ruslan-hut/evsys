@@ -27,7 +27,7 @@ type Server struct {
 	httpServer     *http.Server
 	upgrader       websocket.Upgrader
 	pool           *Pool
-	messageHandler func(ws *WebSocket, data []byte) error
+	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
 }
 
@@ -37,7 +37,7 @@ type WebSocket struct {
 	pool           *Pool
 	id             string
 	uniqueId       string
-	messageHandler func(ws *WebSocket, data []byte) error
+	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
 }
 
@@ -146,7 +146,7 @@ func (s *Server) AddSupportedSupProtocol(proto string) {
 	s.upgrader.Subprotocols = append(s.upgrader.Subprotocols, proto)
 }
 
-func (s *Server) SetMessageHandler(handler func(ws *WebSocket, data []byte) error) {
+func (s *Server) SetMessageHandler(handler func(ws ocpp.WebSocket, data []byte) error) {
 	s.messageHandler = handler
 }
 
@@ -284,13 +284,17 @@ func (s *Server) Start() error {
 	return err
 }
 
-func (s *Server) SendResponse(ws *WebSocket, response *ocpp.Response) error {
+func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 	callResult, _ := CreateCallResult(response, ws.UniqueId())
 	data, err := callResult.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("error encoding response: %s", err)
 	}
-	ws.send <- data
+	socket, ok := ws.(*WebSocket)
+	if !ok {
+		return fmt.Errorf("error casting websocket %s", ws.ID())
+	}
+	socket.send <- data
 	return nil
 }
 

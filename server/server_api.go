@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"evsys/internal"
 	"evsys/internal/config"
+	"evsys/ocpp"
 	"fmt"
 	"net/http"
 )
@@ -15,6 +16,7 @@ const (
 type Api struct {
 	conf       *config.Config
 	httpServer *http.Server
+	wsServer   ocpp.WebSocketServer
 	logger     internal.LogHandler
 }
 
@@ -46,6 +48,10 @@ func (s *Api) Start() error {
 		err = s.httpServer.ListenAndServe()
 	}
 	return err
+}
+
+func (s *Api) SetWebSocketServer(wsServer ocpp.WebSocketServer) {
+	s.wsServer = wsServer
 }
 
 // handle requests to the root path

@@ -33,7 +33,7 @@ func (cs *CentralSystem) SetFirmwareHandler(handler firmware.SystemHandler) {
 	cs.firmwareHandler = handler
 }
 
-func (cs *CentralSystem) handleIncomingMessage(ws *WebSocket, data []byte) error {
+func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) error {
 	chargePointId := ws.ID()
 	message, err := utility.ParseJson(data)
 	if err != nil {
@@ -76,7 +76,7 @@ func (cs *CentralSystem) handleIncomingMessage(ws *WebSocket, data []byte) error
 		return err
 	}
 
-	err = cs.server.SendResponse(ws, &confirmation)
+	err = cs.server.SendResponse(ws, confirmation)
 	return err
 }
 

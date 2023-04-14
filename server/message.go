@@ -57,7 +57,7 @@ const (
 type CallResult struct {
 	TypeId   CallType
 	UniqueId string
-	Payload  *ocpp.Response
+	Payload  ocpp.Response
 }
 
 func (callResult *CallResult) MarshalJSON() ([]byte, error) {
@@ -68,7 +68,7 @@ func (callResult *CallResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func CreateCallResult(confirmation *ocpp.Response, uniqueId string) (*CallResult, error) {
+func CreateCallResult(confirmation ocpp.Response, uniqueId string) (*CallResult, error) {
 	callResult := CallResult{
 		TypeId:   CallTypeResult,
 		UniqueId: uniqueId,
