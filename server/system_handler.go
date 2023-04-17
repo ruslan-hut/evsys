@@ -273,10 +273,10 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
 	}
 	connector := h.getConnector(state, request.ConnectorId)
-	// zero is a valid number for the first transaction !
-	if connector.CurrentTransactionId > 0 {
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("connector %d is now busy with transaction %d", request.ConnectorId, connector.CurrentTransactionId))
-		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
+	if connector.CurrentTransactionId >= 0 {
+		//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("connector %d is now busy with transaction %d", request.ConnectorId, connector.CurrentTransactionId))
+		//return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
+		h.logger.Error("connector is busy", fmt.Errorf("%s@%d is now busy with transaction %d", chargePointId, request.ConnectorId, connector.CurrentTransactionId))
 	}
 
 	transaction := models.Transaction{}
@@ -436,6 +436,9 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
 		connector.ErrorCode = string(request.ErrorCode)
+		if request.Status == core.ChargePointStatusAvailable {
+			connector.CurrentTransactionId = -1
+		}
 		if h.database != nil {
 			err = h.database.UpdateConnector(connector)
 			if err != nil {
