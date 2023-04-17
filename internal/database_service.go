@@ -22,7 +22,7 @@ type Database interface {
 	AddUserTag(userTag *models.UserTag) error
 
 	GetLastTransaction() (*models.Transaction, error)
-	GetTransaction(id int) (*models.Transaction, error)
+	GetTransaction(id int) (models.Transaction, error)
 	AddTransaction(transaction *models.Transaction) error
 	UpdateTransaction(transaction *models.Transaction) error
 

@@ -152,7 +152,8 @@ func (b *TgBot) OnStatusNotification(event *internal.EventMessage) {
 	if event.ConnectorId == 0 {
 		msg = fmt.Sprintf("*%v*: `%v`", event.ChargePointId, event.Status)
 	} else {
-		msg = fmt.Sprintf("*%v*: Connector %v: `%v`", event.ChargePointId, event.ConnectorId, event.Status)
+		msg = fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
+		msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
 	}
 	b.event <- MessageContent{Text: msg}
 }

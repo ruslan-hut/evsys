@@ -5,4 +5,5 @@ type ChargePointStatus struct {
 	ConnectorID   int    `json:"connector_id" bson:"connector_id"`
 	Status        string `json:"status" bson:"status"`
 	Time          string `json:"time" bson:"time"`
+	TransactionId int    `json:"transaction_id" bson:"transaction_id"`
 }

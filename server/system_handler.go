@@ -9,6 +9,7 @@ import (
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -20,23 +21,25 @@ type ChargePointState struct {
 	status            core.ChargePointStatus
 	diagnosticsStatus firmware.DiagnosticsStatus
 	firmwareStatus    firmware.Status
-	connectors        map[int]*models.Connector // No assumptions about the # of connectors
-	transactions      map[int]*models.Transaction
+	connectors        map[int]models.Connector // No assumptions about the # of connectors
+	transactions      map[int]models.Transaction
 	errorCode         core.ChargePointErrorCode
-	model             *models.ChargePoint
+	model             models.ChargePoint
 }
 
 type SystemHandler struct {
-	chargePoints map[string]*ChargePointState
+	chargePoints map[string]ChargePointState
 	database     internal.Database
 	logger       internal.LogHandler
 	eventHandler internal.EventHandler
 	debug        bool
+	mux          *sync.Mutex
 }
 
 func NewSystemHandler() SystemHandler {
 	handler := SystemHandler{
-		chargePoints: make(map[string]*ChargePointState),
+		chargePoints: make(map[string]ChargePointState),
+		mux:          &sync.Mutex{},
 	}
 	return handler
 }
@@ -74,8 +77,11 @@ func (h *SystemHandler) OnStart() error {
 		}
 
 		for _, cp := range chargePoints {
-			h.addChargePoint(cp.Id, &cp)
-			state, _ := h.chargePoints[cp.Id]
+			state := ChargePointState{
+				connectors:   make(map[int]models.Connector),
+				transactions: make(map[int]models.Transaction),
+				model:        cp,
+			}
 			state.status = core.GetStatus(cp.Status)
 			state.errorCode = core.GetErrorCode(cp.ErrorCode)
 			if !cp.IsEnabled {
@@ -83,9 +89,10 @@ func (h *SystemHandler) OnStart() error {
 			}
 			for _, c := range connectors {
 				if c.ChargePointId == cp.Id {
-					state.connectors[c.Id] = &c
+					state.connectors[c.Id] = c
 				}
 			}
+			h.chargePoints[cp.Id] = state
 		}
 		h.logger.Debug(fmt.Sprintf("loaded %d charge points, %d connectors from database", len(chargePoints), len(connectors)))
 
@@ -107,27 +114,22 @@ func (h *SystemHandler) OnStart() error {
 /**
  * Add a new charge point to the system and database
  */
-func (h *SystemHandler) addChargePoint(chargePointId string, model *models.ChargePoint) {
-	var cp *models.ChargePoint
-	if model == nil {
-		cp = &models.ChargePoint{
-			Id:        chargePointId,
-			IsEnabled: true,
-			Status:    string(core.ChargePointStatusAvailable),
-			ErrorCode: string(core.NoError),
-		}
-		if h.database != nil {
-			err := h.database.AddChargePoint(cp)
-			if err != nil {
-				h.logger.Error("failed to add charge point to database: %s", err)
-			}
-		}
-	} else {
-		cp = model
+func (h *SystemHandler) addChargePoint(chargePointId string) {
+	cp := models.ChargePoint{
+		Id:        chargePointId,
+		IsEnabled: true,
+		Status:    string(core.ChargePointStatusAvailable),
+		ErrorCode: string(core.NoError),
 	}
-	h.chargePoints[chargePointId] = &ChargePointState{
-		connectors:   make(map[int]*models.Connector),
-		transactions: make(map[int]*models.Transaction),
+	if h.database != nil {
+		err := h.database.AddChargePoint(&cp)
+		if err != nil {
+			h.logger.Error("failed to add charge point to database: %s", err)
+		}
+	}
+	h.chargePoints[chargePointId] = ChargePointState{
+		connectors:   make(map[int]models.Connector),
+		transactions: make(map[int]models.Transaction),
 		model:        cp,
 	}
 }
@@ -135,7 +137,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string, model *models.Charg
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
 	connector, ok := cps.connectors[id]
 	if !ok {
-		connector = &models.Connector{
+		connector = models.Connector{
 			Id:                   id,
 			ChargePointId:        cps.model.Id,
 			IsEnabled:            true,
@@ -143,13 +145,13 @@ func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Conn
 		}
 		cps.connectors[id] = connector
 		if h.database != nil {
-			err := h.database.AddConnector(connector)
+			err := h.database.AddConnector(&connector)
 			if err != nil {
 				h.logger.Error("failed to add connector to database", err)
 			}
 		}
 	}
-	return connector
+	return &connector
 }
 
 // select charge point
@@ -159,14 +161,16 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 		h.logger.Warn(fmt.Sprintf("unknown charging point: %s", chargePointId))
 		if h.debug {
 			h.logger.Debug("registering new charge point in debug mode")
-			h.addChargePoint(chargePointId, nil)
+			h.addChargePoint(chargePointId)
 			state, ok = h.chargePoints[chargePointId]
 		}
 	}
-	return state, ok
+	return &state, ok
 }
 
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.BootNotificationRequest) (confirmation *core.BootNotificationResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	regStatus := core.RegistrationStatusAccepted
 
 	state, ok := h.getChargePoint(chargePointId)
@@ -177,7 +181,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 				state.model.FirmwareVersion = request.FirmwareVersion
 				state.model.Model = request.ChargePointModel
 				state.model.Vendor = request.ChargePointVendor
-				err := h.database.UpdateChargePoint(state.model)
+				err := h.database.UpdateChargePoint(&state.model)
 				if err != nil {
 					h.logger.Error("update charge point", err)
 				}
@@ -193,6 +197,8 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (confirmation *core.AuthorizeResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	authStatus := types.AuthorizationStatusAccepted
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
@@ -252,12 +258,16 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 }
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *core.HeartbeatRequest) (confirmation *core.HeartbeatResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	_, _ = h.getChargePoint(chargePointId)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", time.Now()))
 	return core.NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
 }
 
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.StartTransactionRequest) (confirmation *core.StartTransactionResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
@@ -269,7 +279,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 	}
 
-	transaction := &models.Transaction{}
+	transaction := models.Transaction{}
 	transaction.IdTag = request.IdTag
 	transaction.ConnectorId = request.ConnectorId
 	transaction.ChargePointId = chargePointId
@@ -294,7 +304,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			transaction.IdTagNote = idTag.Note
 			transaction.Username = idTag.Username
 		}
-		err = h.database.AddTransaction(transaction)
+		err = h.database.AddTransaction(&transaction)
 		if err != nil {
 			h.logger.Error("add transaction", err)
 		}
@@ -319,6 +329,8 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 }
 
 func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.StopTransactionRequest) (confirmation *core.StopTransactionResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStopTransactionResponse(), nil
@@ -330,9 +342,10 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		if err != nil {
 			h.logger.Error("get transaction", err)
 		}
+		ok = err == nil
 	}
 
-	if transaction == nil {
+	if !ok {
 		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
 		return core.NewStopTransactionResponse(), nil
 	}
@@ -368,7 +381,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	//TODO: bill clients
 	if h.database != nil {
-		err = h.database.UpdateTransaction(transaction)
+		err = h.database.UpdateTransaction(&transaction)
 		if err != nil {
 			h.logger.Error("update transaction", err)
 		}
@@ -395,6 +408,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 }
 
 func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterValuesRequest) (confirmation *core.MeterValuesResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewMeterValuesResponse(), nil
@@ -407,10 +422,13 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 }
 
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core.StatusNotificationRequest) (confirmation *core.StatusNotificationResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStatusNotificationResponse(), nil
 	}
+	currentTransactionId := 0
 	state.errorCode = request.ErrorCode
 	if request.ConnectorId > 0 {
 		connector := h.getConnector(state, request.ConnectorId)
@@ -424,13 +442,14 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 				h.logger.Error("update status", err)
 			}
 		}
+		currentTransactionId = connector.CurrentTransactionId
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
 	} else {
 		state.status = request.Status
 		state.model.Status = string(request.Status)
 		state.model.Info = request.Info
 		if h.database != nil {
-			err = h.database.UpdateChargePoint(state.model)
+			err = h.database.UpdateChargePoint(&state.model)
 			if err != nil {
 				h.logger.Error("update status", err)
 			}
@@ -446,7 +465,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			Username:      "",
 			IdTag:         "",
 			Status:        string(request.Status),
-			TransactionId: 0,
+			TransactionId: currentTransactionId,
 			Payload:       request,
 		}
 		h.eventHandler.OnStatusNotification(eventMessage)
@@ -456,6 +475,8 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 }
 
 func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataTransferRequest) (confirmation *core.DataTransferResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewDataTransferResponse(core.DataTransferStatusRejected), nil
@@ -465,6 +486,8 @@ func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataT
 }
 
 func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (confirmation *firmware.DiagnosticsStatusNotificationResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		state.diagnosticsStatus = request.Status
@@ -474,6 +497,8 @@ func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, re
 }
 
 func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (confirmation *firmware.StatusNotificationResponse, err error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		state.firmwareStatus = request.Status
@@ -483,6 +508,8 @@ func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, reque
 }
 
 func (h *SystemHandler) OnTriggerMessage(chargePointId string, connectorId int, message string) (*remotetrigger.TriggerMessageRequest, error) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("charge point not found")
