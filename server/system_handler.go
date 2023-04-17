@@ -156,7 +156,6 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 	if !ok {
 		h.logger.Warn(fmt.Sprintf("unknown charging point: %s", chargePointId))
 		if h.debug {
-			h.logger.Debug("registering new charge point in debug mode")
 			h.addChargePoint(chargePointId)
 			state, ok = h.chargePoints[chargePointId]
 		}
@@ -164,7 +163,7 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 	return &state, ok
 }
 
-func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.BootNotificationRequest) (confirmation *core.BootNotificationResponse, err error) {
+func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.BootNotificationRequest) (*core.BootNotificationResponse, error) {
 	regStatus := core.RegistrationStatusAccepted
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
@@ -189,7 +188,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 	return core.NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, regStatus), nil
 }
 
-func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (confirmation *core.AuthorizeResponse, err error) {
+func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {
 	authStatus := types.AuthorizationStatusAccepted
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
@@ -248,13 +247,13 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
-func (h *SystemHandler) OnHeartbeat(chargePointId string, request *core.HeartbeatRequest) (confirmation *core.HeartbeatResponse, err error) {
+func (h *SystemHandler) OnHeartbeat(chargePointId string, request *core.HeartbeatRequest) (*core.HeartbeatResponse, error) {
 	_, _ = h.getChargePoint(chargePointId)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", time.Now()))
 	return core.NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
 }
 
-func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.StartTransactionRequest) (confirmation *core.StartTransactionResponse, err error) {
+func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.StartTransactionRequest) (*core.StartTransactionResponse, error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
@@ -284,7 +283,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	state.transactions[transaction.Id] = transaction
 
 	if h.database != nil {
-		err = h.database.UpdateConnector(connector)
+		err := h.database.UpdateConnector(connector)
 		if err != nil {
 			h.logger.Error("update connector", err)
 		}
@@ -319,12 +318,13 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.Id), nil
 }
 
-func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.StopTransactionRequest) (confirmation *core.StopTransactionResponse, err error) {
+func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.StopTransactionRequest) (*core.StopTransactionResponse, error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStopTransactionResponse(), nil
 	}
 
+	var err error
 	transaction, ok := state.transactions[request.TransactionId]
 	if !ok && h.database != nil {
 		transaction, err = h.database.GetTransaction(request.TransactionId)
@@ -337,10 +337,14 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
 		return core.NewStopTransactionResponse(), nil
 	}
+	transaction.Init()
+	transaction.Lock()
+	defer transaction.Unlock()
 
 	connector := h.getConnector(state, transaction.ConnectorId)
 	connector.Lock()
 	defer connector.Unlock()
+
 	connector.CurrentTransactionId = -1
 	err = h.database.UpdateConnector(connector)
 	if err != nil {

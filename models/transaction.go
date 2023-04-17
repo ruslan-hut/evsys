@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type Transaction struct {
 	Id            int       `json:"transaction_id" bson:"transaction_id"`
@@ -16,4 +19,19 @@ type Transaction struct {
 	Reason        string    `json:"reason" bson:"reason"`
 	IdTagNote     string    `json:"id_tag_note" bson:"id_tag_note"`
 	Username      string    `json:"username" bson:"username"`
+	mutex         *sync.Mutex
+}
+
+func (t *Transaction) Lock() {
+	t.mutex.Lock()
+}
+
+func (t *Transaction) Unlock() {
+	t.mutex.Unlock()
+}
+
+func (t *Transaction) Init() {
+	if t.mutex == nil {
+		t.mutex = &sync.Mutex{}
+	}
 }
