@@ -13,7 +13,7 @@ type Database interface {
 	AddChargePoint(chargePoint *models.ChargePoint) error
 	GetChargePoint(id string) (*models.ChargePoint, error)
 
-	GetConnectors() ([]models.Connector, error)
+	GetConnectors() ([]*models.Connector, error)
 	UpdateConnector(connector *models.Connector) error
 	AddConnector(connector *models.Connector) error
 	GetConnector(id int, chargePointId string) (*models.Connector, error)
@@ -22,7 +22,7 @@ type Database interface {
 	AddUserTag(userTag *models.UserTag) error
 
 	GetLastTransaction() (*models.Transaction, error)
-	GetTransaction(id int) (models.Transaction, error)
+	GetTransaction(id int) (*models.Transaction, error)
 	AddTransaction(transaction *models.Transaction) error
 	UpdateTransaction(transaction *models.Transaction) error
 

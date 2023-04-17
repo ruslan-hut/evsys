@@ -132,17 +132,16 @@ func (m *MongoDB) GetChargePoints() ([]models.ChargePoint, error) {
 	return chargePoints, nil
 }
 
-func (m *MongoDB) GetConnectors() ([]models.Connector, error) {
+func (m *MongoDB) GetConnectors() ([]*models.Connector, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
 	}
 	defer m.disconnect(connection)
 
-	var connectors []models.Connector
+	var connectors []*models.Connector
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	filter := bson.D{}
-	//opts := options.Find()
 	cursor, err := collection.Find(m.ctx, filter)
 	if err != nil {
 		return nil, err
@@ -308,11 +307,11 @@ func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
 	return &transaction, nil
 }
 
-func (m *MongoDB) GetTransaction(id int) (models.Transaction, error) {
+func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
 	var transaction models.Transaction
 	connection, err := m.connect()
 	if err != nil {
-		return transaction, err
+		return nil, err
 	}
 	defer m.disconnect(connection)
 
@@ -320,9 +319,9 @@ func (m *MongoDB) GetTransaction(id int) (models.Transaction, error) {
 	collection := connection.Database(m.database).Collection(collectionTransactions)
 	err = collection.FindOne(m.ctx, filter).Decode(&transaction)
 	if err != nil {
-		return transaction, err
+		return nil, err
 	}
-	return transaction, nil
+	return &transaction, nil
 }
 
 func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {

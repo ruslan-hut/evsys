@@ -4,6 +4,7 @@ import "time"
 
 type Transaction struct {
 	Id            int       `json:"transaction_id" bson:"transaction_id"`
+	IsFinished    bool      `json:"is_finished" bson:"is_finished"`
 	ConnectorId   int       `json:"connector_id" bson:"connector_id"`
 	ChargePointId string    `json:"charge_point_id" bson:"charge_point_id"`
 	IdTag         string    `json:"id_tag" bson:"id_tag"`

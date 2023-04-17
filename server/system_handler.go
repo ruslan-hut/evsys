@@ -21,8 +21,8 @@ type ChargePointState struct {
 	status            core.ChargePointStatus
 	diagnosticsStatus firmware.DiagnosticsStatus
 	firmwareStatus    firmware.Status
-	connectors        map[int]models.Connector // No assumptions about the # of connectors
-	transactions      map[int]models.Transaction
+	connectors        map[int]*models.Connector // No assumptions about the # of connectors
+	transactions      map[int]*models.Transaction
 	errorCode         core.ChargePointErrorCode
 	model             models.ChargePoint
 }
@@ -78,8 +78,8 @@ func (h *SystemHandler) OnStart() error {
 
 		for _, cp := range chargePoints {
 			state := ChargePointState{
-				connectors:   make(map[int]models.Connector),
-				transactions: make(map[int]models.Transaction),
+				connectors:   make(map[int]*models.Connector),
+				transactions: make(map[int]*models.Transaction),
 				model:        cp,
 			}
 			state.status = core.GetStatus(cp.Status)
@@ -89,6 +89,7 @@ func (h *SystemHandler) OnStart() error {
 			}
 			for _, c := range connectors {
 				if c.ChargePointId == cp.Id {
+					c.Init()
 					state.connectors[c.Id] = c
 				}
 			}
@@ -128,8 +129,8 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 		}
 	}
 	h.chargePoints[chargePointId] = ChargePointState{
-		connectors:   make(map[int]models.Connector),
-		transactions: make(map[int]models.Transaction),
+		connectors:   make(map[int]*models.Connector),
+		transactions: make(map[int]*models.Transaction),
 		model:        cp,
 	}
 }
@@ -137,21 +138,16 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
 	connector, ok := cps.connectors[id]
 	if !ok {
-		connector = models.Connector{
-			Id:                   id,
-			ChargePointId:        cps.model.Id,
-			IsEnabled:            true,
-			CurrentTransactionId: -1,
-		}
+		connector = models.NewConnector(id, cps.model.Id)
 		cps.connectors[id] = connector
 		if h.database != nil {
-			err := h.database.AddConnector(&connector)
+			err := h.database.AddConnector(connector)
 			if err != nil {
 				h.logger.Error("failed to add connector to database", err)
 			}
 		}
 	}
-	return &connector
+	return connector
 }
 
 // select charge point
@@ -169,10 +165,7 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 }
 
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.BootNotificationRequest) (confirmation *core.BootNotificationResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	regStatus := core.RegistrationStatusAccepted
-
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		if h.database != nil {
@@ -197,8 +190,6 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (confirmation *core.AuthorizeResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	authStatus := types.AuthorizationStatusAccepted
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
@@ -258,35 +249,35 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 }
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *core.HeartbeatRequest) (confirmation *core.HeartbeatResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	_, _ = h.getChargePoint(chargePointId)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", time.Now()))
 	return core.NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
 }
 
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.StartTransactionRequest) (confirmation *core.StartTransactionResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
 	}
 	connector := h.getConnector(state, request.ConnectorId)
+	connector.Lock()
+	defer connector.Unlock()
 	if connector.CurrentTransactionId >= 0 {
 		//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("connector %d is now busy with transaction %d", request.ConnectorId, connector.CurrentTransactionId))
 		//return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 		h.logger.Error("connector is busy", fmt.Errorf("%s@%d is now busy with transaction %d", chargePointId, request.ConnectorId, connector.CurrentTransactionId))
 	}
 
-	transaction := models.Transaction{}
-	transaction.IdTag = request.IdTag
-	transaction.ConnectorId = request.ConnectorId
-	transaction.ChargePointId = chargePointId
-	transaction.MeterStart = request.MeterStart
-	transaction.TimeStart = request.Timestamp.Time
-	transaction.ReservationId = request.ReservationId
-	transaction.Id = newTransactionId
+	transaction := &models.Transaction{
+		IdTag:         request.IdTag,
+		IsFinished:    false,
+		ConnectorId:   request.ConnectorId,
+		ChargePointId: chargePointId,
+		MeterStart:    request.MeterStart,
+		TimeStart:     request.Timestamp.Time,
+		ReservationId: request.ReservationId,
+		Id:            newTransactionId,
+	}
 	newTransactionId += 1
 
 	connector.CurrentTransactionId = transaction.Id
@@ -304,7 +295,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			transaction.IdTagNote = idTag.Note
 			transaction.Username = idTag.Username
 		}
-		err = h.database.AddTransaction(&transaction)
+		err = h.database.AddTransaction(transaction)
 		if err != nil {
 			h.logger.Error("add transaction", err)
 		}
@@ -329,8 +320,6 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 }
 
 func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.StopTransactionRequest) (confirmation *core.StopTransactionResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStopTransactionResponse(), nil
@@ -344,19 +333,25 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 		ok = err == nil
 	}
-
 	if !ok {
 		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
 		return core.NewStopTransactionResponse(), nil
 	}
 
 	connector := h.getConnector(state, transaction.ConnectorId)
+	connector.Lock()
+	defer connector.Unlock()
 	connector.CurrentTransactionId = -1
 	err = h.database.UpdateConnector(connector)
 	if err != nil {
 		h.logger.Error("update connector", err)
 	}
+	if transaction.IsFinished {
+		h.logger.Warn(fmt.Sprintf("transaction #%v is already finished", request.TransactionId))
+		return core.NewStopTransactionResponse(), nil
+	}
 
+	transaction.IsFinished = true
 	transaction.TimeStop = request.Timestamp.Time
 	transaction.MeterStop = request.MeterStop
 	transaction.Reason = string(request.Reason)
@@ -381,7 +376,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	//TODO: bill clients
 	if h.database != nil {
-		err = h.database.UpdateTransaction(&transaction)
+		err = h.database.UpdateTransaction(transaction)
 		if err != nil {
 			h.logger.Error("update transaction", err)
 		}
@@ -408,8 +403,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 }
 
 func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterValuesRequest) (confirmation *core.MeterValuesResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewMeterValuesResponse(), nil
@@ -422,8 +415,6 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 }
 
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core.StatusNotificationRequest) (confirmation *core.StatusNotificationResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStatusNotificationResponse(), nil
@@ -432,6 +423,8 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	state.errorCode = request.ErrorCode
 	if request.ConnectorId > 0 {
 		connector := h.getConnector(state, request.ConnectorId)
+		connector.Lock()
+		defer connector.Unlock()
 		connector.Status = string(request.Status)
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
@@ -478,8 +471,6 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 }
 
 func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataTransferRequest) (confirmation *core.DataTransferResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewDataTransferResponse(core.DataTransferStatusRejected), nil
@@ -489,8 +480,6 @@ func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataT
 }
 
 func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (confirmation *firmware.DiagnosticsStatusNotificationResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		state.diagnosticsStatus = request.Status
@@ -500,8 +489,6 @@ func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, re
 }
 
 func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (confirmation *firmware.StatusNotificationResponse, err error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		state.firmwareStatus = request.Status
@@ -511,8 +498,6 @@ func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, reque
 }
 
 func (h *SystemHandler) OnTriggerMessage(chargePointId string, connectorId int, message string) (*remotetrigger.TriggerMessageRequest, error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return nil, fmt.Errorf("charge point not found")
