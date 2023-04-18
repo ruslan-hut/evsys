@@ -406,14 +406,44 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	return core.NewStopTransactionResponse(), nil
 }
 
-func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterValuesRequest) (confirmation *core.MeterValuesResponse, err error) {
+func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterValuesRequest) (*core.MeterValuesResponse, error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewMeterValuesResponse(), nil
 	}
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("recieved meter values for connector #%v", request.ConnectorId))
-	for _, value := range request.MeterValue {
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v --> %v", request.ConnectorId, value))
+	//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("received meter values for connector #%v", request.ConnectorId))
+	transactionId := request.TransactionId
+	if transactionId != nil && h.database != nil {
+		transaction, err := h.database.GetTransaction(*transactionId)
+		currentValue := 0
+		if err != nil {
+			h.logger.Error("get transaction failed", err)
+		} else {
+			for _, sampledValue := range request.MeterValue {
+				for _, value := range sampledValue.SampledValue {
+					if value.Context == types.ReadingContextSamplePeriodic && value.Measurand == types.MeasurandEnergyActiveImportRegister {
+						currentValue = utility.ToInt(value.Value)
+					}
+				}
+			}
+		}
+		consumed := (currentValue - transaction.MeterStart) / 1000
+		if consumed > 0 {
+			if h.eventHandler != nil {
+				eventMessage := &internal.EventMessage{
+					ChargePointId: chargePointId,
+					ConnectorId:   request.ConnectorId,
+					Time:          time.Now(),
+					Username:      transaction.Username,
+					IdTag:         transaction.IdTag,
+					Status:        "Charging",
+					TransactionId: transaction.Id,
+					Info:          fmt.Sprintf("consumed %v kW", consumed),
+					Payload:       request,
+				}
+				h.eventHandler.OnStatusNotification(eventMessage)
+			}
+		}
 	}
 	return core.NewMeterValuesResponse(), nil
 }

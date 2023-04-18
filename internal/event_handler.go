@@ -7,6 +7,7 @@ type EventHandler interface {
 	OnTransactionStart(event *EventMessage)
 	OnTransactionStop(event *EventMessage)
 	OnAuthorize(event *EventMessage)
+	OnTransactionEvent(event *EventMessage)
 }
 
 type EventMessage struct {
