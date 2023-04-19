@@ -421,7 +421,8 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 		} else {
 			for _, sampledValue := range request.MeterValue {
 				for _, value := range sampledValue.SampledValue {
-					if value.Context == types.ReadingContextSamplePeriodic && value.Measurand == types.MeasurandEnergyActiveImportRegister {
+					// read value of active energy import register only for triggered messages
+					if value.Context == types.ReadingContextTrigger && value.Measurand == types.MeasurandEnergyActiveImportRegister {
 						currentValue = utility.ToInt(value.Value)
 					}
 				}
@@ -441,7 +442,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 					Info:          fmt.Sprintf("consumed %v kW", consumed),
 					Payload:       request,
 				}
-				h.eventHandler.OnStatusNotification(eventMessage)
+				h.eventHandler.OnTransactionEvent(eventMessage)
 			}
 		}
 	}
