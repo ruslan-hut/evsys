@@ -497,6 +497,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			IdTag:         "",
 			Status:        string(request.Status),
 			TransactionId: currentTransactionId,
+			Info:          request.Info,
 			Payload:       request,
 		}
 		h.eventHandler.OnStatusNotification(eventMessage)
