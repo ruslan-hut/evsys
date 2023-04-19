@@ -14,3 +14,13 @@ func ToInt(s string) int {
 	}
 	return int(f)
 }
+
+// IntToString converts an integer to a string like 1234 to 1.2
+func IntToString(i int) string {
+	if i < 100 {
+		return "0.0"
+	}
+	firstPart := i / 1000
+	secondPart := (i % 1000) / 100
+	return strconv.Itoa(firstPart) + "." + strconv.Itoa(secondPart)
+}

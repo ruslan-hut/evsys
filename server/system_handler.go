@@ -387,7 +387,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	}
 
 	if h.eventHandler != nil {
-		consumed := float32((transaction.MeterStop - transaction.MeterStart) / 1000)
+		consumed := utility.IntToString(transaction.MeterStop - transaction.MeterStart)
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   transaction.ConnectorId,
@@ -396,7 +396,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 			IdTag:         transaction.IdTag,
 			Status:        connector.Status,
 			TransactionId: transaction.Id,
-			Info:          fmt.Sprintf("consumed %0.1f kW", consumed),
+			Info:          fmt.Sprintf("consumed %s kW", consumed),
 			Payload:       request,
 		}
 		h.eventHandler.OnTransactionStop(eventMessage)
@@ -428,8 +428,8 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				}
 			}
 		}
-		consumed := (currentValue - transaction.MeterStart) / 1000
-		if consumed > 0 {
+		consumed := utility.IntToString(currentValue - transaction.MeterStart)
+		if consumed != "0.0" {
 			if h.eventHandler != nil {
 				eventMessage := &internal.EventMessage{
 					ChargePointId: chargePointId,
@@ -439,7 +439,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 					IdTag:         transaction.IdTag,
 					Status:        "Charging",
 					TransactionId: transaction.Id,
-					Info:          fmt.Sprintf("consumed %v kW", consumed),
+					Info:          fmt.Sprintf("consumed %s kW", consumed),
 					Payload:       request,
 				}
 				h.eventHandler.OnTransactionEvent(eventMessage)
