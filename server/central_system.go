@@ -6,6 +6,7 @@ import (
 	"evsys/ocpp"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
+	"evsys/ocpp/localauth"
 	"evsys/ocpp/remotetrigger"
 	"evsys/pusher"
 	"evsys/telegram"
@@ -22,6 +23,7 @@ type CentralSystem struct {
 	coreHandler       SystemHandler
 	firmwareHandler   firmware.SystemHandler
 	remoteTrigger     remotetrigger.SystemHandler
+	localAuth         localauth.SystemHandler
 	supportedProtocol []string
 }
 
@@ -35,6 +37,10 @@ func (cs *CentralSystem) SetFirmwareHandler(handler firmware.SystemHandler) {
 
 func (cs *CentralSystem) SetRemoteTriggerHandler(handler remotetrigger.SystemHandler) {
 	cs.remoteTrigger = handler
+}
+
+func (cs *CentralSystem) SetLocalAuthHandler(handler localauth.SystemHandler) {
+	cs.localAuth = handler
 }
 
 func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) error {
@@ -105,6 +111,8 @@ func (cs *CentralSystem) handleApiRequest(chargePointId string, connectorId int,
 	switch feature {
 	case remotetrigger.TriggerMessageFeatureName:
 		request, err = cs.remoteTrigger.OnTriggerMessage(chargePointId, connectorId, payload)
+	case localauth.SendLocalListFeatureName:
+		request, err = cs.localAuth.OnSendLocalList(chargePointId)
 	default:
 		err = fmt.Errorf("feature not supported: %s", feature)
 	}
@@ -210,6 +218,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	cs.SetCoreHandler(systemHandler)
 	cs.SetFirmwareHandler(&systemHandler)
 	cs.SetRemoteTriggerHandler(&systemHandler)
+	cs.SetLocalAuthHandler(&systemHandler)
 
 	// api server
 	apiServer := NewServerApi(conf, logService)

@@ -86,7 +86,6 @@ func (pool *Pool) Start() {
 			for client := range pool.clients {
 				if client.id == envelope.recipient {
 					request := envelope.message
-					request.UniqueId = client.uniqueId
 					data, err := request.MarshalJSON()
 					if err != nil {
 						pool.logger.Error("encode request:", err)
@@ -162,7 +161,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 	// check id above existed connections
 	for client := range s.pool.clients {
 		if client.id == id {
-			s.logger.Warn(fmt.Sprintf("connection from %s already exists", id))
+			s.logger.Debug(fmt.Sprintf("%s requested new connection", id))
 			s.pool.unregister <- client
 		}
 	}

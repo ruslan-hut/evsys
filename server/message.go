@@ -5,6 +5,7 @@ import (
 	"evsys/ocpp"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
+	"evsys/utility"
 	"fmt"
 	"log"
 	"reflect"
@@ -56,7 +57,7 @@ type CallRequest struct {
 func CreateCallRequest(request ocpp.Request) (CallRequest, error) {
 	callRequest := CallRequest{
 		TypeId:   CallTypeRequest,
-		UniqueId: "",
+		UniqueId: utility.NewUUID(),
 		feature:  request.GetFeatureName(),
 		Payload:  request,
 	}

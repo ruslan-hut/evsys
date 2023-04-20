@@ -29,10 +29,10 @@ func NewTriggerMessageRequest(requestedMessage MessageTrigger, connectorId int) 
 	return request
 }
 
-type TriggerMessageConfirmation struct {
+type TriggerMessageResponse struct {
 	Status TriggerMessageStatus `json:"status" validate:"required,triggerMessageStatus"`
 }
 
-func (f TriggerMessageConfirmation) GetFeatureName() string {
+func (f TriggerMessageResponse) GetFeatureName() string {
 	return TriggerMessageFeatureName
 }

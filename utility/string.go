@@ -2,6 +2,7 @@ package utility
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"strconv"
 )
 
@@ -23,4 +24,8 @@ func IntToString(i int) string {
 	firstPart := i / 1000
 	secondPart := (i % 1000) / 100
 	return strconv.Itoa(firstPart) + "." + strconv.Itoa(secondPart)
+}
+
+func NewUUID() string {
+	return uuid.New().String()
 }

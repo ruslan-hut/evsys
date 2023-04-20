@@ -5,6 +5,7 @@ import (
 	"evsys/models"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
+	"evsys/ocpp/localauth"
 	"evsys/ocpp/remotetrigger"
 	"evsys/types"
 	"evsys/utility"
@@ -449,7 +450,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 	return core.NewMeterValuesResponse(), nil
 }
 
-func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core.StatusNotificationRequest) (confirmation *core.StatusNotificationResponse, err error) {
+func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core.StatusNotificationRequest) (*core.StatusNotificationResponse, error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStatusNotificationResponse(), nil
@@ -468,7 +469,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			connector.CurrentTransactionId = -1
 		}
 		if h.database != nil {
-			err = h.database.UpdateConnector(connector)
+			err := h.database.UpdateConnector(connector)
 			if err != nil {
 				h.logger.Error("update status", err)
 			}
@@ -480,7 +481,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		state.model.Status = string(request.Status)
 		state.model.Info = request.Info
 		if h.database != nil {
-			err = h.database.UpdateChargePoint(&state.model)
+			err := h.database.UpdateChargePoint(&state.model)
 			if err != nil {
 				h.logger.Error("update status", err)
 			}
@@ -506,7 +507,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	return core.NewStatusNotificationResponse(), nil
 }
 
-func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataTransferRequest) (confirmation *core.DataTransferResponse, err error) {
+func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataTransferRequest) (*core.DataTransferResponse, error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewDataTransferResponse(core.DataTransferStatusRejected), nil
@@ -515,7 +516,7 @@ func (h *SystemHandler) OnDataTransfer(chargePointId string, request *core.DataT
 	return core.NewDataTransferResponse(core.DataTransferStatusAccepted), nil
 }
 
-func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (confirmation *firmware.DiagnosticsStatusNotificationResponse, err error) {
+func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, request *firmware.DiagnosticsStatusNotificationRequest) (*firmware.DiagnosticsStatusNotificationResponse, error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		state.diagnosticsStatus = request.Status
@@ -524,7 +525,7 @@ func (h *SystemHandler) OnDiagnosticsStatusNotification(chargePointId string, re
 	return firmware.NewDiagnosticsStatusNotificationResponse(), nil
 }
 
-func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (confirmation *firmware.StatusNotificationResponse, err error) {
+func (h *SystemHandler) OnFirmwareStatusNotification(chargePointId string, request *firmware.StatusNotificationRequest) (*firmware.StatusNotificationResponse, error) {
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		state.firmwareStatus = request.Status
@@ -540,5 +541,34 @@ func (h *SystemHandler) OnTriggerMessage(chargePointId string, connectorId int, 
 	}
 	request := remotetrigger.NewTriggerMessageRequest(remotetrigger.MessageTrigger(message), connectorId)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("message: %v", message))
+	return request, nil
+}
+
+func (h *SystemHandler) OnSendLocalList(chargePointId string) (*localauth.SendLocalListRequest, error) {
+	state, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point %s not found", chargePointId)
+	}
+	version := state.model.LocalAuthVersion + 1
+	request := localauth.NewSendLocalListRequest(version, localauth.UpdateTypeFull)
+	authList := make([]localauth.AuthorizationData, 0)
+	if h.database != nil {
+		ids, err := h.database.GetActiveUserTags(chargePointId, version)
+		if err != nil {
+			h.logger.Error("get active user tags", err)
+		} else {
+			for _, id := range ids {
+				authList = append(authList, localauth.AuthorizationData{
+					IdTag: id.IdTag,
+					IdTagInfo: &types.IdTagInfo{
+						//TODO: add expiry date
+						Status: types.AuthorizationStatusAccepted,
+					},
+				})
+			}
+		}
+	}
+	request.LocalAuthorizationList = authList
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("sending local auth list #%v", version))
 	return request, nil
 }

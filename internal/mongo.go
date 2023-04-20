@@ -289,6 +289,36 @@ func (m *MongoDB) AddUserTag(userTag *models.UserTag) error {
 	return err
 }
 
+func (m *MongoDB) GetActiveUserTags(chargePointId string, listVersion int) ([]models.UserTag, error) {
+	chargePoint, err := m.GetChargePoint(chargePointId)
+	if err != nil {
+		return nil, fmt.Errorf("charge point with id %s not found: %v", chargePointId, err)
+	}
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"is_enabled", true}}
+	collection := connection.Database(m.database).Collection(collectionUserTags)
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	var userTags []models.UserTag
+	if err = cursor.All(m.ctx, &userTags); err != nil {
+		return nil, err
+	}
+	// current list version has to be saved in charge point
+	chargePoint.LocalAuthVersion = listVersion
+	err = m.UpdateChargePoint(chargePoint)
+	if err != nil {
+		return nil, err
+	}
+	return userTags, nil
+}
+
 func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
