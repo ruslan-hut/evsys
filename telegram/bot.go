@@ -209,7 +209,14 @@ func (b *TgBot) composeStatusMessage() string {
 		} else {
 			for _, s := range status {
 				msg += fmt.Sprintf("*%v*: `%v`\n", s.ChargePointID, sanitize(s.Time))
-				msg += fmt.Sprintf("`%v`\n", s.Status)
+				//msg += fmt.Sprintf("`%v`\n", s.Status)
+				for _, c := range s.Connectors {
+					msg += fmt.Sprintf("Connector %v: `%v`\n", c.ConnectorID, c.Status)
+					if c.TransactionId > 0 {
+						msg += fmt.Sprintf("Transaction ID: %v\n", c.TransactionId)
+					}
+					msg += fmt.Sprintf("%v\n", sanitize(c.Info))
+				}
 				msg += "\n"
 			}
 		}

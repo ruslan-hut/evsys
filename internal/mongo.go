@@ -488,6 +488,35 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	collection := connection.Database(m.database).Collection(collectionLog)
 
 	pipeline := bson.A{
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$charge_point_id"},
+					{"connectors",
+						bson.D{
+							{"$push",
+								bson.D{
+									{"connector_id", "$connector_id"},
+									{"info", "$info"},
+									{"status", "$status"},
+									{"transaction_id", "$current_transaction_id"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate connectors states: %v", err)
+	}
+	if err = cursor.All(m.ctx, &status); err != nil {
+		return nil, fmt.Errorf("decode connectors states: %v", err)
+	}
+
+	pipeline = bson.A{
 		bson.D{{"$match", bson.D{{"feature", "Heartbeat"}}}},
 		bson.D{{"$sort", bson.D{{"time", -1}}}},
 		bson.D{
@@ -501,7 +530,7 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 		bson.D{{"$sort", bson.D{{"_id", 1}}}},
 	}
 	var pipeResult []pipeResult
-	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	cursor, err = collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate Heartbeat: %v", err)
 	}
@@ -510,39 +539,45 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	}
 
 	for _, heartbeat := range pipeResult {
-		status = append(status, models.ChargePointStatus{
-			ChargePointID: heartbeat.ChargePointID,
-			Time:          heartbeat.Info,
-		})
-	}
-
-	pipeline = bson.A{
-		bson.D{{"$match", bson.D{{"feature", "StatusNotification"}}}},
-		bson.D{{"$sort", bson.D{{"time", -1}}}},
-		bson.D{
-			{"$group",
-				bson.D{
-					{"_id", "$charge_point_id"},
-					{"info", bson.D{{"$first", "$text"}}},
-				},
-			},
-		},
-	}
-	cursor, err = collection.Aggregate(m.ctx, pipeline)
-	if err != nil {
-		return nil, fmt.Errorf("aggregate StatusNotification: %v", err)
-	}
-	if err = cursor.All(m.ctx, &pipeResult); err != nil {
-		return nil, fmt.Errorf("decode StatusNotification: %v", err)
-	}
-
-	for _, statusInfo := range pipeResult {
 		for i, s := range status {
-			if s.ChargePointID == statusInfo.ChargePointID {
-				status[i].Status = statusInfo.Info
+			if s.ChargePointID == heartbeat.ChargePointID {
+				status[i].Time = heartbeat.Info
+				break
 			}
 		}
+		//status = append(status, models.ChargePointStatus{
+		//	ChargePointID: heartbeat.ChargePointID,
+		//	Time:          heartbeat.Info,
+		//})
 	}
+
+	//pipeline = bson.A{
+	//	bson.D{{"$match", bson.D{{"feature", "StatusNotification"}}}},
+	//	bson.D{{"$sort", bson.D{{"time", -1}}}},
+	//	bson.D{
+	//		{"$group",
+	//			bson.D{
+	//				{"_id", "$charge_point_id"},
+	//				{"info", bson.D{{"$first", "$text"}}},
+	//			},
+	//		},
+	//	},
+	//}
+	//cursor, err = collection.Aggregate(m.ctx, pipeline)
+	//if err != nil {
+	//	return nil, fmt.Errorf("aggregate StatusNotification: %v", err)
+	//}
+	//if err = cursor.All(m.ctx, &pipeResult); err != nil {
+	//	return nil, fmt.Errorf("decode StatusNotification: %v", err)
+	//}
+	//
+	//for _, statusInfo := range pipeResult {
+	//	for i, s := range status {
+	//		if s.ChargePointID == statusInfo.ChargePointID {
+	//			status[i].Status = statusInfo.Info
+	//		}
+	//	}
+	//}
 
 	return status, nil
 }
