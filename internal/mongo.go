@@ -485,8 +485,6 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	defer m.disconnect(connection)
 
 	var status []models.ChargePointStatus
-	collection := connection.Database(m.database).Collection(collectionLog)
-
 	pipeline := bson.A{
 		bson.D{
 			{"$group",
@@ -507,7 +505,9 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 				},
 			},
 		},
+		bson.D{{"$sort", bson.D{{"_id", 1}}}},
 	}
+	collection := connection.Database(m.database).Collection(collectionConnectors)
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate connectors states: %v", err)
@@ -530,7 +530,8 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 		bson.D{{"$sort", bson.D{{"_id", 1}}}},
 	}
 	var pipeResult []pipeResult
-	cursor, err = collection.Aggregate(m.ctx, pipeline)
+	cLog := connection.Database(m.database).Collection(collectionLog)
+	cursor, err = cLog.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate Heartbeat: %v", err)
 	}

@@ -215,7 +215,7 @@ func (b *TgBot) composeStatusMessage() string {
 					if c.TransactionId > 0 {
 						msg += fmt.Sprintf("Transaction ID: %v\n", c.TransactionId)
 					}
-					msg += fmt.Sprintf("%v\n", sanitize(c.Info))
+					//msg += fmt.Sprintf("%v\n", sanitize(c.Info))
 				}
 				msg += "\n"
 			}
