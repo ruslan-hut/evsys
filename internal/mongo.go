@@ -4,11 +4,13 @@ import (
 	"context"
 	"evsys/internal/config"
 	"evsys/models"
+	"evsys/utility"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
+	"time"
 )
 
 const (
@@ -472,8 +474,9 @@ func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) erro
 }
 
 type pipeResult struct {
-	ChargePointID string `bson:"_id"`
-	Info          string `bson:"info"`
+	ChargePointID string    `bson:"_id"`
+	Info          string    `bson:"info"`
+	Time          time.Time `bson:"time"`
 }
 
 // GetLastStatus returns the last status
@@ -523,7 +526,8 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 			{"$group",
 				bson.D{
 					{"_id", "$charge_point_id"},
-					{"info", bson.D{{"$first", "$time"}}},
+					//{"info", bson.D{{"$first", "$time"}}},
+					{"time", bson.D{{"$first", "$timestamp"}}},
 				},
 			},
 		},
@@ -542,7 +546,7 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	for _, heartbeat := range pipeResult {
 		for i, s := range status {
 			if s.ChargePointID == heartbeat.ChargePointID {
-				status[i].Time = heartbeat.Info
+				status[i].Time = utility.TimeAgo(heartbeat.Time)
 				break
 			}
 		}
