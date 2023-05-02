@@ -24,10 +24,10 @@ type Api struct {
 }
 
 type command struct {
-	ChargePointId string
-	ConnectorId   int
-	FeatureName   string
-	Payload       string
+	ChargePointId string `json:"charge_point_id"`
+	ConnectorId   int    `json:"connector_id"`
+	FeatureName   string `json:"feature_name"`
+	Payload       string `json:"payload"`
 }
 
 func NewServerApi(conf *config.Config, logger internal.LogHandler) *Api {

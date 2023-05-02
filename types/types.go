@@ -109,3 +109,55 @@ type MeterValue struct {
 	Timestamp    *DateTime      `json:"timestamp" validate:"required"`
 	SampledValue []SampledValue `json:"sampledValue" validate:"required,min=1,dive"`
 }
+
+type RemoteStartStopStatus string
+
+const (
+	RemoteStartStopStatusAccepted RemoteStartStopStatus = "Accepted"
+	RemoteStartStopStatusRejected RemoteStartStopStatus = "Rejected"
+)
+
+// Charging Profiles
+type ChargingProfilePurposeType string
+type ChargingProfileKindType string
+type RecurrencyKindType string
+type ChargingRateUnitType string
+
+const (
+	ChargingProfilePurposeChargePointMaxProfile ChargingProfilePurposeType = "ChargePointMaxProfile"
+	ChargingProfilePurposeTxDefaultProfile      ChargingProfilePurposeType = "TxDefaultProfile"
+	ChargingProfilePurposeTxProfile             ChargingProfilePurposeType = "TxProfile"
+	ChargingProfileKindAbsolute                 ChargingProfileKindType    = "Absolute"
+	ChargingProfileKindRecurring                ChargingProfileKindType    = "Recurring"
+	ChargingProfileKindRelative                 ChargingProfileKindType    = "Relative"
+	RecurrencyKindDaily                         RecurrencyKindType         = "Daily"
+	RecurrencyKindWeekly                        RecurrencyKindType         = "Weekly"
+	ChargingRateUnitWatts                       ChargingRateUnitType       = "W"
+	ChargingRateUnitAmperes                     ChargingRateUnitType       = "A"
+)
+
+type ChargingSchedulePeriod struct {
+	StartPeriod  int     `json:"startPeriod" validate:"gte=0"`
+	Limit        float64 `json:"limit" validate:"gte=0"`
+	NumberPhases *int    `json:"numberPhases,omitempty" validate:"omitempty,gte=0"`
+}
+
+type ChargingSchedule struct {
+	Duration               *int                     `json:"duration,omitempty" validate:"omitempty,gte=0"`
+	StartSchedule          *DateTime                `json:"startSchedule,omitempty"`
+	ChargingRateUnit       ChargingRateUnitType     `json:"chargingRateUnit" validate:"required,chargingRateUnit"`
+	ChargingSchedulePeriod []ChargingSchedulePeriod `json:"chargingSchedulePeriod" validate:"required,min=1"`
+	MinChargingRate        *float64                 `json:"minChargingRate,omitempty" validate:"omitempty,gte=0"`
+}
+
+type ChargingProfile struct {
+	ChargingProfileId      int                        `json:"chargingProfileId"`
+	TransactionId          int                        `json:"transactionId,omitempty"`
+	StackLevel             int                        `json:"stackLevel" validate:"gte=0"`
+	ChargingProfilePurpose ChargingProfilePurposeType `json:"chargingProfilePurpose" validate:"required,chargingProfilePurpose"`
+	ChargingProfileKind    ChargingProfileKindType    `json:"chargingProfileKind" validate:"required,chargingProfileKind"`
+	RecurrencyKind         RecurrencyKindType         `json:"recurrencyKind,omitempty" validate:"omitempty,recurrencyKind"`
+	ValidFrom              *DateTime                  `json:"validFrom,omitempty"`
+	ValidTo                *DateTime                  `json:"validTo,omitempty"`
+	ChargingSchedule       *ChargingSchedule          `json:"chargingSchedule" validate:"required"`
+}

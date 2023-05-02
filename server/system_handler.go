@@ -572,3 +572,16 @@ func (h *SystemHandler) OnSendLocalList(chargePointId string) (*localauth.SendLo
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("sending local auth list #%v", version))
 	return request, nil
 }
+
+func (h *SystemHandler) OnRemoteStartTransaction(chargePointId string, connectorId int, idTag string) (*core.RemoteStartTransactionRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	request := core.NewRemoteStartTransactionRequest(idTag)
+	if connectorId > 0 {
+		request.ConnectorId = &connectorId
+	}
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("remote start transaction on connector: %v; for id: %s", request.ConnectorId, idTag))
+	return request, nil
+}
