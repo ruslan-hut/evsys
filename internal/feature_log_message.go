@@ -20,13 +20,3 @@ func (fm *FeatureLogMessage) MessageType() string {
 func (fm *FeatureLogMessage) DataType() string {
 	return FeatureLogMessageType
 }
-
-func NewFeatureLogMessage(feature, id, text string) *FeatureLogMessage {
-	return &FeatureLogMessage{
-		Time:          logTime(time.Now()),
-		TimeStamp:     time.Now(),
-		Text:          text,
-		Feature:       feature,
-		ChargePointId: id,
-	}
-}

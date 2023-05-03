@@ -35,15 +35,21 @@ type SystemHandler struct {
 	logger       internal.LogHandler
 	eventHandler internal.EventHandler
 	debug        bool
+	location     *time.Location
 	mux          *sync.Mutex
 }
 
-func NewSystemHandler() SystemHandler {
-	handler := SystemHandler{
+func NewSystemHandler(location *time.Location) *SystemHandler {
+	handler := &SystemHandler{
 		chargePoints: make(map[string]ChargePointState),
+		location:     location,
 		mux:          &sync.Mutex{},
 	}
 	return handler
+}
+
+func (h *SystemHandler) getTime() time.Time {
+	return time.Now().In(h.location)
 }
 
 func (h *SystemHandler) SetDatabase(database internal.Database) {
@@ -118,6 +124,8 @@ func (h *SystemHandler) OnStart() error {
  * Add a new charge point to the system and database
  */
 func (h *SystemHandler) addChargePoint(chargePointId string) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	cp := models.ChargePoint{
 		Id:        chargePointId,
 		IsEnabled: true,
@@ -140,6 +148,8 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
 	connector, ok := cps.connectors[id]
 	if !ok {
+		h.mux.Lock()
+		defer h.mux.Unlock()
 		connector = models.NewConnector(id, cps.model.Id)
 		cps.connectors[id] = connector
 		if h.database != nil {
@@ -170,6 +180,8 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		if h.database != nil {
+			h.mux.Lock()
+			defer h.mux.Unlock()
 			if state.model.SerialNumber != request.ChargePointSerialNumber || state.model.FirmwareVersion != request.FirmwareVersion {
 				state.model.SerialNumber = request.ChargePointSerialNumber
 				state.model.FirmwareVersion = request.FirmwareVersion
@@ -187,7 +199,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 	}
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, string(regStatus))
-	return core.NewBootNotificationResponse(types.NewDateTime(time.Now()), defaultHeartbeatInterval, regStatus), nil
+	return core.NewBootNotificationResponse(types.NewDateTime(h.getTime()), defaultHeartbeatInterval, regStatus), nil
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {
@@ -200,6 +212,8 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	} else {
 		authStatus = types.AuthorizationStatusBlocked
 	}
+	h.mux.Lock()
+	defer h.mux.Unlock()
 	username := ""
 	id := request.IdTag
 	if id == "" {
@@ -235,7 +249,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   0,
-			Time:          time.Now(),
+			Time:          h.getTime(),
 			Username:      username,
 			IdTag:         id,
 			Status:        string(authStatus),
@@ -251,8 +265,9 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 
 func (h *SystemHandler) OnHeartbeat(chargePointId string, request *core.HeartbeatRequest) (*core.HeartbeatResponse, error) {
 	_, _ = h.getChargePoint(chargePointId)
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", time.Now()))
-	return core.NewHeartbeatResponse(types.NewDateTime(time.Now())), nil
+	t := h.getTime()
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", t))
+	return core.NewHeartbeatResponse(types.NewDateTime(t)), nil
 }
 
 func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.StartTransactionRequest) (*core.StartTransactionResponse, error) {
@@ -436,7 +451,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				eventMessage := &internal.EventMessage{
 					ChargePointId: chargePointId,
 					ConnectorId:   request.ConnectorId,
-					Time:          time.Now(),
+					Time:          h.getTime(),
 					Username:      transaction.Username,
 					IdTag:         transaction.IdTag,
 					Status:        "Charging",
@@ -478,6 +493,8 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		currentTransactionId = connector.CurrentTransactionId
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
 	} else {
+		h.mux.Lock()
+		defer h.mux.Unlock()
 		state.status = request.Status
 		state.model.Status = string(request.Status)
 		state.model.Info = request.Info
@@ -494,7 +511,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   request.ConnectorId,
-			Time:          time.Now(),
+			Time:          h.getTime(),
 			Username:      "",
 			IdTag:         "",
 			Status:        string(request.Status),

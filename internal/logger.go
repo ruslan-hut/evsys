@@ -18,6 +18,7 @@ const (
 type Logger struct {
 	messageService MessageService
 	database       Database
+	location       *time.Location
 	debugMode      bool
 	writer         chan *Event
 }
@@ -27,9 +28,10 @@ type Event struct {
 	Message    *FeatureLogMessage
 }
 
-func NewLogger() *Logger {
+func NewLogger(location *time.Location) *Logger {
 	logger := &Logger{
 		debugMode: false,
+		location:  location,
 		writer:    make(chan *Event, 100),
 	}
 	go logger.startWriter()
@@ -76,7 +78,7 @@ func logTime(t time.Time) string {
 }
 
 func (l *Logger) FeatureEvent(feature, id, text string) {
-	l.logEvent(Info, NewFeatureLogMessage(feature, id, text))
+	l.logEvent(Info, l.newFeatureLogMessage(feature, id, text))
 }
 
 func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
@@ -92,20 +94,20 @@ func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
 }
 
 func (l *Logger) Debug(text string) {
-	l.logEvent(Info, NewFeatureLogMessage("info", "", text))
+	l.logEvent(Info, l.newFeatureLogMessage("info", "", text))
 }
 
 func (l *Logger) Warn(text string) {
-	l.logEvent(Warning, NewFeatureLogMessage("warning", "", text))
+	l.logEvent(Warning, l.newFeatureLogMessage("warning", "", text))
 }
 
 func (l *Logger) Error(text string, err error) {
-	l.logEvent(Error, NewFeatureLogMessage("error", "", fmt.Sprintf("%s: %s", text, err)))
+	l.logEvent(Error, l.newFeatureLogMessage("error", "", fmt.Sprintf("%s: %s", text, err)))
 }
 
 func (l *Logger) RawDataEvent(direction, data string) {
 	if l.debugMode {
-		l.logEvent(Raw, NewFeatureLogMessage("raw", "", fmt.Sprintf("%s: %s", direction, data)))
+		l.logEvent(Raw, l.newFeatureLogMessage("raw", "", fmt.Sprintf("%s: %s", direction, data)))
 	}
 }
 
@@ -117,4 +119,14 @@ func (l *Logger) logLine(importance Importance, text string) {
 		return
 	}
 	log.Printf("%s %s", importance, text)
+}
+
+func (l *Logger) newFeatureLogMessage(feature, id, text string) *FeatureLogMessage {
+	return &FeatureLogMessage{
+		Time:          logTime(time.Now().In(l.location)),
+		TimeStamp:     time.Now().UTC(),
+		Text:          text,
+		Feature:       feature,
+		ChargePointId: id,
+	}
 }

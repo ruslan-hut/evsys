@@ -14,20 +14,22 @@ import (
 	"evsys/utility"
 	"fmt"
 	"log"
+	"time"
 )
 
 type CentralSystem struct {
 	server            *Server
 	api               *Api
 	logger            internal.LogHandler
-	coreHandler       SystemHandler
+	coreHandler       *SystemHandler
 	firmwareHandler   firmware.SystemHandler
 	remoteTrigger     remotetrigger.SystemHandler
 	localAuth         localauth.SystemHandler
+	location          *time.Location
 	supportedProtocol []string
 }
 
-func (cs *CentralSystem) SetCoreHandler(handler SystemHandler) {
+func (cs *CentralSystem) SetCoreHandler(handler *SystemHandler) {
 	cs.coreHandler = handler
 }
 
@@ -144,8 +146,10 @@ func (cs *CentralSystem) Start() {
 	select {}
 }
 
-func NewCentralSystem() (CentralSystem, error) {
-	cs := CentralSystem{}
+func NewCentralSystem(location *time.Location) (CentralSystem, error) {
+	cs := CentralSystem{
+		location: location,
+	}
 	var database internal.Database
 
 	conf, err := config.GetConfig()
@@ -182,7 +186,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	}
 
 	// logger with database and push service for the message handling
-	logService := internal.NewLogger()
+	logService := internal.NewLogger(location)
 	logService.SetDebugMode(conf.IsDebug)
 	logService.SetDatabase(database)
 	logService.SetMessageService(messageService)
@@ -197,7 +201,7 @@ func NewCentralSystem() (CentralSystem, error) {
 	cs.server = wsServer
 
 	// message handler
-	systemHandler := NewSystemHandler()
+	systemHandler := NewSystemHandler(location)
 	systemHandler.SetDatabase(database)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetDebugMode(conf.IsDebug)
@@ -220,9 +224,9 @@ func NewCentralSystem() (CentralSystem, error) {
 	}
 
 	cs.SetCoreHandler(systemHandler)
-	cs.SetFirmwareHandler(&systemHandler)
-	cs.SetRemoteTriggerHandler(&systemHandler)
-	cs.SetLocalAuthHandler(&systemHandler)
+	cs.SetFirmwareHandler(systemHandler)
+	cs.SetRemoteTriggerHandler(systemHandler)
+	cs.SetLocalAuthHandler(systemHandler)
 
 	// api server
 	apiServer := NewServerApi(conf, logService)
