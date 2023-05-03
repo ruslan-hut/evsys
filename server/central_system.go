@@ -115,6 +115,8 @@ func (cs *CentralSystem) handleApiRequest(chargePointId string, connectorId int,
 		request, err = cs.localAuth.OnSendLocalList(chargePointId)
 	case core.RemoteStartTransactionFeatureName:
 		request, err = cs.coreHandler.OnRemoteStartTransaction(chargePointId, connectorId, payload)
+	case core.RemoteStopTransactionFeatureName:
+		request, err = cs.coreHandler.OnRemoteStopTransaction(chargePointId, payload)
 	default:
 		err = fmt.Errorf("feature not supported: %s", feature)
 	}

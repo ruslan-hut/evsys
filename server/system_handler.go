@@ -10,6 +10,7 @@ import (
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -583,5 +584,19 @@ func (h *SystemHandler) OnRemoteStartTransaction(chargePointId string, connector
 		request.ConnectorId = &connectorId
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("remote start transaction on connector: %v; for id: %s", request.ConnectorId, idTag))
+	return request, nil
+}
+
+func (h *SystemHandler) OnRemoteStopTransaction(chargePointId string, id string) (*core.RemoteStopTransactionRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	transactionId, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid transaction id")
+	}
+	request := core.NewRemoteStopTransactionRequest(int(transactionId))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("remote stop transaction: %v", transactionId))
 	return request, nil
 }
