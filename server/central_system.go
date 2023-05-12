@@ -213,7 +213,7 @@ func NewCentralSystem(location *time.Location) (CentralSystem, error) {
 		} else {
 			telegramBot.SetDatabase(database)
 			telegramBot.Start()
-			systemHandler.SetEventHandler(telegramBot)
+			systemHandler.AddEventListener(telegramBot)
 			log.Println("telegram bot is configured and enabled")
 		}
 	}

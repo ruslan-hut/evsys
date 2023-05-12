@@ -20,10 +20,10 @@ type Logger struct {
 	database       Database
 	location       *time.Location
 	debugMode      bool
-	writer         chan *Event
+	writer         chan *LogEvent
 }
 
-type Event struct {
+type LogEvent struct {
 	Importance Importance
 	Message    *FeatureLogMessage
 }
@@ -32,7 +32,7 @@ func NewLogger(location *time.Location) *Logger {
 	logger := &Logger{
 		debugMode: false,
 		location:  location,
-		writer:    make(chan *Event, 100),
+		writer:    make(chan *LogEvent, 100),
 	}
 	go logger.startWriter()
 	return logger
@@ -86,7 +86,7 @@ func (l *Logger) logEvent(importance Importance, message *FeatureLogMessage) {
 		message.ChargePointId = "*"
 	}
 	message.Importance = string(importance)
-	event := &Event{
+	event := &LogEvent{
 		Importance: importance,
 		Message:    message,
 	}

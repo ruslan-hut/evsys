@@ -30,20 +30,21 @@ type ChargePointState struct {
 }
 
 type SystemHandler struct {
-	chargePoints map[string]ChargePointState
-	database     internal.Database
-	logger       internal.LogHandler
-	eventHandler internal.EventHandler
-	debug        bool
-	location     *time.Location
-	mux          *sync.Mutex
+	chargePoints   map[string]ChargePointState
+	database       internal.Database
+	logger         internal.LogHandler
+	eventListeners []internal.EventHandler
+	debug          bool
+	location       *time.Location
+	mux            *sync.Mutex
 }
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
-		chargePoints: make(map[string]ChargePointState),
-		location:     location,
-		mux:          &sync.Mutex{},
+		chargePoints:   make(map[string]ChargePointState),
+		eventListeners: make([]internal.EventHandler, 0),
+		location:       location,
+		mux:            &sync.Mutex{},
 	}
 	return handler
 }
@@ -65,8 +66,26 @@ func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
 	h.logger = logger
 }
 
-func (h *SystemHandler) SetEventHandler(eventHandler internal.EventHandler) {
-	h.eventHandler = eventHandler
+func (h *SystemHandler) AddEventListener(eventListener internal.EventHandler) {
+	h.eventListeners = append(h.eventListeners, eventListener)
+}
+
+// common function for event listeners
+func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *internal.EventMessage) {
+	for _, listener := range h.eventListeners {
+		switch event {
+		case internal.StatusNotification:
+			listener.OnStatusNotification(eventData)
+		case internal.TransactionStart:
+			listener.OnTransactionStart(eventData)
+		case internal.TransactionStop:
+			listener.OnTransactionStop(eventData)
+		case internal.Authorize:
+			listener.OnAuthorize(eventData)
+		case internal.TransactionEvent:
+			listener.OnTransactionEvent(eventData)
+		}
+	}
 }
 
 func (h *SystemHandler) OnStart() error {
@@ -245,19 +264,17 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 		}
 	}
 
-	if h.eventHandler != nil {
-		eventMessage := &internal.EventMessage{
-			ChargePointId: chargePointId,
-			ConnectorId:   0,
-			Time:          h.getTime(),
-			Username:      username,
-			IdTag:         id,
-			Status:        string(authStatus),
-			TransactionId: 0,
-			Payload:       request,
-		}
-		h.eventHandler.OnAuthorize(eventMessage)
+	eventMessage := &internal.EventMessage{
+		ChargePointId: chargePointId,
+		ConnectorId:   0,
+		Time:          h.getTime(),
+		Username:      username,
+		IdTag:         id,
+		Status:        string(authStatus),
+		TransactionId: 0,
+		Payload:       request,
 	}
+	h.notifyEventListeners(internal.Authorize, eventMessage)
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", id, authStatus))
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
@@ -317,19 +334,17 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		}
 	}
 
-	if h.eventHandler != nil {
-		eventMessage := &internal.EventMessage{
-			ChargePointId: chargePointId,
-			ConnectorId:   transaction.ConnectorId,
-			Time:          transaction.TimeStart,
-			Username:      transaction.Username,
-			IdTag:         transaction.IdTag,
-			Status:        connector.Status,
-			TransactionId: transaction.Id,
-			Payload:       request,
-		}
-		h.eventHandler.OnTransactionStart(eventMessage)
+	eventMessage := &internal.EventMessage{
+		ChargePointId: chargePointId,
+		ConnectorId:   transaction.ConnectorId,
+		Time:          transaction.TimeStart,
+		Username:      transaction.Username,
+		IdTag:         transaction.IdTag,
+		Status:        connector.Status,
+		TransactionId: transaction.Id,
+		Payload:       request,
 	}
+	h.notifyEventListeners(internal.TransactionStart, eventMessage)
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("started transaction #%v for connector %v", transaction.Id, transaction.ConnectorId))
 	return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.Id), nil
@@ -403,21 +418,19 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 	}
 
-	if h.eventHandler != nil {
-		consumed := utility.IntToString(transaction.MeterStop - transaction.MeterStart)
-		eventMessage := &internal.EventMessage{
-			ChargePointId: chargePointId,
-			ConnectorId:   transaction.ConnectorId,
-			Time:          transaction.TimeStart,
-			Username:      transaction.Username,
-			IdTag:         transaction.IdTag,
-			Status:        connector.Status,
-			TransactionId: transaction.Id,
-			Info:          fmt.Sprintf("consumed %s kW", consumed),
-			Payload:       request,
-		}
-		h.eventHandler.OnTransactionStop(eventMessage)
+	consumed := utility.IntToString(transaction.MeterStop - transaction.MeterStart)
+	eventMessage := &internal.EventMessage{
+		ChargePointId: chargePointId,
+		ConnectorId:   transaction.ConnectorId,
+		Time:          transaction.TimeStart,
+		Username:      transaction.Username,
+		IdTag:         transaction.IdTag,
+		Status:        connector.Status,
+		TransactionId: transaction.Id,
+		Info:          fmt.Sprintf("consumed %s kW", consumed),
+		Payload:       request,
 	}
+	h.notifyEventListeners(internal.TransactionStop, eventMessage)
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %v %v", request.TransactionId, request.Reason))
 	return core.NewStopTransactionResponse(), nil
@@ -447,20 +460,18 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 		}
 		consumed := utility.IntToString(currentValue - transaction.MeterStart)
 		if consumed != "0.0" {
-			if h.eventHandler != nil {
-				eventMessage := &internal.EventMessage{
-					ChargePointId: chargePointId,
-					ConnectorId:   request.ConnectorId,
-					Time:          h.getTime(),
-					Username:      transaction.Username,
-					IdTag:         transaction.IdTag,
-					Status:        "Charging",
-					TransactionId: transaction.Id,
-					Info:          fmt.Sprintf("consumed %s kW", consumed),
-					Payload:       request,
-				}
-				h.eventHandler.OnTransactionEvent(eventMessage)
+			eventMessage := &internal.EventMessage{
+				ChargePointId: chargePointId,
+				ConnectorId:   request.ConnectorId,
+				Time:          h.getTime(),
+				Username:      transaction.Username,
+				IdTag:         transaction.IdTag,
+				Status:        "Charging",
+				TransactionId: transaction.Id,
+				Info:          fmt.Sprintf("consumed %s kW", consumed),
+				Payload:       request,
 			}
+			h.notifyEventListeners(internal.TransactionEvent, eventMessage)
 		}
 	}
 	return core.NewMeterValuesResponse(), nil
@@ -507,20 +518,18 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
 	}
 
-	if h.eventHandler != nil {
-		eventMessage := &internal.EventMessage{
-			ChargePointId: chargePointId,
-			ConnectorId:   request.ConnectorId,
-			Time:          h.getTime(),
-			Username:      "",
-			IdTag:         "",
-			Status:        string(request.Status),
-			TransactionId: currentTransactionId,
-			Info:          request.Info,
-			Payload:       request,
-		}
-		h.eventHandler.OnStatusNotification(eventMessage)
+	eventMessage := &internal.EventMessage{
+		ChargePointId: chargePointId,
+		ConnectorId:   request.ConnectorId,
+		Time:          h.getTime(),
+		Username:      "",
+		IdTag:         "",
+		Status:        string(request.Status),
+		TransactionId: currentTransactionId,
+		Info:          request.Info,
+		Payload:       request,
 	}
+	h.notifyEventListeners(internal.StatusNotification, eventMessage)
 
 	return core.NewStatusNotificationResponse(), nil
 }

@@ -2,6 +2,16 @@ package internal
 
 import "time"
 
+type Event string
+
+const (
+	StatusNotification Event = "StatusNotification"
+	TransactionStart   Event = "TransactionStart"
+	TransactionStop    Event = "TransactionStop"
+	Authorize          Event = "Authorize"
+	TransactionEvent   Event = "TransactionEvent"
+)
+
 type EventHandler interface {
 	OnStatusNotification(event *EventMessage)
 	OnTransactionStart(event *EventMessage)
