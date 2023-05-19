@@ -20,6 +20,7 @@ const (
 	collectionConnectors    = "connectors"
 	collectionTransactions  = "transactions"
 	collectionSubscriptions = "subscriptions"
+	collectionMeterValues   = "meter_values"
 )
 
 type MongoDB struct {
@@ -379,6 +380,34 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 	update := bson.M{"$set": transaction}
 	collection := connection.Database(m.database).Collection(collectionTransactions)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	_, err = collection.InsertOne(m.ctx, meterValue)
+	return err
+}
+
+func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", transactionId}}
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	_, err = collection.DeleteMany(m.ctx, filter)
 	if err != nil {
 		return err
 	}

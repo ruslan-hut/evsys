@@ -143,6 +143,10 @@ func (h *SystemHandler) OnStart() error {
  * Add a new charge point to the system and database
  */
 func (h *SystemHandler) addChargePoint(chargePointId string) {
+	if chargePointId == "" {
+		h.logger.Warn("invalid charge point id")
+		return
+	}
 	h.mux.Lock()
 	defer h.mux.Unlock()
 	cp := models.ChargePoint{
@@ -415,6 +419,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		err = h.database.UpdateTransaction(transaction)
 		if err != nil {
 			h.logger.Error("update transaction", err)
+		} else {
+			err = h.database.DeleteTransactionMeterValues(transaction.Id)
+			if err != nil {
+				h.logger.Error("delete transaction meter values", err)
+			}
 		}
 	}
 
@@ -454,24 +463,37 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 					// read value of active energy import register only for triggered messages
 					if value.Context == types.ReadingContextTrigger && value.Measurand == types.MeasurandEnergyActiveImportRegister {
 						currentValue = utility.ToInt(value.Value)
+						transactionMeter := &models.TransactionMeter{
+							Id:        transaction.Id,
+							Value:     currentValue,
+							Time:      time.Now(),
+							Unit:      string(value.Unit),
+							Measurand: string(value.Measurand),
+						}
+						err = h.database.AddTransactionMeterValue(transactionMeter)
+						if err != nil {
+							h.logger.Error("add transaction meter value", err)
+						}
 					}
 				}
 			}
 		}
-		consumed := utility.IntToString(currentValue - transaction.MeterStart)
-		if consumed != "0.0" {
-			eventMessage := &internal.EventMessage{
-				ChargePointId: chargePointId,
-				ConnectorId:   request.ConnectorId,
-				Time:          h.getTime(),
-				Username:      transaction.Username,
-				IdTag:         transaction.IdTag,
-				Status:        "Charging",
-				TransactionId: transaction.Id,
-				Info:          fmt.Sprintf("consumed %s kW", consumed),
-				Payload:       request,
+		if transaction != nil {
+			consumed := utility.IntToString(currentValue - transaction.MeterStart)
+			if consumed != "0.0" {
+				eventMessage := &internal.EventMessage{
+					ChargePointId: chargePointId,
+					ConnectorId:   request.ConnectorId,
+					Time:          h.getTime(),
+					Username:      transaction.Username,
+					IdTag:         transaction.IdTag,
+					Status:        "Charging",
+					TransactionId: transaction.Id,
+					Info:          fmt.Sprintf("consumed %s kW", consumed),
+					Payload:       request,
+				}
+				h.notifyEventListeners(internal.TransactionEvent, eventMessage)
 			}
-			h.notifyEventListeners(internal.TransactionEvent, eventMessage)
 		}
 	}
 	return core.NewMeterValuesResponse(), nil

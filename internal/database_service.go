@@ -27,6 +27,9 @@ type Database interface {
 	AddTransaction(transaction *models.Transaction) error
 	UpdateTransaction(transaction *models.Transaction) error
 
+	AddTransactionMeterValue(meterValue *models.TransactionMeter) error
+	DeleteTransactionMeterValues(transactionId int) error
+
 	GetSubscriptions() ([]models.UserSubscription, error)
 	AddSubscription(subscription *models.UserSubscription) error
 	UpdateSubscription(subscription *models.UserSubscription) error
