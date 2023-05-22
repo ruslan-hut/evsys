@@ -34,6 +34,7 @@ type SystemHandler struct {
 	database       internal.Database
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
+	trigger        *Trigger
 	debug          bool
 	location       *time.Location
 	mux            *sync.Mutex
@@ -68,6 +69,10 @@ func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
 
 func (h *SystemHandler) AddEventListener(eventListener internal.EventHandler) {
 	h.eventListeners = append(h.eventListeners, eventListener)
+}
+
+func (h *SystemHandler) SetTrigger(trigger *Trigger) {
+	h.trigger = trigger
 }
 
 // common function for event listeners
@@ -136,6 +141,20 @@ func (h *SystemHandler) OnStart() error {
 		// load firmware status from database
 		// load diagnostics status from database
 	}
+
+	if h.trigger == nil {
+		return fmt.Errorf("trigger is not set")
+	}
+	h.trigger.Start()
+	// registering all connectors with active transactions
+	for _, cp := range h.chargePoints {
+		for _, c := range cp.connectors {
+			if c.CurrentTransactionId != -1 {
+				h.trigger.Register <- c
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -338,6 +357,8 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		}
 	}
 
+	h.trigger.Register <- connector
+
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
 		ConnectorId:   transaction.ConnectorId,
@@ -373,6 +394,9 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
 		return core.NewStopTransactionResponse(), nil
 	}
+	// stop requests for meter values
+	h.trigger.Unregister <- transaction.Id
+
 	transaction.Init()
 	transaction.Lock()
 	defer transaction.Unlock()

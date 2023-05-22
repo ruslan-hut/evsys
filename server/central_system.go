@@ -218,6 +218,9 @@ func NewCentralSystem(location *time.Location) (CentralSystem, error) {
 		}
 	}
 
+	trigger := NewTrigger(wsServer, logService)
+	systemHandler.SetTrigger(trigger)
+
 	err = systemHandler.OnStart()
 	if err != nil {
 		return cs, err
