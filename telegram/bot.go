@@ -88,8 +88,8 @@ func (b *TgBot) updatesPump() {
 				err := b.database.AddSubscription(&subscription)
 				if err != nil {
 					log.Printf("bot: error adding subscription: %v", err)
+					msg = fmt.Sprintf("Error adding subscription:\n `%v`", err)
 				}
-				msg = fmt.Sprintf("Error adding subscription:\n `%v`", err)
 			}
 			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: msg}
 		case "stop":
