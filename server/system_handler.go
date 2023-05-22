@@ -502,23 +502,23 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				}
 			}
 		}
-		if transaction != nil {
-			consumed := utility.IntToString(currentValue - transaction.MeterStart)
-			if consumed != "0.0" {
-				eventMessage := &internal.EventMessage{
-					ChargePointId: chargePointId,
-					ConnectorId:   request.ConnectorId,
-					Time:          h.getTime(),
-					Username:      transaction.Username,
-					IdTag:         transaction.IdTag,
-					Status:        "Charging",
-					TransactionId: transaction.Id,
-					Info:          fmt.Sprintf("consumed %s kW", consumed),
-					Payload:       request,
-				}
-				h.notifyEventListeners(internal.TransactionEvent, eventMessage)
-			}
-		}
+		//if transaction != nil {
+		//	consumed := utility.IntToString(currentValue - transaction.MeterStart)
+		//	if consumed != "0.0" {
+		//		eventMessage := &internal.EventMessage{
+		//			ChargePointId: chargePointId,
+		//			ConnectorId:   request.ConnectorId,
+		//			Time:          h.getTime(),
+		//			Username:      transaction.Username,
+		//			IdTag:         transaction.IdTag,
+		//			Status:        "Charging",
+		//			TransactionId: transaction.Id,
+		//			Info:          fmt.Sprintf("consumed %s kW", consumed),
+		//			Payload:       request,
+		//		}
+		//		h.notifyEventListeners(internal.TransactionEvent, eventMessage)
+		//	}
+		//}
 	}
 	return core.NewMeterValuesResponse(), nil
 }
