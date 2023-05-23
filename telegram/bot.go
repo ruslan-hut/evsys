@@ -197,6 +197,15 @@ func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
 	b.event <- MessageContent{Text: msg}
 }
 
+func (b *TgBot) OnAlert(event *internal.EventMessage) {
+	msg := fmt.Sprintf("*%v*: Connector: %v `ALERT`\n", event.ChargePointId, event.ConnectorId)
+	msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
+	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("ID Tag: %v\n\n", event.IdTag)
+	msg += fmt.Sprintf("%v", sanitize(event.Info))
+	b.event <- MessageContent{Text: msg}
+}
+
 // compose status message
 func (b *TgBot) composeStatusMessage() string {
 	msg := "Status info:\n"

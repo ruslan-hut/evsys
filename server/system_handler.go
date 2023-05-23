@@ -319,9 +319,20 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	connector.Lock()
 	defer connector.Unlock()
 	if connector.CurrentTransactionId >= 0 {
-		//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("connector %d is now busy with transaction %d", request.ConnectorId, connector.CurrentTransactionId))
-		//return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 		h.logger.Error("connector is busy", fmt.Errorf("%s@%d is now busy with transaction %d", chargePointId, request.ConnectorId, connector.CurrentTransactionId))
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   connector.Id,
+			Time:          time.Now(),
+			Username:      "",
+			IdTag:         request.IdTag,
+			Status:        connector.Status,
+			TransactionId: connector.CurrentTransactionId,
+			Info:          "New transaction was requested, but connector is busy with another transaction.",
+			Payload:       request,
+		}
+		h.notifyEventListeners(internal.Alert, eventMessage)
+		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 	}
 
 	transaction := &models.Transaction{
