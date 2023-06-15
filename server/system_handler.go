@@ -257,6 +257,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	h.mux.Lock()
 	defer h.mux.Unlock()
 	username := ""
+	info := ""
 	id := request.IdTag
 	if id == "" {
 		authStatus = types.AuthorizationStatusInvalid
@@ -274,6 +275,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 				userTag = &models.UserTag{
 					IdTag:     id,
 					IsEnabled: h.debug,
+					Note:      fmt.Sprintf("added at %s", time.Now().Format("2006-01-02 15:04:05")),
 				}
 				err = h.database.AddUserTag(userTag)
 				if err != nil {
@@ -284,6 +286,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 				authStatus = types.AuthorizationStatusAccepted
 			}
 			username = userTag.Username
+			info = userTag.Note
 		}
 	}
 
@@ -294,6 +297,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 		Username:      username,
 		IdTag:         id,
 		Status:        string(authStatus),
+		Info:          info,
 		TransactionId: 0,
 		Payload:       request,
 	}

@@ -194,6 +194,12 @@ func (b *TgBot) OnTransactionEvent(event *internal.EventMessage) {
 func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: user: `%v`\n", event.ChargePointId, event.IdTag)
 	msg += fmt.Sprintf("Auth status: %v\n", event.Status)
+	if event.Username != "" {
+		msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
+	}
+	if event.Info != "" {
+		msg += fmt.Sprintf("%v\n", sanitize(event.Info))
+	}
 	b.event <- MessageContent{Text: msg}
 }
 
