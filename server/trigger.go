@@ -57,10 +57,10 @@ func (t *Trigger) listen() {
 	for {
 		select {
 		case connector := <-t.Register:
-			t.logger.FeatureEvent(featureNameTrigger, connector.ChargePointId, fmt.Sprintf("registered new transaction: %v", connector.CurrentTransactionId))
+			t.logger.FeatureEvent(featureNameTrigger, connector.ChargePointId, fmt.Sprintf("start watching on connector: %v transaction: %v", connector.Id, connector.CurrentTransactionId))
 			t.connectors[connector.CurrentTransactionId] = connector
 		case transactionId := <-t.Unregister:
-			t.logger.FeatureEvent(featureNameTrigger, "", fmt.Sprintf("unregistered transaction: %v", transactionId))
+			t.logger.FeatureEvent(featureNameTrigger, "", fmt.Sprintf("stop watching on transaction: %v", transactionId))
 			delete(t.connectors, transactionId)
 		}
 	}

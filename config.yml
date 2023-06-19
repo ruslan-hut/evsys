@@ -1,6 +1,8 @@
 ---
 
 is_debug: false
+accept_unknown_tag: false
+accept_unknown_chp: false
 listen:
   type: port
   bind_ip: 0.0.0.0

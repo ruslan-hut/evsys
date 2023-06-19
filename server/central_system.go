@@ -204,7 +204,7 @@ func NewCentralSystem(location *time.Location) (CentralSystem, error) {
 	systemHandler := NewSystemHandler(location)
 	systemHandler.SetDatabase(database)
 	systemHandler.SetLogger(logService)
-	systemHandler.SetDebugMode(conf.IsDebug)
+	systemHandler.SetParameters(conf.IsDebug, conf.AcceptUnknownTag, conf.AcceptUnknownChp)
 
 	if conf.Telegram.Enabled {
 		telegramBot, err := telegram.NewBot(conf.Telegram.ApiKey)

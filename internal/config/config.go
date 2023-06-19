@@ -7,8 +7,10 @@ import (
 )
 
 type Config struct {
-	IsDebug bool `yaml:"is_debug" env-default:"false"`
-	Listen  struct {
+	IsDebug          bool `yaml:"is_debug" env-default:"false"`
+	AcceptUnknownTag bool `yaml:"accept_unknown_tag" env-default:"false"`
+	AcceptUnknownChp bool `yaml:"accept_unknown_chp" env-default:"false"`
+	Listen           struct {
 		Type     string `yaml:"type" env-default:"port"`
 		BindIP   string `yaml:"bind_ip" env-default:"0.0.0.0"`
 		Port     string `yaml:"port" env-default:"5000"`

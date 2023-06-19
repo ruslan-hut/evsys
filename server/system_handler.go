@@ -36,6 +36,8 @@ type SystemHandler struct {
 	eventListeners []internal.EventHandler
 	trigger        *Trigger
 	debug          bool
+	acceptTags     bool
+	acceptPoints   bool
 	location       *time.Location
 	mux            *sync.Mutex
 }
@@ -58,9 +60,10 @@ func (h *SystemHandler) SetDatabase(database internal.Database) {
 	h.database = database
 }
 
-// SetDebugMode setting debug mode, used for registering unknown charge points
-func (h *SystemHandler) SetDebugMode(debug bool) {
+func (h *SystemHandler) SetParameters(debug bool, acceptTags bool, acceptPoints bool) {
 	h.debug = debug
+	h.acceptTags = acceptTags
+	h.acceptPoints = acceptPoints
 }
 
 func (h *SystemHandler) SetLogger(logger internal.LogHandler) {
@@ -209,7 +212,7 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 	state, ok := h.chargePoints[chargePointId]
 	if !ok {
 		h.logger.Warn(fmt.Sprintf("unknown charging point: %s", chargePointId))
-		if h.debug {
+		if h.acceptPoints {
 			h.addChargePoint(chargePointId)
 			state, ok = h.chargePoints[chargePointId]
 		}
@@ -270,11 +273,11 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			if err != nil {
 				h.logger.Error("failed to get user tag from database", err)
 			}
-			// add user tag if not found, new tag is enabled if debug mode is on
+			// add user tag if not found, new tag is enabled if acceptTags mode is on
 			if userTag == nil {
 				userTag = &models.UserTag{
 					IdTag:     id,
-					IsEnabled: h.debug,
+					IsEnabled: h.acceptTags,
 					Note:      fmt.Sprintf("added at %s", time.Now().Format("2006-01-02 15:04:05")),
 				}
 				err = h.database.AddUserTag(userTag)
