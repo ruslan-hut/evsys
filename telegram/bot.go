@@ -137,12 +137,16 @@ func (b *TgBot) sendMessage(id int64, text string) {
 	msg.ParseMode = "MarkdownV2"
 	_, err := b.api.Send(msg)
 	if err != nil {
-		//log.Printf( "bot: error sending parsed message: %v", err)
-		// maybe error was while parsing, so we can send a message about this error
-		msg = tgbotapi.NewMessage(id, fmt.Sprintf("Error: %v", err))
-		_, err = b.api.Send(msg)
+		safeMsg := tgbotapi.NewMessage(id, fmt.Sprintf("This message caused an error:\n%v", removeMarkup(text)))
+		_, err = b.api.Send(safeMsg)
 		if err != nil {
-			log.Printf("bot: error sending message: %v", err)
+			log.Printf("bot: error sending unmarkuped message: %v", err)
+			// maybe error was while parsing, so we can send a message about this error
+			msg = tgbotapi.NewMessage(id, fmt.Sprintf("Error: %v", err))
+			_, err = b.api.Send(msg)
+			if err != nil {
+				log.Printf("bot: error sending message: %v", err)
+			}
 		}
 	}
 }
@@ -238,6 +242,19 @@ func (b *TgBot) composeStatusMessage() string {
 	}
 	msg += fmt.Sprintf("Active subscriptions: %v", len(b.subscriptions))
 	return msg
+}
+
+func removeMarkup(input string) string {
+	reservedChars := "\\`*_|"
+
+	sanitized := ""
+	for _, char := range input {
+		if !strings.ContainsRune(reservedChars, char) {
+			sanitized += string(char)
+		}
+	}
+
+	return sanitized
 }
 
 func sanitize(input string) string {
