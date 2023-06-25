@@ -673,7 +673,7 @@ func (h *SystemHandler) OnRemoteStartTransaction(chargePointId string, connector
 	if connectorId > 0 {
 		request.ConnectorId = &connectorId
 	}
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("remote start transaction on connector: %v; for id: %s", request.ConnectorId, idTag))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("remote start transaction on connector: %v; for id: %s", connectorId, idTag))
 	return request, nil
 }
 
