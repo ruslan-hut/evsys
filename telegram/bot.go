@@ -172,7 +172,7 @@ func (b *TgBot) OnStatusNotification(event *internal.EventMessage) {
 func (b *TgBot) OnTransactionStart(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 	msg += fmt.Sprintf("Transaction ID: %v START\n", event.TransactionId)
-	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
 	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
 	b.event <- MessageContent{Text: msg}
 }
@@ -180,7 +180,7 @@ func (b *TgBot) OnTransactionStart(event *internal.EventMessage) {
 func (b *TgBot) OnTransactionStop(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 	msg += fmt.Sprintf("Transaction ID: %v STOP\n", event.TransactionId)
-	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
 	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
 	msg += fmt.Sprintf("Info: %v\n", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
@@ -189,7 +189,7 @@ func (b *TgBot) OnTransactionStop(event *internal.EventMessage) {
 func (b *TgBot) OnTransactionEvent(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 	msg += fmt.Sprintf("Transaction ID: %v ACTIVE\n", event.TransactionId)
-	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
 	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
 	msg += fmt.Sprintf("Info: %v\n", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
@@ -210,7 +210,7 @@ func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
 func (b *TgBot) OnAlert(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector: %v `ALERT`\n", event.ChargePointId, event.ConnectorId)
 	msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
-	msg += fmt.Sprintf("User: %v\n", event.Username)
+	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
 	msg += fmt.Sprintf("ID Tag: %v\n\n", event.IdTag)
 	msg += fmt.Sprintf("%v", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
