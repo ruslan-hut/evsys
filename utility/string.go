@@ -26,6 +26,13 @@ func IntToString(i int) string {
 	return strconv.Itoa(firstPart) + "." + strconv.Itoa(secondPart)
 }
 
+// IntAsPrice converts an integer to a string like 10234 to 102.34
+func IntAsPrice(i int) string {
+	floatValue := float64(i) / 100.0
+	// Convert float64 to string.
+	return strconv.FormatFloat(floatValue, 'f', 2, 64)
+}
+
 func NewUUID() string {
 	return uuid.New().String()
 }

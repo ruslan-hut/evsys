@@ -32,6 +32,7 @@ type ChargePointState struct {
 type SystemHandler struct {
 	chargePoints   map[string]ChargePointState
 	database       internal.Database
+	billing        internal.BillingService
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
 	trigger        *Trigger
@@ -58,6 +59,10 @@ func (h *SystemHandler) getTime() time.Time {
 
 func (h *SystemHandler) SetDatabase(database internal.Database) {
 	h.database = database
+}
+
+func (h *SystemHandler) SetBillingService(billing internal.BillingService) {
+	h.billing = billing
 }
 
 func (h *SystemHandler) SetParameters(debug bool, acceptTags bool, acceptPoints bool) {
@@ -456,7 +461,19 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 	}
 
-	//TODO: bill clients
+	err = h.billing.OnTransactionFinished(transaction)
+	if err != nil {
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			Username:      transaction.Username,
+			IdTag:         transaction.IdTag,
+			Info:          fmt.Sprintf("billing failed %v", err),
+			Payload:       request,
+		}
+		h.notifyEventListeners(internal.Alert, eventMessage)
+	}
+
 	if h.database != nil {
 		err = h.database.UpdateTransaction(transaction)
 		if err != nil {
@@ -470,6 +487,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	}
 
 	consumed := utility.IntToString(transaction.MeterStop - transaction.MeterStart)
+	price := utility.IntAsPrice(transaction.PaymentAmount)
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
 		ConnectorId:   transaction.ConnectorId,
@@ -478,7 +496,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		IdTag:         transaction.IdTag,
 		Status:        connector.Status,
 		TransactionId: transaction.Id,
-		Info:          fmt.Sprintf("consumed %s kW", consumed),
+		Info:          fmt.Sprintf("consumed %s kW; %v €", consumed, price),
 		Payload:       request,
 	}
 	h.notifyEventListeners(internal.TransactionStop, eventMessage)
@@ -492,19 +510,24 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 	if !ok {
 		return core.NewMeterValuesResponse(), nil
 	}
-	//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("received meter values for connector #%v", request.ConnectorId))
+
 	transactionId := request.TransactionId
 	if transactionId != nil && h.database != nil {
+
 		transaction, err := h.database.GetTransaction(*transactionId)
+
 		currentValue := 0
 		if err != nil {
 			h.logger.Error("get transaction failed", err)
 		} else {
+
 			for _, sampledValue := range request.MeterValue {
 				for _, value := range sampledValue.SampledValue {
 					// read value of active energy import register only for triggered messages
 					if value.Context == types.ReadingContextTrigger && value.Measurand == types.MeasurandEnergyActiveImportRegister {
+
 						currentValue = utility.ToInt(value.Value)
+
 						transactionMeter := &models.TransactionMeter{
 							Id:        transaction.Id,
 							Value:     currentValue,
@@ -512,6 +535,20 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 							Unit:      string(value.Unit),
 							Measurand: string(value.Measurand),
 						}
+
+						err = h.billing.OnMeterValue(transaction, transactionMeter)
+						if err != nil {
+							eventMessage := &internal.EventMessage{
+								ChargePointId: chargePointId,
+								ConnectorId:   transaction.ConnectorId,
+								Username:      transaction.Username,
+								IdTag:         transaction.IdTag,
+								Info:          fmt.Sprintf("billing failed %v", err),
+								Payload:       request,
+							}
+							h.notifyEventListeners(internal.Alert, eventMessage)
+						}
+
 						err = h.database.AddTransactionMeterValue(transactionMeter)
 						if err != nil {
 							h.logger.Error("add transaction meter value", err)
@@ -520,23 +557,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				}
 			}
 		}
-		//if transaction != nil {
-		//	consumed := utility.IntToString(currentValue - transaction.MeterStart)
-		//	if consumed != "0.0" {
-		//		eventMessage := &internal.EventMessage{
-		//			ChargePointId: chargePointId,
-		//			ConnectorId:   request.ConnectorId,
-		//			Time:          h.getTime(),
-		//			Username:      transaction.Username,
-		//			IdTag:         transaction.IdTag,
-		//			Status:        "Charging",
-		//			TransactionId: transaction.Id,
-		//			Info:          fmt.Sprintf("consumed %s kW", consumed),
-		//			Payload:       request,
-		//		}
-		//		h.notifyEventListeners(internal.TransactionEvent, eventMessage)
-		//	}
-		//}
+
 	}
 	return core.NewMeterValuesResponse(), nil
 }

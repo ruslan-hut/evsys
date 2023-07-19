@@ -1,6 +1,7 @@
 package server
 
 import (
+	"evsys/billing"
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/ocpp"
@@ -200,9 +201,15 @@ func NewCentralSystem(location *time.Location) (CentralSystem, error) {
 
 	cs.server = wsServer
 
+	// billing
+	affleck := billing.NewAffleck()
+	affleck.SetDatabase(database)
+	affleck.SetLogger(logService)
+
 	// message handler
 	systemHandler := NewSystemHandler(location)
 	systemHandler.SetDatabase(database)
+	systemHandler.SetBillingService(affleck)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetParameters(conf.IsDebug, conf.AcceptUnknownTag, conf.AcceptUnknownChp)
 
