@@ -369,7 +369,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		}
 		idTag, err := h.database.GetUserTag(transaction.IdTag)
 		if err != nil {
-			h.logger.Error("get user tag", err)
+			h.logger.Error(fmt.Sprintf("get user tag %s", transaction.IdTag), err)
 		} else {
 			transaction.IdTagNote = idTag.Note
 			transaction.Username = idTag.Username
@@ -390,6 +390,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		IdTag:         transaction.IdTag,
 		Status:        connector.Status,
 		TransactionId: transaction.Id,
+		Info:          transaction.IdTagNote,
 		Payload:       request,
 	}
 	h.notifyEventListeners(internal.TransactionStart, eventMessage)

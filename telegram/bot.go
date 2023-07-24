@@ -174,6 +174,9 @@ func (b *TgBot) OnTransactionStart(event *internal.EventMessage) {
 	msg += fmt.Sprintf("Transaction ID: %v START\n", event.TransactionId)
 	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
 	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	if event.Info != "" {
+		msg += fmt.Sprintf("%v\n", sanitize(event.Info))
+	}
 	b.event <- MessageContent{Text: msg}
 }
 
