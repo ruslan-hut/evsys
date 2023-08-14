@@ -1,6 +1,7 @@
 ---
 
 is_debug: false
+time_zone: Europe/Madrid
 accept_unknown_tag: false
 accept_unknown_chp: false
 listen:

@@ -7,9 +7,10 @@ import (
 )
 
 type Config struct {
-	IsDebug          bool `yaml:"is_debug" env-default:"false"`
-	AcceptUnknownTag bool `yaml:"accept_unknown_tag" env-default:"false"`
-	AcceptUnknownChp bool `yaml:"accept_unknown_chp" env-default:"false"`
+	IsDebug          bool   `yaml:"is_debug" env-default:"false"`
+	TimeZone         string `yaml:"time_zone" env-default:"Europe/Madrid"`
+	AcceptUnknownTag bool   `yaml:"accept_unknown_tag" env-default:"false"`
+	AcceptUnknownChp bool   `yaml:"accept_unknown_chp" env-default:"false"`
 	Listen           struct {
 		Type     string `yaml:"type" env-default:"port"`
 		BindIP   string `yaml:"bind_ip" env-default:"0.0.0.0"`
@@ -49,11 +50,11 @@ type Config struct {
 var instance *Config
 var once sync.Once
 
-func GetConfig() (*Config, error) {
+func GetConfig(path *string) (*Config, error) {
 	var err error
 	once.Do(func() {
 		instance = &Config{}
-		if err = cleanenv.ReadConfig("config.yml", instance); err != nil {
+		if err = cleanenv.ReadConfig(*path, instance); err != nil {
 			desc, _ := cleanenv.GetDescription(instance, nil)
 			err = fmt.Errorf("%s; %s", err, desc)
 			instance = nil

@@ -147,19 +147,16 @@ func (cs *CentralSystem) Start() {
 	select {}
 }
 
-func NewCentralSystem(location *time.Location) (CentralSystem, error) {
-	cs := CentralSystem{
-		location: location,
-	}
-	var database internal.Database
+func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
+	cs := CentralSystem{}
 
-	conf, err := config.GetConfig()
+	log.Println("set time zone to " + conf.TimeZone)
+	location, err := time.LoadLocation("Europe/Madrid")
 	if err != nil {
-		return cs, fmt.Errorf("loading configuration failed: %s", err)
+		return cs, fmt.Errorf("time zone initialization failed: %s", err)
 	}
-	if conf.IsDebug {
-		log.Println("debug mode is enabled")
-	}
+	cs.location = location
+	var database internal.Database
 
 	if conf.Mongo.Enabled {
 		database, err = internal.NewMongoClient(conf)
