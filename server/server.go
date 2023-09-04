@@ -39,6 +39,7 @@ type WebSocket struct {
 	uniqueId       string
 	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
+	isClosed       bool
 }
 
 type Pool struct {
@@ -202,6 +203,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		send:           make(chan []byte, 256),
 		logger:         s.logger,
 		messageHandler: s.messageHandler,
+		isClosed:       false,
 	}
 	s.pool.register <- &ws
 
@@ -215,6 +217,9 @@ func (ws *WebSocket) readPump() {
 	}()
 	conn := ws.conn
 	for {
+		if ws.isClosed {
+			break
+		}
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
@@ -241,6 +246,9 @@ func (ws *WebSocket) writePump() {
 	}()
 	conn := ws.conn
 	for {
+		if ws.isClosed {
+			break
+		}
 		select {
 		case message, ok := <-ws.send:
 			if !ok {
@@ -261,7 +269,10 @@ func (ws *WebSocket) writePump() {
 // close closing the websocket connection
 func (ws *WebSocket) close() {
 	ws.pool.unregister <- ws
-	_ = ws.conn.Close()
+	if !ws.isClosed {
+		ws.isClosed = true
+		_ = ws.conn.Close()
+	}
 }
 
 func (s *Server) Start() error {
@@ -293,6 +304,9 @@ func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 	socket, ok := ws.(*WebSocket)
 	if !ok {
 		return fmt.Errorf("error casting websocket %s", ws.ID())
+	}
+	if socket.isClosed {
+		return fmt.Errorf("websocket %s is closed", ws.ID())
 	}
 	socket.send <- data
 	return nil
