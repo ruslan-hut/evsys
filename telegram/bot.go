@@ -3,6 +3,7 @@ package telegram
 import (
 	"evsys/internal"
 	"evsys/models"
+	"evsys/utility"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -212,9 +213,15 @@ func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
 
 func (b *TgBot) OnAlert(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector: %v `ALERT`\n", event.ChargePointId, event.ConnectorId)
-	msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
-	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
-	msg += fmt.Sprintf("ID Tag: %v\n\n", event.IdTag)
+	if event.TransactionId > 0 {
+		msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
+	}
+	if event.Username != "" {
+		msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
+	}
+	if event.IdTag != "" {
+		msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	}
 	msg += fmt.Sprintf("%v", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
 }
@@ -230,14 +237,22 @@ func (b *TgBot) composeStatusMessage() string {
 			msg += fmt.Sprintf("Error getting last status:\n `%v`", err)
 		} else {
 			for _, s := range status {
-				msg += fmt.Sprintf("*%v*: `%v`\n", s.ChargePointID, sanitize(s.Time))
-				//msg += fmt.Sprintf("`%v`\n", s.Status)
+				msg += fmt.Sprintf("*%v*: ", s.ChargePointID)
+				eventTime := utility.TimeAgo(s.EventTime)
+				if s.IsOnline {
+					msg += fmt.Sprintf("Online `%v`\n", sanitize(eventTime))
+				} else {
+					msg += fmt.Sprintf("*OFFLINE* `%v`\n", sanitize(eventTime))
+				}
 				for _, c := range s.Connectors {
-					msg += fmt.Sprintf("Connector %v: `%v`\n", c.ConnectorID, c.Status)
+					statusTime := utility.TimeAgo(c.StatusTime)
+					msg += fmt.Sprintf("Connector %v: `%v` %v\n", c.ConnectorID, c.Status, sanitize(statusTime))
 					if c.TransactionId > 0 {
 						msg += fmt.Sprintf("Transaction ID: %v\n", c.TransactionId)
 					}
-					//msg += fmt.Sprintf("%v\n", sanitize(c.Info))
+					if c.Info != "" {
+						msg += fmt.Sprintf("%v\n", sanitize(c.Info))
+					}
 				}
 				msg += "\n"
 			}

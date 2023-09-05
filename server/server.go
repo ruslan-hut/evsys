@@ -29,6 +29,7 @@ type Server struct {
 	pool           *Pool
 	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
+	watchdog       internal.StatusHandler
 }
 
 type WebSocket struct {
@@ -40,6 +41,7 @@ type WebSocket struct {
 	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
 	isClosed       bool
+	watchdog       internal.StatusHandler
 }
 
 type Pool struct {
@@ -151,6 +153,10 @@ func (s *Server) SetMessageHandler(handler func(ws ocpp.WebSocket, data []byte) 
 	s.messageHandler = handler
 }
 
+func (s *Server) SetWatchdog(handler internal.StatusHandler) {
+	s.watchdog = handler
+}
+
 func (s *Server) Register(router *httprouter.Router) {
 	router.GET(wsEndpoint, s.handleWsRequest)
 }
@@ -204,8 +210,10 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		logger:         s.logger,
 		messageHandler: s.messageHandler,
 		isClosed:       false,
+		watchdog:       s.watchdog,
 	}
 	s.pool.register <- &ws
+	s.watchdog.OnOnlineStatusChanged(id, true)
 
 	go ws.readPump()
 	go ws.writePump()
@@ -237,6 +245,7 @@ func (ws *WebSocket) readPump() {
 				continue
 			}
 		}
+		ws.watchdog.OnOnlineStatusChanged(ws.id, true)
 	}
 }
 
@@ -268,6 +277,7 @@ func (ws *WebSocket) writePump() {
 
 // close closing the websocket connection
 func (ws *WebSocket) close() {
+	ws.watchdog.OnOnlineStatusChanged(ws.id, false)
 	ws.pool.unregister <- ws
 	if !ws.isClosed {
 		ws.isClosed = true
@@ -324,4 +334,12 @@ func (s *Server) SendRequest(clientId string, request ocpp.Request) error {
 	}
 	s.pool.send <- envelope
 	return nil
+}
+
+func (s *Server) GetActiveConnections() map[string]bool {
+	connections := make(map[string]bool)
+	for client := range s.pool.clients {
+		connections[client.id] = !client.isClosed
+	}
+	return connections
 }

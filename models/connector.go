@@ -1,18 +1,22 @@
 package models
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 type Connector struct {
-	Id                   int    `json:"connector_id" bson:"connector_id"`
-	ChargePointId        string `json:"charge_point_id" bson:"charge_point_id"`
-	IsEnabled            bool   `json:"is_enabled" bson:"is_enabled"`
-	Status               string `json:"status" bson:"status"`
-	Info                 string `json:"info" bson:"info"`
-	VendorId             string `json:"vendor_id" bson:"vendor_id"`
-	ErrorCode            string `json:"error_code" bson:"error_code"`
-	Type                 string `json:"type" bson:"type"`
-	Power                int    `json:"power" bson:"power"`
-	CurrentTransactionId int    `json:"current_transaction_id" bson:"current_transaction_id"`
+	Id                   int       `json:"connector_id" bson:"connector_id"`
+	ChargePointId        string    `json:"charge_point_id" bson:"charge_point_id"`
+	IsEnabled            bool      `json:"is_enabled" bson:"is_enabled"`
+	Status               string    `json:"status" bson:"status"`
+	StatusTime           time.Time `json:"status_time" bson:"status_time"`
+	Info                 string    `json:"info" bson:"info"`
+	VendorId             string    `json:"vendor_id" bson:"vendor_id"`
+	ErrorCode            string    `json:"error_code" bson:"error_code"`
+	Type                 string    `json:"type" bson:"type"`
+	Power                int       `json:"power" bson:"power"`
+	CurrentTransactionId int       `json:"current_transaction_id" bson:"current_transaction_id"`
 	mutex                *sync.Mutex
 }
 

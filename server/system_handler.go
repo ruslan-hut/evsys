@@ -575,6 +575,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		connector.Lock()
 		defer connector.Unlock()
 		connector.Status = string(request.Status)
+		connector.StatusTime = request.Timestamp.Time
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
 		connector.ErrorCode = string(request.ErrorCode)
@@ -594,9 +595,10 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		defer h.mux.Unlock()
 		state.status = request.Status
 		state.model.Status = string(request.Status)
+		state.model.StatusTime = request.Timestamp.Time
 		state.model.Info = request.Info
 		if h.database != nil {
-			err := h.database.UpdateChargePoint(&state.model)
+			err := h.database.UpdateChargePointStatus(&state.model)
 			if err != nil {
 				h.logger.Error("update status", err)
 			}
@@ -711,4 +713,22 @@ func (h *SystemHandler) OnRemoteStopTransaction(chargePointId string, id string)
 	request := core.NewRemoteStopTransactionRequest(int(transactionId))
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("remote stop transaction: %v", transactionId))
 	return request, nil
+}
+
+func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
+	h.mux.Lock()
+	defer h.mux.Unlock()
+	err := h.database.UpdateOnlineStatus(id, isOnline)
+	if err != nil {
+		h.logger.Error("update online status", err)
+	}
+	if !isOnline {
+		eventMessage := &internal.EventMessage{
+			ChargePointId: id,
+			ConnectorId:   0,
+			Time:          h.getTime(),
+			Info:          "goes offline",
+		}
+		h.notifyEventListeners(internal.Alert, eventMessage)
+	}
 }

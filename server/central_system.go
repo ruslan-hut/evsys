@@ -191,13 +191,6 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 
 	cs.logger = logService
 
-	// websocket listener
-	wsServer := NewServer(conf, logService)
-	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
-	wsServer.SetMessageHandler(cs.handleIncomingMessage)
-
-	cs.server = wsServer
-
 	// billing
 	affleck := billing.NewAffleck()
 	affleck.SetDatabase(database)
@@ -221,6 +214,14 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 			log.Println("telegram bot is configured and enabled")
 		}
 	}
+
+	// websocket listener
+	wsServer := NewServer(conf, logService)
+	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
+	wsServer.SetMessageHandler(cs.handleIncomingMessage)
+	wsServer.SetWatchdog(systemHandler)
+
+	cs.server = wsServer
 
 	trigger := NewTrigger(wsServer, logService)
 	systemHandler.SetTrigger(trigger)

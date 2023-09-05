@@ -4,7 +4,6 @@ import (
 	"context"
 	"evsys/internal/config"
 	"evsys/models"
-	"evsys/utility"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -163,7 +162,41 @@ func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
 	defer m.disconnect(connection)
 
 	filter := bson.D{{"charge_point_id", chargePoint.Id}}
-	update := bson.M{"$set": chargePoint}
+	update := bson.M{"$set": bson.M{"serial_number": chargePoint.SerialNumber, "firmware_version": chargePoint.FirmwareVersion, "model": chargePoint.Model, "vendor": chargePoint.Vendor}}
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) UpdateChargePointStatus(chargePoint *models.ChargePoint) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"charge_point_id", chargePoint.Id}}
+	update := bson.M{"$set": bson.M{"status": chargePoint.Status, "status_time": chargePoint.StatusTime, "info": chargePoint.Info}}
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) UpdateOnlineStatus(chargePointId string, isOnline bool) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"charge_point_id", chargePointId}}
+	update := bson.M{"$set": bson.M{"is_online": isOnline, "event_time": time.Now()}}
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
@@ -505,13 +538,7 @@ func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) erro
 	return nil
 }
 
-type pipeResult struct {
-	ChargePointID string    `bson:"_id"`
-	Info          string    `bson:"info"`
-	Time          time.Time `bson:"time"`
-}
-
-// GetLastStatus returns the last status
+// GetLastStatus returns the last status for all points and connectors
 func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	connection, err := m.connect()
 	if err != nil {
@@ -520,29 +547,15 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	defer m.disconnect(connection)
 
 	var status []models.ChargePointStatus
-	pipeline := bson.A{
-		bson.D{
-			{"$group",
-				bson.D{
-					{"_id", "$charge_point_id"},
-					{"connectors",
-						bson.D{
-							{"$push",
-								bson.D{
-									{"connector_id", "$connector_id"},
-									{"info", "$info"},
-									{"status", "$status"},
-									{"transaction_id", "$current_transaction_id"},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		bson.D{{"$sort", bson.D{{"_id", 1}}}},
+	pipeline := mongo.Pipeline{
+		bson.D{{"$lookup", bson.D{
+			{"from", "connectors"},
+			{"localField", "charge_point_id"},
+			{"foreignField", "charge_point_id"},
+			{"as", "connectors"},
+		}}},
 	}
-	collection := connection.Database(m.database).Collection(collectionConnectors)
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate connectors states: %v", err)
@@ -550,71 +563,5 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	if err = cursor.All(m.ctx, &status); err != nil {
 		return nil, fmt.Errorf("decode connectors states: %v", err)
 	}
-
-	pipeline = bson.A{
-		bson.D{{"$match", bson.D{{"feature", "Heartbeat"}}}},
-		bson.D{{"$sort", bson.D{{"time", -1}}}},
-		bson.D{
-			{"$group",
-				bson.D{
-					{"_id", "$charge_point_id"},
-					//{"info", bson.D{{"$first", "$time"}}},
-					{"time", bson.D{{"$first", "$timestamp"}}},
-				},
-			},
-		},
-		bson.D{{"$sort", bson.D{{"_id", 1}}}},
-	}
-	var pipeResult []pipeResult
-	cLog := connection.Database(m.database).Collection(collectionLog)
-	cursor, err = cLog.Aggregate(m.ctx, pipeline)
-	if err != nil {
-		return nil, fmt.Errorf("aggregate Heartbeat: %v", err)
-	}
-	if err = cursor.All(m.ctx, &pipeResult); err != nil {
-		return nil, fmt.Errorf("decode Heartbeat: %v", err)
-	}
-
-	for _, heartbeat := range pipeResult {
-		for i, s := range status {
-			if s.ChargePointID == heartbeat.ChargePointID {
-				status[i].Time = utility.TimeAgo(heartbeat.Time)
-				break
-			}
-		}
-		//status = append(status, models.ChargePointStatus{
-		//	ChargePointID: heartbeat.ChargePointID,
-		//	Time:          heartbeat.Info,
-		//})
-	}
-
-	//pipeline = bson.A{
-	//	bson.D{{"$match", bson.D{{"feature", "StatusNotification"}}}},
-	//	bson.D{{"$sort", bson.D{{"time", -1}}}},
-	//	bson.D{
-	//		{"$group",
-	//			bson.D{
-	//				{"_id", "$charge_point_id"},
-	//				{"info", bson.D{{"$first", "$text"}}},
-	//			},
-	//		},
-	//	},
-	//}
-	//cursor, err = collection.Aggregate(m.ctx, pipeline)
-	//if err != nil {
-	//	return nil, fmt.Errorf("aggregate StatusNotification: %v", err)
-	//}
-	//if err = cursor.All(m.ctx, &pipeResult); err != nil {
-	//	return nil, fmt.Errorf("decode StatusNotification: %v", err)
-	//}
-	//
-	//for _, statusInfo := range pipeResult {
-	//	for i, s := range status {
-	//		if s.ChargePointID == statusInfo.ChargePointID {
-	//			status[i].Status = statusInfo.Info
-	//		}
-	//	}
-	//}
-
 	return status, nil
 }
