@@ -21,7 +21,9 @@ func TimeAgo(t time.Time) string {
 		return fmt.Sprintf("%d hours", minutes/60)
 	} else if minutes < 2880 {
 		return "1 day"
-	} else {
+	} else if minutes < 525600 {
 		return fmt.Sprintf("%d days", minutes/1440)
+	} else {
+		return "too long ago"
 	}
 }

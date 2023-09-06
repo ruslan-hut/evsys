@@ -244,7 +244,7 @@ func (b *TgBot) composeStatusMessage() string {
 					msg += "*OFFLINE*"
 				}
 				eventTime := utility.TimeAgo(s.EventTime)
-				msg += fmt.Sprintf(" `%v`\n", sanitize(eventTime))
+				msg += fmt.Sprintf(" %v\n", sanitize(eventTime))
 				for _, c := range s.Connectors {
 					statusTime := utility.TimeAgo(c.StatusTime)
 					msg += fmt.Sprintf("Connector %v: `%v` %v\n", c.ConnectorID, c.Status, sanitize(statusTime))
