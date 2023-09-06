@@ -238,19 +238,20 @@ func (b *TgBot) composeStatusMessage() string {
 		} else {
 			for _, s := range status {
 				msg += fmt.Sprintf("*%v*: ", s.ChargePointID)
-				eventTime := utility.TimeAgo(s.EventTime)
 				if s.IsOnline {
-					msg += fmt.Sprintf("Online `%v`\n", sanitize(eventTime))
+					msg += "Online"
 				} else {
-					msg += fmt.Sprintf("*OFFLINE* `%v`\n", sanitize(eventTime))
+					msg += "*OFFLINE*"
 				}
+				eventTime := utility.TimeAgo(s.EventTime)
+				msg += fmt.Sprintf(" `%v`\n", sanitize(eventTime))
 				for _, c := range s.Connectors {
 					statusTime := utility.TimeAgo(c.StatusTime)
 					msg += fmt.Sprintf("Connector %v: `%v` %v\n", c.ConnectorID, c.Status, sanitize(statusTime))
 					if c.TransactionId > 0 {
-						msg += fmt.Sprintf("Transaction ID: %v\n", c.TransactionId)
+						msg += fmt.Sprintf("Transaction: %v\n", c.TransactionId)
 					}
-					if c.Info != "" {
+					if c.Info != "" && c.Status != "Available" {
 						msg += fmt.Sprintf("%v\n", sanitize(c.Info))
 					}
 				}
@@ -258,6 +259,7 @@ func (b *TgBot) composeStatusMessage() string {
 			}
 		}
 	}
+	msg += "\n"
 	msg += fmt.Sprintf("Active subscriptions: %v", len(b.subscriptions))
 	return msg
 }
