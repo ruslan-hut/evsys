@@ -404,20 +404,39 @@ func (m *MongoDB) GetUnfinishedTransactions() ([]*models.Transaction, error) {
 		{
 			{"$lookup", bson.D{
 				{"from", "connectors"},
-				{"localField", "connector_id"},
-				{"foreignField", "connector_id"},
+				{"let", bson.D{
+					{"tc", "$connector_id"},
+					{"tp", "$charge_point_id"},
+				}},
+				{"pipeline", bson.A{
+					bson.D{{"$match", bson.D{
+						{"$expr", bson.D{
+							{"$and", bson.A{
+								bson.D{{"$eq", bson.A{"$charge_point_id", "$$tp"}}},
+								bson.D{{"$eq", bson.A{"$connector_id", "$$tc"}}},
+							}},
+						}},
+					}},
+					}},
+				},
 				{"as", "connector"},
+			},
+			},
+		},
+		{
+			{"$unwind", bson.D{{"path", "$connector"}}},
+		},
+		{
+			{"$match", bson.D{
+				{"$expr", bson.D{
+					{"$not", bson.D{
+						{"$eq", bson.A{"$transaction_id", "$connector.current_transaction_id"}},
+					}},
+				}},
 			}},
-		},
-		{
-			{"$unwind", "$connector"},
-		},
-		{
-			{"$match", bson.D{{"connector.status", "Available"}}},
 		},
 	}
 
-	//filter := bson.D{{"is_finished", false}}
 	collection := connection.Database(m.database).Collection(collectionTransactions)
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
