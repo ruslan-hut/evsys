@@ -390,6 +390,46 @@ func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
 	return &transaction, nil
 }
 
+func (m *MongoDB) GetUnfinishedTransactions() ([]*models.Transaction, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	pipeline := mongo.Pipeline{
+		{
+			{"$match", bson.D{{"is_finished", false}}},
+		},
+		{
+			{"$lookup", bson.D{
+				{"from", "connectors"},
+				{"localField", "connector_id"},
+				{"foreignField", "connector_id"},
+				{"as", "connector"},
+			}},
+		},
+		{
+			{"$unwind", "$connector"},
+		},
+		{
+			{"$match", bson.D{{"connector.status", "Available"}}},
+		},
+	}
+
+	//filter := bson.D{{"is_finished", false}}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var transactions []*models.Transaction
+	if err = cursor.All(m.ctx, &transactions); err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
 func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {
 	connection, err := m.connect()
 	if err != nil {

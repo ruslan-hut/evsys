@@ -165,6 +165,8 @@ func (h *SystemHandler) OnStart() error {
 		}
 	}
 
+	h.checkAndFinishTransactions()
+
 	return nil
 }
 
@@ -407,6 +409,9 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		return core.NewStopTransactionResponse(), nil
 	}
 
+	// stop requests for meter values
+	h.trigger.Unregister <- request.TransactionId
+
 	var err error
 	transaction, ok := state.transactions[request.TransactionId]
 	if !ok && h.database != nil {
@@ -420,8 +425,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
 		return core.NewStopTransactionResponse(), nil
 	}
-	// stop requests for meter values
-	h.trigger.Unregister <- transaction.Id
 
 	transaction.Init()
 	transaction.Lock()
@@ -730,6 +733,42 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 			ConnectorId:   0,
 			Time:          h.getTime(),
 			Info:          "goes offline",
+		}
+		h.notifyEventListeners(internal.Alert, eventMessage)
+	}
+}
+
+func (h *SystemHandler) checkAndFinishTransactions() {
+	if h.database == nil {
+		return
+	}
+
+	transactions, err := h.database.GetUnfinishedTransactions()
+	if err != nil {
+		h.logger.Error("get unfinished transactions", err)
+		return
+	}
+	for _, transaction := range transactions {
+		h.logger.Warn(fmt.Sprintf("transaction #%v is not finished", transaction.Id))
+		h.trigger.Unregister <- transaction.ConnectorId
+
+		transaction.Lock()
+		transaction.IsFinished = true
+		transaction.TimeStop = h.getTime()
+		transaction.Reason = "stopped by system"
+		err = h.database.UpdateTransaction(transaction)
+		if err != nil {
+			h.logger.Error("update transaction", err)
+		}
+		transaction.Unlock()
+
+		eventMessage := &internal.EventMessage{
+			ChargePointId: transaction.ChargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			TransactionId: transaction.Id,
+			Username:      transaction.Username,
+			Time:          h.getTime(),
+			Info:          "transaction was stopped by system",
 		}
 		h.notifyEventListeners(internal.Alert, eventMessage)
 	}

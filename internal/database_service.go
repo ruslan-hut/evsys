@@ -28,6 +28,7 @@ type Database interface {
 	GetTransaction(id int) (*models.Transaction, error)
 	AddTransaction(transaction *models.Transaction) error
 	UpdateTransaction(transaction *models.Transaction) error
+	GetUnfinishedTransactions() ([]*models.Transaction, error)
 
 	AddTransactionMeterValue(meterValue *models.TransactionMeter) error
 	DeleteTransactionMeterValues(transactionId int) error
