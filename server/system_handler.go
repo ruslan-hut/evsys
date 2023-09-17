@@ -749,7 +749,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		return
 	}
 	for _, transaction := range transactions {
-		h.logger.Warn(fmt.Sprintf("transaction #%v is not finished", transaction.Id))
+		h.logger.Warn(fmt.Sprintf("transaction #%v is not finished correctly", transaction.Id))
 		h.trigger.Unregister <- transaction.ConnectorId
 
 		transaction.Init()
@@ -757,11 +757,30 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		transaction.IsFinished = true
 		transaction.TimeStop = h.getTime()
 		transaction.Reason = "stopped by system"
+
+		err = h.billing.OnTransactionFinished(transaction)
+		if err != nil {
+			eventMessage := &internal.EventMessage{
+				ChargePointId: transaction.ChargePointId,
+				ConnectorId:   transaction.ConnectorId,
+				TransactionId: transaction.Id,
+				Username:      transaction.Username,
+				IdTag:         transaction.IdTag,
+				Info:          fmt.Sprintf("billing failed %v", err),
+			}
+			h.notifyEventListeners(internal.Alert, eventMessage)
+		}
+
 		err = h.database.UpdateTransaction(transaction)
 		if err != nil {
 			h.logger.Error("update transaction", err)
 		}
 		transaction.Unlock()
+
+		err = h.database.DeleteTransactionMeterValues(transaction.Id)
+		if err != nil {
+			h.logger.Error("delete transaction meter values", err)
+		}
 
 		eventMessage := &internal.EventMessage{
 			ChargePointId: transaction.ChargePointId,
