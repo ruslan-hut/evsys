@@ -752,6 +752,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		h.logger.Warn(fmt.Sprintf("transaction #%v is not finished", transaction.Id))
 		h.trigger.Unregister <- transaction.ConnectorId
 
+		transaction.Init()
 		transaction.Lock()
 		transaction.IsFinished = true
 		transaction.TimeStop = h.getTime()
