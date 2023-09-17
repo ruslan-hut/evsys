@@ -742,6 +742,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 	if h.database == nil {
 		return
 	}
+	//TODO add meter values for unfinished transactions
 
 	transactions, err := h.database.GetUnfinishedTransactions()
 	if err != nil {
