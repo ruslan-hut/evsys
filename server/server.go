@@ -10,6 +10,7 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"net"
 	"net/http"
+	"sync"
 )
 
 const (
@@ -42,6 +43,7 @@ type WebSocket struct {
 	logger         internal.LogHandler
 	isClosed       bool
 	watchdog       internal.StatusHandler
+	mutex          *sync.Mutex
 }
 
 type Pool struct {
@@ -211,6 +213,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		messageHandler: s.messageHandler,
 		isClosed:       false,
 		watchdog:       s.watchdog,
+		mutex:          &sync.Mutex{},
 	}
 	s.pool.register <- &ws
 	s.watchdog.OnOnlineStatusChanged(id, true)
@@ -245,7 +248,7 @@ func (ws *WebSocket) readPump() {
 				continue
 			}
 		}
-		ws.watchdog.OnOnlineStatusChanged(ws.id, true)
+		go ws.watchdog.OnOnlineStatusChanged(ws.id, true)
 	}
 }
 
@@ -277,7 +280,11 @@ func (ws *WebSocket) writePump() {
 
 // close closing the websocket connection
 func (ws *WebSocket) close() {
-	ws.watchdog.OnOnlineStatusChanged(ws.id, false)
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+
+	go ws.watchdog.OnOnlineStatusChanged(ws.id, false)
+
 	ws.pool.unregister <- ws
 	if !ws.isClosed {
 		ws.isClosed = true

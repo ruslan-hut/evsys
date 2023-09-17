@@ -97,6 +97,8 @@ func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *in
 			listener.OnAuthorize(eventData)
 		case internal.TransactionEvent:
 			listener.OnTransactionEvent(eventData)
+		case internal.Alert:
+			listener.OnAlert(eventData)
 		}
 	}
 }
