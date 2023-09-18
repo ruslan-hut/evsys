@@ -493,6 +493,25 @@ func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) 
 	return err
 }
 
+// ReadTransactionMeterValue read last transaction meter value sorted by timestamp
+func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", transactionId}}
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	opts := options.FindOne().SetSort(bson.D{{"timestamp", -1}})
+	var meterValue models.TransactionMeter
+	err = collection.FindOne(m.ctx, filter, opts).Decode(&meterValue)
+	if err != nil {
+		return nil, err
+	}
+	return &meterValue, nil
+}
+
 func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
 	connection, err := m.connect()
 	if err != nil {

@@ -763,6 +763,12 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		transaction.TimeStop = h.getTime()
 		transaction.Reason = "stopped by system"
 
+		meterValue, err := h.database.ReadTransactionMeterValue(transaction.Id)
+		if meterValue != nil {
+			transaction.MeterStop = meterValue.Value
+			transaction.TimeStop = meterValue.Time
+		}
+
 		err = h.billing.OnTransactionFinished(transaction)
 		if err != nil {
 			eventMessage := &internal.EventMessage{

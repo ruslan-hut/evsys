@@ -31,6 +31,7 @@ type Database interface {
 	GetUnfinishedTransactions() ([]*models.Transaction, error)
 
 	AddTransactionMeterValue(meterValue *models.TransactionMeter) error
+	ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error)
 	DeleteTransactionMeterValues(transactionId int) error
 
 	GetSubscriptions() ([]models.UserSubscription, error)
