@@ -54,7 +54,8 @@ func NewSystemHandler(location *time.Location) *SystemHandler {
 }
 
 func (h *SystemHandler) getTime() time.Time {
-	return time.Now().In(h.location)
+	t := time.Now().In(h.location)
+	return t.Truncate(time.Second)
 }
 
 func (h *SystemHandler) SetDatabase(database internal.Database) {
