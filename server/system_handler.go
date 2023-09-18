@@ -625,6 +625,10 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	}
 	h.notifyEventListeners(internal.StatusNotification, eventMessage)
 
+	if request.ConnectorId > 0 && request.Status == core.ChargePointStatusAvailable {
+		go h.checkAndFinishTransactions()
+	}
+
 	return core.NewStatusNotificationResponse(), nil
 }
 
@@ -750,7 +754,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		return
 	}
 	for _, transaction := range transactions {
-		h.logger.Warn(fmt.Sprintf("transaction #%v is not finished correctly", transaction.Id))
+		h.logger.Warn(fmt.Sprintf("transaction #%v was not finished correctly", transaction.Id))
 		h.trigger.Unregister <- transaction.ConnectorId
 
 		transaction.Init()
