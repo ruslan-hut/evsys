@@ -11,6 +11,7 @@ const (
 	Authorize          Event = "Authorize"
 	TransactionEvent   Event = "TransactionEvent"
 	Alert              Event = "Alert"
+	Information        Event = "Info"
 )
 
 type EventHandler interface {
@@ -20,6 +21,7 @@ type EventHandler interface {
 	OnAuthorize(event *EventMessage)
 	OnTransactionEvent(event *EventMessage)
 	OnAlert(event *EventMessage)
+	OnInfo(event *EventMessage)
 }
 
 type EventMessage struct {

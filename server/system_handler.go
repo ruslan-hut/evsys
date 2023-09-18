@@ -100,6 +100,8 @@ func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *in
 			listener.OnTransactionEvent(eventData)
 		case internal.Alert:
 			listener.OnAlert(eventData)
+		case internal.Information:
+			listener.OnInfo(eventData)
 		}
 	}
 }
@@ -110,12 +112,18 @@ func (h *SystemHandler) OnStart() error {
 		// load charge points from database
 		chargePoints, err := h.database.GetChargePoints()
 		if err != nil {
+			h.notifyEventListeners(internal.Information, &internal.EventMessage{
+				Info: fmt.Sprintf("Start failed; load charge points from database: %s", err),
+			})
 			return fmt.Errorf("failed to load charge points from database: %s", err)
 		}
 
 		// load connectors from database
 		connectors, err := h.database.GetConnectors()
 		if err != nil {
+			h.notifyEventListeners(internal.Information, &internal.EventMessage{
+				Info: fmt.Sprintf("Start failed; load connectors from database: %s", err),
+			})
 			return fmt.Errorf("failed to load connectors from database: %s", err)
 		}
 
@@ -167,6 +175,10 @@ func (h *SystemHandler) OnStart() error {
 	}
 
 	h.checkAndFinishTransactions()
+
+	h.notifyEventListeners(internal.Information, &internal.EventMessage{
+		Info: "Central system started",
+	})
 
 	return nil
 }

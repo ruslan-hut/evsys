@@ -212,7 +212,11 @@ func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
 }
 
 func (b *TgBot) OnAlert(event *internal.EventMessage) {
-	msg := fmt.Sprintf("*%v*: Connector: %v `ALERT`\n", event.ChargePointId, event.ConnectorId)
+	msg := fmt.Sprintf("*%v*:", event.ChargePointId)
+	if event.ConnectorId > 0 {
+		msg += fmt.Sprintf(" Connector: %v", event.ConnectorId)
+	}
+	msg += " `ALERT`\n"
 	if event.TransactionId > 0 {
 		msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
 	}
@@ -223,6 +227,11 @@ func (b *TgBot) OnAlert(event *internal.EventMessage) {
 		msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
 	}
 	msg += fmt.Sprintf("%v", sanitize(event.Info))
+	b.event <- MessageContent{Text: msg}
+}
+
+func (b *TgBot) OnInfo(event *internal.EventMessage) {
+	msg := fmt.Sprintf("%v", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
 }
 
