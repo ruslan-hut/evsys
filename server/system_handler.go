@@ -740,18 +740,29 @@ func (h *SystemHandler) OnRemoteStopTransaction(chargePointId string, id string)
 func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
-	err := h.database.UpdateOnlineStatus(id, isOnline)
+	chp, err := h.database.GetChargePoint(id)
+	if chp != nil {
+		// don't send event and update database if status is not changed and charge point is offline
+		if !isOnline && !chp.IsOnline {
+			return
+		}
+		if chp.IsOnline != isOnline {
+			info := fmt.Sprintf("goes online; was offline %v", utility.TimeAgo(chp.EventTime))
+			if !isOnline {
+				info = "goes OFFLINE"
+			}
+			eventMessage := &internal.EventMessage{
+				ChargePointId: id,
+				ConnectorId:   0,
+				Time:          h.getTime(),
+				Info:          info,
+			}
+			h.notifyEventListeners(internal.Alert, eventMessage)
+		}
+	}
+	err = h.database.UpdateOnlineStatus(id, isOnline)
 	if err != nil {
 		h.logger.Error("update online status", err)
-	}
-	if !isOnline {
-		eventMessage := &internal.EventMessage{
-			ChargePointId: id,
-			ConnectorId:   0,
-			Time:          h.getTime(),
-			Info:          "goes offline",
-		}
-		h.notifyEventListeners(internal.Alert, eventMessage)
 	}
 }
 
