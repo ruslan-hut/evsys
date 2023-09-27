@@ -8,6 +8,7 @@ import (
 type Affleck struct {
 	database internal.Database
 	logger   internal.LogHandler
+	payment  internal.PaymentService
 }
 
 func NewAffleck() *Affleck {
@@ -20,6 +21,10 @@ func (a *Affleck) SetDatabase(database internal.Database) {
 
 func (a *Affleck) SetLogger(logger internal.LogHandler) {
 	a.logger = logger
+}
+
+func (a *Affleck) SetPayment(payment internal.PaymentService) {
+	a.payment = payment
 }
 
 func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
@@ -43,6 +48,11 @@ func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
 	}
 
 	transaction.PaymentAmount = price
+
+	if a.payment != nil {
+		go a.payment.TransactionPayment(transaction)
+	}
+
 	return nil
 }
 
