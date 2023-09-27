@@ -747,7 +747,7 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 			return
 		}
 		if chp.IsOnline != isOnline {
-			info := fmt.Sprintf("goes online; was offline %v", utility.TimeAgo(chp.EventTime))
+			info := fmt.Sprintf("comes online; was offline %v", utility.TimeAgo(chp.EventTime))
 			if !isOnline {
 				info = "goes OFFLINE"
 			}
