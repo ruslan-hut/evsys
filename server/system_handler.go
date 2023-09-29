@@ -174,9 +174,9 @@ func (h *SystemHandler) OnStart() error {
 		}
 	}
 
-	h.checkAndFinishTransactions()
+	go h.checkAndFinishTransactions()
 
-	h.notifyEventListeners(internal.Information, &internal.EventMessage{
+	go h.notifyEventListeners(internal.Information, &internal.EventMessage{
 		Info: "Central system started",
 	})
 
@@ -326,7 +326,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 		TransactionId: 0,
 		Payload:       request,
 	}
-	h.notifyEventListeners(internal.Authorize, eventMessage)
+	go h.notifyEventListeners(internal.Authorize, eventMessage)
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", id, authStatus))
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
@@ -360,7 +360,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			Info:          "New transaction was requested, but connector is busy with another transaction.",
 			Payload:       request,
 		}
-		h.notifyEventListeners(internal.Alert, eventMessage)
+		go h.notifyEventListeners(internal.Alert, eventMessage)
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 	}
 
@@ -410,7 +410,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		Info:          transaction.IdTagNote,
 		Payload:       request,
 	}
-	h.notifyEventListeners(internal.TransactionStart, eventMessage)
+	go h.notifyEventListeners(internal.TransactionStart, eventMessage)
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("started transaction #%v for connector %v", transaction.Id, transaction.ConnectorId))
 	return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), transaction.Id), nil
@@ -490,7 +490,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 			Info:          fmt.Sprintf("billing failed %v", err),
 			Payload:       request,
 		}
-		h.notifyEventListeners(internal.Alert, eventMessage)
+		go h.notifyEventListeners(internal.Alert, eventMessage)
 	}
 
 	if h.database != nil {
@@ -518,7 +518,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		Info:          fmt.Sprintf("consumed %s kW; %v €", consumed, price),
 		Payload:       request,
 	}
-	h.notifyEventListeners(internal.TransactionStop, eventMessage)
+	go h.notifyEventListeners(internal.TransactionStop, eventMessage)
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %v %v", request.TransactionId, request.Reason))
 	return core.NewStopTransactionResponse(), nil
@@ -565,7 +565,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 								Info:          fmt.Sprintf("billing failed %v", err),
 								Payload:       request,
 							}
-							h.notifyEventListeners(internal.Alert, eventMessage)
+							go h.notifyEventListeners(internal.Alert, eventMessage)
 						}
 
 						err = h.database.AddTransactionMeterValue(transactionMeter)
@@ -635,7 +635,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		Info:          request.Info,
 		Payload:       request,
 	}
-	h.notifyEventListeners(internal.StatusNotification, eventMessage)
+	go h.notifyEventListeners(internal.StatusNotification, eventMessage)
 
 	if request.ConnectorId > 0 && request.Status == core.ChargePointStatusAvailable {
 		go h.checkAndFinishTransactions()
@@ -757,7 +757,7 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 				Time:          h.getTime(),
 				Info:          info,
 			}
-			h.notifyEventListeners(internal.Alert, eventMessage)
+			go h.notifyEventListeners(internal.Alert, eventMessage)
 		}
 	}
 	err = h.database.UpdateOnlineStatus(id, isOnline)
@@ -803,7 +803,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 				IdTag:         transaction.IdTag,
 				Info:          fmt.Sprintf("billing failed %v", err),
 			}
-			h.notifyEventListeners(internal.Alert, eventMessage)
+			go h.notifyEventListeners(internal.Alert, eventMessage)
 		}
 
 		err = h.database.UpdateTransaction(transaction)
@@ -825,6 +825,6 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 			Time:          h.getTime(),
 			Info:          "transaction was stopped by system",
 		}
-		h.notifyEventListeners(internal.Alert, eventMessage)
+		go h.notifyEventListeners(internal.Alert, eventMessage)
 	}
 }
