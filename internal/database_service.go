@@ -24,6 +24,12 @@ type Database interface {
 	AddUserTag(userTag *models.UserTag) error
 	GetActiveUserTags(chargePointId string, listVersion int) ([]models.UserTag, error)
 
+	GetPaymentMethod(userId string) (*models.PaymentMethod, error)
+
+	GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error)
+	GetLastOrder() (*models.PaymentOrder, error)
+	SavePaymentOrder(order *models.PaymentOrder) error
+
 	GetLastTransaction() (*models.Transaction, error)
 	GetTransaction(id int) (*models.Transaction, error)
 	AddTransaction(transaction *models.Transaction) error
@@ -31,6 +37,7 @@ type Database interface {
 	GetUnfinishedTransactions() ([]*models.Transaction, error)
 
 	AddTransactionMeterValue(meterValue *models.TransactionMeter) error
+	ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error)
 	DeleteTransactionMeterValues(transactionId int) error
 
 	GetSubscriptions() ([]models.UserSubscription, error)

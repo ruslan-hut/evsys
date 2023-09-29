@@ -196,6 +196,12 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	affleck.SetDatabase(database)
 	affleck.SetLogger(logService)
 
+	// payment service
+	payment := billing.NewRedSys()
+	payment.SetDatabase(database)
+	payment.SetLogger(logService)
+	affleck.SetPayment(payment)
+
 	// message handler
 	systemHandler := NewSystemHandler(location)
 	systemHandler.SetDatabase(database)

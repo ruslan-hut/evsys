@@ -13,13 +13,15 @@ import (
 )
 
 const (
-	collectionLog           = "sys_log"
-	collectionUserTags      = "user_tags"
-	collectionChargePoints  = "charge_points"
-	collectionConnectors    = "connectors"
-	collectionTransactions  = "transactions"
-	collectionSubscriptions = "subscriptions"
-	collectionMeterValues   = "meter_values"
+	collectionLog            = "sys_log"
+	collectionUserTags       = "user_tags"
+	collectionChargePoints   = "charge_points"
+	collectionConnectors     = "connectors"
+	collectionTransactions   = "transactions"
+	collectionSubscriptions  = "subscriptions"
+	collectionMeterValues    = "meter_values"
+	collectionPaymentMethods = "payment_methods"
+	collectionPaymentOrders  = "payment_orders"
 )
 
 type MongoDB struct {
@@ -493,6 +495,25 @@ func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) 
 	return err
 }
 
+// ReadTransactionMeterValue read last transaction meter value sorted by timestamp
+func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", transactionId}}
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	opts := options.FindOne().SetSort(bson.D{{"timestamp", -1}})
+	var meterValue models.TransactionMeter
+	err = collection.FindOne(m.ctx, filter, opts).Decode(&meterValue)
+	if err != nil {
+		return nil, err
+	}
+	return &meterValue, nil
+}
+
 func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
 	connection, err := m.connect()
 	if err != nil {
@@ -623,4 +644,74 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 		return nil, fmt.Errorf("decode connectors states: %v", err)
 	}
 	return status, nil
+}
+
+func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{"user_id", userId}, {"is_default", true}}
+	var paymentMethod *models.PaymentMethod
+	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
+	if paymentMethod == nil {
+		filter = bson.D{{"user_id", userId}}
+		err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return paymentMethod, nil
+}
+
+func (m *MongoDB) GetLastOrder() (*models.PaymentOrder, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
+	filter := bson.D{}
+	var order models.PaymentOrder
+	if err = collection.FindOne(m.ctx, filter, options.FindOne().SetSort(bson.D{{"time_opened", -1}})).Decode(&order); err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
+	filter := bson.D{{"transaction_id", transactionId}, {"is_completed", false}}
+	var order models.PaymentOrder
+	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+func (m *MongoDB) SavePaymentOrder(order *models.PaymentOrder) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"order", order.Order}}
+	set := bson.M{"$set": order}
+	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
+	_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
+	if err != nil {
+		return err
+	}
+	return nil
 }

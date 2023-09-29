@@ -54,7 +54,8 @@ func NewSystemHandler(location *time.Location) *SystemHandler {
 }
 
 func (h *SystemHandler) getTime() time.Time {
-	return time.Now().In(h.location)
+	t := time.Now().In(h.location)
+	return t.Truncate(time.Second)
 }
 
 func (h *SystemHandler) SetDatabase(database internal.Database) {
@@ -99,6 +100,8 @@ func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *in
 			listener.OnTransactionEvent(eventData)
 		case internal.Alert:
 			listener.OnAlert(eventData)
+		case internal.Information:
+			listener.OnInfo(eventData)
 		}
 	}
 }
@@ -109,12 +112,18 @@ func (h *SystemHandler) OnStart() error {
 		// load charge points from database
 		chargePoints, err := h.database.GetChargePoints()
 		if err != nil {
+			h.notifyEventListeners(internal.Information, &internal.EventMessage{
+				Info: fmt.Sprintf("Start failed; load charge points from database: %s", err),
+			})
 			return fmt.Errorf("failed to load charge points from database: %s", err)
 		}
 
 		// load connectors from database
 		connectors, err := h.database.GetConnectors()
 		if err != nil {
+			h.notifyEventListeners(internal.Information, &internal.EventMessage{
+				Info: fmt.Sprintf("Start failed; load connectors from database: %s", err),
+			})
 			return fmt.Errorf("failed to load connectors from database: %s", err)
 		}
 
@@ -166,6 +175,10 @@ func (h *SystemHandler) OnStart() error {
 	}
 
 	h.checkAndFinishTransactions()
+
+	h.notifyEventListeners(internal.Information, &internal.EventMessage{
+		Info: "Central system started",
+	})
 
 	return nil
 }
@@ -624,6 +637,10 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	}
 	h.notifyEventListeners(internal.StatusNotification, eventMessage)
 
+	if request.ConnectorId > 0 && request.Status == core.ChargePointStatusAvailable {
+		go h.checkAndFinishTransactions()
+	}
+
 	return core.NewStatusNotificationResponse(), nil
 }
 
@@ -723,18 +740,29 @@ func (h *SystemHandler) OnRemoteStopTransaction(chargePointId string, id string)
 func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
-	err := h.database.UpdateOnlineStatus(id, isOnline)
+	chp, err := h.database.GetChargePoint(id)
+	if chp != nil {
+		// don't send event and update database if status is not changed and charge point is offline
+		if !isOnline && !chp.IsOnline {
+			return
+		}
+		if chp.IsOnline != isOnline {
+			info := fmt.Sprintf("comes online; was offline %v", utility.TimeAgo(chp.EventTime))
+			if !isOnline {
+				info = "goes OFFLINE"
+			}
+			eventMessage := &internal.EventMessage{
+				ChargePointId: id,
+				ConnectorId:   0,
+				Time:          h.getTime(),
+				Info:          info,
+			}
+			h.notifyEventListeners(internal.Alert, eventMessage)
+		}
+	}
+	err = h.database.UpdateOnlineStatus(id, isOnline)
 	if err != nil {
 		h.logger.Error("update online status", err)
-	}
-	if !isOnline {
-		eventMessage := &internal.EventMessage{
-			ChargePointId: id,
-			ConnectorId:   0,
-			Time:          h.getTime(),
-			Info:          "goes offline",
-		}
-		h.notifyEventListeners(internal.Alert, eventMessage)
 	}
 }
 
@@ -750,7 +778,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		return
 	}
 	for _, transaction := range transactions {
-		h.logger.Warn(fmt.Sprintf("transaction #%v is not finished correctly", transaction.Id))
+		h.logger.Warn(fmt.Sprintf("transaction #%v was not finished correctly", transaction.Id))
 		h.trigger.Unregister <- transaction.ConnectorId
 
 		transaction.Init()
@@ -758,6 +786,12 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		transaction.IsFinished = true
 		transaction.TimeStop = h.getTime()
 		transaction.Reason = "stopped by system"
+
+		meterValue, err := h.database.ReadTransactionMeterValue(transaction.Id)
+		if meterValue != nil {
+			transaction.MeterStop = meterValue.Value
+			transaction.TimeStop = meterValue.Time
+		}
 
 		err = h.billing.OnTransactionFinished(transaction)
 		if err != nil {
