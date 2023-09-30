@@ -49,10 +49,6 @@ func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
 
 	transaction.PaymentAmount = price
 
-	if a.payment != nil {
-		go a.payment.TransactionPayment(transaction)
-	}
-
 	return nil
 }
 

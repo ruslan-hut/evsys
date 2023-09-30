@@ -30,6 +30,10 @@ mongo:
   user: admin
   password: pass
   database: evsys
+payment:
+  enabled: false
+  api_url: 127.0.0.1:5002
+  api_key: PAYMENT_API_KEY
 telegram:
   enabled: false
   telegram_api_key: YOUR_TELEGRAM_API_KEY

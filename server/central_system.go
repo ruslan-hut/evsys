@@ -196,18 +196,20 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	affleck.SetDatabase(database)
 	affleck.SetLogger(logService)
 
-	// payment service
-	payment := billing.NewRedSys()
-	payment.SetDatabase(database)
-	payment.SetLogger(logService)
-	affleck.SetPayment(payment)
-
-	// message handler
+	// system events handler
 	systemHandler := NewSystemHandler(location)
 	systemHandler.SetDatabase(database)
 	systemHandler.SetBillingService(affleck)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetParameters(conf.IsDebug, conf.AcceptUnknownTag, conf.AcceptUnknownChp)
+
+	// payment service
+	if conf.Payment.Enabled {
+		payment := billing.NewPaymentService(conf)
+		payment.SetDatabase(database)
+		payment.SetLogger(logService)
+		systemHandler.SetPaymentService(payment)
+	}
 
 	if conf.Telegram.Enabled {
 		telegramBot, err := telegram.NewBot(conf.Telegram.ApiKey)

@@ -33,6 +33,7 @@ type SystemHandler struct {
 	chargePoints   map[string]ChargePointState
 	database       internal.Database
 	billing        internal.BillingService
+	payment        internal.PaymentService
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
 	trigger        *Trigger
@@ -64,6 +65,10 @@ func (h *SystemHandler) SetDatabase(database internal.Database) {
 
 func (h *SystemHandler) SetBillingService(billing internal.BillingService) {
 	h.billing = billing
+}
+
+func (h *SystemHandler) SetPaymentService(payment internal.PaymentService) {
+	h.payment = payment
 }
 
 func (h *SystemHandler) SetParameters(debug bool, acceptTags bool, acceptPoints bool) {
@@ -505,6 +510,10 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 	}
 
+	if h.payment != nil {
+		go h.payment.TransactionPayment(transaction)
+	}
+
 	consumed := utility.IntToString(transaction.MeterStop - transaction.MeterStart)
 	price := utility.IntAsPrice(transaction.PaymentAmount)
 	eventMessage := &internal.EventMessage{
@@ -815,6 +824,10 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		err = h.database.DeleteTransactionMeterValues(transaction.Id)
 		if err != nil {
 			h.logger.Error("delete transaction meter values", err)
+		}
+
+		if h.payment != nil {
+			go h.payment.TransactionPayment(transaction)
 		}
 
 		eventMessage := &internal.EventMessage{
