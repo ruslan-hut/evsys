@@ -337,10 +337,10 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
-func (h *SystemHandler) OnHeartbeat(chargePointId string, request *core.HeartbeatRequest) (*core.HeartbeatResponse, error) {
+func (h *SystemHandler) OnHeartbeat(chargePointId string, _ *core.HeartbeatRequest) (*core.HeartbeatResponse, error) {
 	_, _ = h.getChargePoint(chargePointId)
 	t := h.getTime()
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", t))
+	//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", t))
 	return core.NewHeartbeatResponse(types.NewDateTime(t)), nil
 }
 
