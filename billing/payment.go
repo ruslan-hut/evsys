@@ -37,7 +37,7 @@ func (p *Payment) TransactionPayment(transaction *models.Transaction) {
 
 	req, err := http.NewRequest("GET", requestUrl, nil)
 	if err != nil {
-		p.logger.Error("payment: failed to create request: %s", err)
+		p.logger.Error("payment: create request", err)
 		return
 	}
 
@@ -46,13 +46,13 @@ func (p *Payment) TransactionPayment(transaction *models.Transaction) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		p.logger.Error("payment: failed to send request: %s", err)
+		p.logger.Error("payment: send request", err)
 		return
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			p.logger.Error("payment: failed to close response body: %s", err)
+			p.logger.Error("payment: close response body", err)
 		}
 	}(resp.Body)
 
