@@ -460,7 +460,11 @@ func (m *MongoDB) GetNotBilledTransactions() ([]*models.Transaction, error) {
 	}
 	defer m.disconnect(connection)
 
-	filter := bson.D{{"payment_billed", bson.D{{"$lt", "$payment_amount"}}}}
+	filter := bson.M{
+		"$where":         "this.payment_billed < this.payment_amount",
+		"is_finished":    true,
+		"payment_amount": bson.M{"$gt": 0},
+	}
 	collection := connection.Database(m.database).Collection(collectionTransactions)
 	cursor, err := collection.Find(m.ctx, filter)
 	if err != nil {

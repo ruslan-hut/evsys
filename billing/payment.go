@@ -40,7 +40,6 @@ func (p *Payment) SetLogger(logger internal.LogHandler) {
 func (p *Payment) TransactionPayment(transaction *models.Transaction) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	p.logger.Debug(fmt.Sprintf("payment: bill transaction %d", transaction.Id))
 
 	requestUrl := fmt.Sprintf("%s/pay/%d", p.apiUrl, transaction.Id)
 
@@ -67,7 +66,7 @@ func (p *Payment) TransactionPayment(transaction *models.Transaction) {
 
 	// analise response status
 	if resp.StatusCode != http.StatusOK {
-		p.logger.Warn(fmt.Sprintf("payment: response status: %v", resp.StatusCode))
+		p.logger.Warn(fmt.Sprintf("payment: transaction %v response status: %v", transaction.Id, resp.StatusCode))
 		return
 	}
 
@@ -89,7 +88,7 @@ func (p *Payment) checkTransactions() {
 
 // Start ticker with check transactions
 func (p *Payment) Start() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(3 * time.Minute)
 
 	go func() {
 		for range ticker.C {
