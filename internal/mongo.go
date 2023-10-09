@@ -451,6 +451,28 @@ func (m *MongoDB) GetUnfinishedTransactions() ([]*models.Transaction, error) {
 	return transactions, nil
 }
 
+// GetNotBilledTransactions get list of not billed transactions
+// where payment_billed is less than payment_amount
+func (m *MongoDB) GetNotBilledTransactions() ([]*models.Transaction, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"payment_billed", bson.D{{"$lt", "$payment_amount"}}}}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	var transactions []*models.Transaction
+	if err = cursor.All(m.ctx, &transactions); err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
 func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {
 	connection, err := m.connect()
 	if err != nil {

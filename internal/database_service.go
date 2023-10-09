@@ -35,6 +35,7 @@ type Database interface {
 	AddTransaction(transaction *models.Transaction) error
 	UpdateTransaction(transaction *models.Transaction) error
 	GetUnfinishedTransactions() ([]*models.Transaction, error)
+	GetNotBilledTransactions() ([]*models.Transaction, error)
 
 	AddTransactionMeterValue(meterValue *models.TransactionMeter) error
 	ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error)

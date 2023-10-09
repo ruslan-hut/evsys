@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"time"
 )
 
 type Payment struct {
@@ -14,13 +16,17 @@ type Payment struct {
 	logger   internal.LogHandler
 	apiUrl   string
 	apiKey   string
+	mutex    *sync.Mutex
 }
 
 func NewPaymentService(conf *config.Config) *Payment {
-	return &Payment{
+	payment := &Payment{
 		apiUrl: conf.Payment.ApiUrl,
 		apiKey: conf.Payment.ApiKey,
+		mutex:  &sync.Mutex{},
 	}
+	payment.Start()
+	return payment
 }
 
 func (p *Payment) SetDatabase(database internal.Database) {
@@ -32,6 +38,9 @@ func (p *Payment) SetLogger(logger internal.LogHandler) {
 }
 
 func (p *Payment) TransactionPayment(transaction *models.Transaction) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.logger.Debug(fmt.Sprintf("payment: bill transaction %d", transaction.Id))
 
 	requestUrl := fmt.Sprintf("%s/pay/%d", p.apiUrl, transaction.Id)
 
@@ -62,4 +71,29 @@ func (p *Payment) TransactionPayment(transaction *models.Transaction) {
 		return
 	}
 
+}
+
+func (p *Payment) checkTransactions() {
+	if p.database == nil {
+		return
+	}
+	transactions, err := p.database.GetNotBilledTransactions()
+	if err != nil {
+		p.logger.Error("payment: get not billed transactions", err)
+		return
+	}
+	for _, transaction := range transactions {
+		p.TransactionPayment(transaction)
+	}
+}
+
+// Start ticker with check transactions
+func (p *Payment) Start() {
+	ticker := time.NewTicker(5 * time.Minute)
+
+	go func() {
+		for range ticker.C {
+			p.checkTransactions()
+		}
+	}()
 }
