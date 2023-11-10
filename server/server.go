@@ -226,18 +226,12 @@ func (ws *WebSocket) readPump() {
 	defer func() {
 		ws.close()
 	}()
-	conn := ws.conn
 	for {
 		if ws.isClosed {
 			break
 		}
-		_, message, err := conn.ReadMessage()
+		message, err := ws.readMessage()
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
-				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
-			} else {
-				ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("read error: %s", err))
-			}
 			break
 		}
 		ws.logger.RawDataEvent("IN", string(message))
@@ -256,7 +250,6 @@ func (ws *WebSocket) writePump() {
 	defer func() {
 		ws.close()
 	}()
-	conn := ws.conn
 	for {
 		if ws.isClosed {
 			break
@@ -265,14 +258,12 @@ func (ws *WebSocket) writePump() {
 		case message, ok := <-ws.send:
 			if !ok {
 				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
-				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = ws.writeMessage(websocket.CloseMessage, []byte{})
 				break
 			}
 			ws.logger.RawDataEvent("OUT", string(message))
 
-			ws.mutex.Lock()
-			err := conn.WriteMessage(websocket.TextMessage, message)
-			ws.mutex.Unlock()
+			err := ws.writeMessage(websocket.TextMessage, message)
 
 			if err != nil {
 				ws.logger.Warn(fmt.Sprintf("socket %s: %s", ws.id, err))
@@ -280,6 +271,27 @@ func (ws *WebSocket) writePump() {
 			}
 		}
 	}
+}
+
+func (ws *WebSocket) readMessage() ([]byte, error) {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	_, message, err := ws.conn.ReadMessage()
+	if err != nil {
+		if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
+			//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
+		} else {
+			ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("read error: %s", err))
+		}
+		return nil, err
+	}
+	return message, err
+}
+
+func (ws *WebSocket) writeMessage(messageType int, message []byte) error {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	return ws.conn.WriteMessage(messageType, message)
 }
 
 // close closing the websocket connection
