@@ -266,13 +266,17 @@ func (ws *WebSocket) writePump() {
 			if !ok {
 				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
 				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
+				break
 			}
 			ws.logger.RawDataEvent("OUT", string(message))
+
+			ws.mutex.Lock()
 			err := conn.WriteMessage(websocket.TextMessage, message)
+			ws.mutex.Unlock()
+
 			if err != nil {
 				ws.logger.Warn(fmt.Sprintf("socket %s: %s", ws.id, err))
-				return
+				break
 			}
 		}
 	}
