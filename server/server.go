@@ -230,8 +230,13 @@ func (ws *WebSocket) readPump() {
 		if ws.isClosed {
 			break
 		}
-		message, err := ws.readMessage()
+		_, message, err := ws.conn.ReadMessage()
 		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
+				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
+			} else {
+				ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("read error: %s", err))
+			}
 			break
 		}
 		ws.logger.RawDataEvent("IN", string(message))
@@ -271,21 +276,6 @@ func (ws *WebSocket) writePump() {
 			}
 		}
 	}
-}
-
-func (ws *WebSocket) readMessage() ([]byte, error) {
-	ws.mutex.Lock()
-	defer ws.mutex.Unlock()
-	_, message, err := ws.conn.ReadMessage()
-	if err != nil {
-		if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
-			//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
-		} else {
-			ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("read error: %s", err))
-		}
-		return nil, err
-	}
-	return message, err
 }
 
 func (ws *WebSocket) writeMessage(messageType int, message []byte) error {
