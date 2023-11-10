@@ -285,7 +285,7 @@ func (ws *WebSocket) readMessage() ([]byte, error) {
 		}
 		return nil, err
 	}
-	return message, err
+	return message, nil
 }
 
 func (ws *WebSocket) writeMessage(messageType int, message []byte) error {
