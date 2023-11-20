@@ -399,6 +399,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		if h.billing != nil {
 			err = h.billing.OnTransactionStart(transaction)
 			if err != nil {
+				h.logger.Warn(fmt.Sprintf("billing failed on transaction start; %v", err))
 				eventMessage := &internal.EventMessage{
 					ChargePointId: chargePointId,
 					ConnectorId:   transaction.ConnectorId,
