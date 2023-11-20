@@ -3,6 +3,7 @@ package billing
 import (
 	"evsys/internal"
 	"evsys/models"
+	"fmt"
 )
 
 type Affleck struct {
@@ -27,12 +28,25 @@ func (a *Affleck) SetPayment(payment internal.PaymentService) {
 	a.payment = payment
 }
 
+// OnTransactionStart set payment plan for transaction
+func (a *Affleck) OnTransactionStart(transaction *models.Transaction) error {
+	if a.database != nil {
+		plan, _ := a.database.GetUserPaymentPlan(transaction.Username)
+		if plan != nil {
+			transaction.Plan = *plan
+		} else {
+			return fmt.Errorf("no payment plan for user %s", transaction.Username)
+		}
+	}
+	return nil
+}
+
 func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
 
 	// price in cents per hour
-	pricePerHour := 100
+	pricePerHour := transaction.Plan.PricePerHour
 	// price in cents per kW
-	pricePerKw := 30
+	pricePerKw := transaction.Plan.PricePerKwh
 
 	// consumed minutes, minus 1 hour for the first hour
 	duration := transaction.TimeStop.Sub(transaction.TimeStart).Minutes() - 60
@@ -55,9 +69,9 @@ func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
 func (a *Affleck) OnMeterValue(transaction *models.Transaction, meterValue *models.TransactionMeter) error {
 
 	// price in cents per hour
-	pricePerHour := 100
+	pricePerHour := transaction.Plan.PricePerHour
 	// price in cents per kW
-	pricePerKw := 30
+	pricePerKw := transaction.Plan.PricePerKwh
 
 	// consumed minutes, minus 1 hour for the first hour
 	duration := meterValue.Time.Sub(transaction.TimeStart).Minutes() - 60

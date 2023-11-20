@@ -396,6 +396,20 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			transaction.IdTagNote = idTag.Note
 			transaction.Username = idTag.Username
 		}
+		if h.billing != nil {
+			err = h.billing.OnTransactionStart(transaction)
+			if err != nil {
+				eventMessage := &internal.EventMessage{
+					ChargePointId: chargePointId,
+					ConnectorId:   transaction.ConnectorId,
+					Username:      transaction.Username,
+					IdTag:         transaction.IdTag,
+					Info:          fmt.Sprintf("billing failed on transaction start; %v", err),
+					Payload:       request,
+				}
+				go h.notifyEventListeners(internal.Alert, eventMessage)
+			}
+		}
 		err = h.database.AddTransaction(transaction)
 		if err != nil {
 			h.logger.Error("add transaction", err)

@@ -15,6 +15,7 @@ import (
 const (
 	collectionLog            = "sys_log"
 	collectionUserTags       = "user_tags"
+	collectionUsers          = "users"
 	collectionChargePoints   = "charge_points"
 	collectionConnectors     = "connectors"
 	collectionTransactions   = "transactions"
@@ -22,6 +23,7 @@ const (
 	collectionMeterValues    = "meter_values"
 	collectionPaymentMethods = "payment_methods"
 	collectionPaymentOrders  = "payment_orders"
+	collectionPaymentPlans   = "payment_plans"
 )
 
 type MongoDB struct {
@@ -292,6 +294,66 @@ func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector,
 		return nil, err
 	}
 	return &connector, nil
+}
+
+func (m *MongoDB) getUser(username string) (*models.User, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"username", username}}
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	var user models.User
+	err = collection.FindOne(m.ctx, filter).Decode(&user)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// GetUserPaymentPlan returns payment plan for user or default plan if user has no plan set
+func (m *MongoDB) GetUserPaymentPlan(username string) (*models.PaymentPlan, error) {
+	user, err := m.getUser(username)
+	if user == nil {
+		return nil, err
+	}
+	if user.PaymentPlan == "" {
+		return m.getDefaultPaymentPlan()
+	}
+
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"plan_id", user.PaymentPlan}, {"is_active", true}}
+	collection := connection.Database(m.database).Collection(collectionPaymentPlans)
+	var plan models.PaymentPlan
+	err = collection.FindOne(m.ctx, filter).Decode(&plan)
+	if err != nil {
+		return m.getDefaultPaymentPlan()
+	}
+	return &plan, nil
+}
+
+func (m *MongoDB) getDefaultPaymentPlan() (*models.PaymentPlan, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"is_default", true}, {"is_active", true}}
+	collection := connection.Database(m.database).Collection(collectionPaymentPlans)
+	var plan models.PaymentPlan
+	err = collection.FindOne(m.ctx, filter).Decode(&plan)
+	if err != nil {
+		return nil, err
+	}
+	return &plan, nil
 }
 
 func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {

@@ -25,6 +25,7 @@ type Database interface {
 	GetActiveUserTags(chargePointId string, listVersion int) ([]models.UserTag, error)
 
 	GetPaymentMethod(userId string) (*models.PaymentMethod, error)
+	GetUserPaymentPlan(username string) (*models.PaymentPlan, error)
 
 	GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error)
 	GetLastOrder() (*models.PaymentOrder, error)
