@@ -146,7 +146,7 @@ func ParseResultUnchecked(data []interface{}) (*CallResultUnchecked, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid message unique id in request")
 	}
-	payload := data[3].(string)
+	payload := data[2].(string)
 	callResult := CallResultUnchecked{
 		TypeId:   typeId,
 		UniqueId: uniqueId,
