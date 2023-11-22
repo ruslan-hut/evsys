@@ -192,6 +192,7 @@ func (cs *CentralSystem) Start() {
 
 func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	cs := CentralSystem{}
+	cs.pendingRequests = make(map[string]chan string)
 
 	log.Println("set time zone to " + conf.TimeZone)
 	location, err := time.LoadLocation("Europe/Madrid")
