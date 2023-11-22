@@ -30,6 +30,12 @@ type CallResult struct {
 	Payload  ocpp.Response
 }
 
+type CallResultUnchecked struct {
+	TypeId   CallType
+	UniqueId string
+	Payload  string
+}
+
 func (callResult *CallResult) MarshalJSON() ([]byte, error) {
 	fields := make([]interface{}, 3)
 	fields[0] = int(callResult.TypeId)
@@ -92,7 +98,7 @@ func MessageType(data []interface{}) (CallType, error) {
 	return typeId, nil
 }
 
-func ParseMessage(data []interface{}) (*CallRequest, error) {
+func ParseRequest(data []interface{}) (*CallRequest, error) {
 	typeId, err := MessageType(data)
 	if err != nil {
 		return nil, err
@@ -123,6 +129,30 @@ func ParseMessage(data []interface{}) (*CallRequest, error) {
 		Payload:  request,
 	}
 	return &callRequest, nil
+}
+
+func ParseResultUnchecked(data []interface{}) (*CallResultUnchecked, error) {
+	typeId, err := MessageType(data)
+	if err != nil {
+		return nil, err
+	}
+	if typeId != CallTypeResult {
+		return nil, fmt.Errorf("invalid message type id: %v", typeId)
+	}
+	if len(data) != 3 {
+		return nil, fmt.Errorf("unsupported result format; expected length: 3 elements")
+	}
+	uniqueId, ok := data[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid message unique id in request")
+	}
+	payload := data[3].(string)
+	callResult := CallResultUnchecked{
+		TypeId:   typeId,
+		UniqueId: uniqueId,
+		Payload:  payload,
+	}
+	return &callResult, nil
 }
 
 func getMessageType(action string) (requestType reflect.Type, err error) {

@@ -15,6 +15,7 @@ import (
 	"evsys/utility"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 )
 
@@ -28,6 +29,14 @@ type CentralSystem struct {
 	localAuth         localauth.SystemHandler
 	location          *time.Location
 	supportedProtocol []string
+	pendingRequests   map[string]chan string
+}
+
+type CentralSystemCommand struct {
+	ChargePointId string `json:"charge_point_id"`
+	ConnectorId   int    `json:"connector_id"`
+	FeatureName   string `json:"feature_name"`
+	Payload       string `json:"payload"`
 }
 
 func (cs *CentralSystem) SetCoreHandler(handler *SystemHandler) {
@@ -60,12 +69,18 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 		cs.logger.Warn(fmt.Sprintf("error message received from charge point %s: %s", chargePointId, string(data)))
 		return nil
 	}
-	if callType != CallTypeRequest {
-		// silent exit, we only handle requests
-		//cs.logger.Warn(fmt.Sprintf("charge point %s response: %s", chargePointId, string(data)))
+	if callType == CallTypeResult {
+		result, err := ParseResultUnchecked(message)
+		if err != nil {
+			cs.logger.Warn(fmt.Sprintf("invalid message received from charge point %s: %s", chargePointId, string(data)))
+			return nil
+		}
+		if responseChan, ok := cs.pendingRequests[result.UniqueId]; ok {
+			responseChan <- result.Payload
+		}
 		return nil
 	}
-	callRequest, err := ParseMessage(message)
+	callRequest, err := ParseRequest(message)
 	if err != nil {
 		return err
 	}
@@ -106,31 +121,56 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	return err
 }
 
-func (cs *CentralSystem) handleApiRequest(chargePointId string, connectorId int, feature string, payload string) error {
-	if feature == "" {
+func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command CentralSystemCommand) error {
+	if command.FeatureName == "" {
 		return fmt.Errorf("feature name is empty")
 	}
 	var request ocpp.Request
 	var err error
-	switch feature {
+	switch command.FeatureName {
 	case remotetrigger.TriggerMessageFeatureName:
-		request, err = cs.remoteTrigger.OnTriggerMessage(chargePointId, connectorId, payload)
+		request, err = cs.remoteTrigger.OnTriggerMessage(command.ChargePointId, command.ConnectorId, command.Payload)
 	case localauth.SendLocalListFeatureName:
-		request, err = cs.localAuth.OnSendLocalList(chargePointId)
+		request, err = cs.localAuth.OnSendLocalList(command.ChargePointId)
 	case core.RemoteStartTransactionFeatureName:
-		request, err = cs.coreHandler.OnRemoteStartTransaction(chargePointId, connectorId, payload)
+		request, err = cs.coreHandler.OnRemoteStartTransaction(command.ChargePointId, command.ConnectorId, command.Payload)
 	case core.RemoteStopTransactionFeatureName:
-		request, err = cs.coreHandler.OnRemoteStopTransaction(chargePointId, payload)
+		request, err = cs.coreHandler.OnRemoteStopTransaction(command.ChargePointId, command.Payload)
 	case core.GetConfigurationFeatureName:
-		request, err = cs.coreHandler.OnGetConfiguration(chargePointId, payload)
+		request, err = cs.coreHandler.OnGetConfiguration(command.ChargePointId, command.Payload)
 	default:
-		err = fmt.Errorf("feature not supported: %s", feature)
+		err = fmt.Errorf("feature not supported: %s", command.FeatureName)
 	}
 	if err != nil {
 		return err
 	}
-	err = cs.server.SendRequest(chargePointId, request)
-	return err
+
+	id, err := cs.server.SendRequest(command.ChargePointId, request)
+	if err != nil {
+		return err
+	}
+	response := make(chan string)
+	cs.pendingRequests[id] = response
+
+	select {
+	case payload := <-response:
+		//w.Header().Add("Access-Control-Allow-Origin", "*")
+		if payload == "" {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.Header().Add("Content-Type", "application/json; charset=utf-8")
+			_, err := w.Write([]byte(payload))
+			if err != nil {
+				cs.logger.Error("send api response", err)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		cs.logger.Warn(fmt.Sprintf("timeout waiting for response from %s", command.ChargePointId))
+		w.WriteHeader(http.StatusNoContent)
+	}
+	delete(cs.pendingRequests, id)
+
+	return nil
 }
 
 func (cs *CentralSystem) Start() {

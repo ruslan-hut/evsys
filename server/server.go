@@ -335,18 +335,18 @@ func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 	return nil
 }
 
-// SendRequest send request to the websocket
-func (s *Server) SendRequest(clientId string, request ocpp.Request) error {
+// SendRequest send request to the websocket and return the unique id of the request
+func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, error) {
 	callRequest, err := CreateCallRequest(request)
 	if err != nil {
-		return fmt.Errorf("error creating call request: %s", err)
+		return "", fmt.Errorf("error creating call request: %s", err)
 	}
 	envelope := &envelope{
 		recipient: clientId,
 		message:   callRequest,
 	}
 	s.pool.send <- envelope
-	return nil
+	return callRequest.UniqueId, nil
 }
 
 func (s *Server) GetActiveConnections() map[string]bool {

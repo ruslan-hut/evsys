@@ -19,15 +19,8 @@ type SupportedFeature string
 type Api struct {
 	conf           *config.Config
 	httpServer     *http.Server
-	requestHandler func(chargePointId string, connectorId int, featureName string, payload string) error
+	requestHandler func(w http.ResponseWriter, command CentralSystemCommand) error
 	logger         internal.LogHandler
-}
-
-type command struct {
-	ChargePointId string `json:"charge_point_id"`
-	ConnectorId   int    `json:"connector_id"`
-	FeatureName   string `json:"feature_name"`
-	Payload       string `json:"payload"`
 }
 
 func NewServerApi(conf *config.Config, logger internal.LogHandler) *Api {
@@ -60,7 +53,7 @@ func (s *Api) Start() error {
 	return err
 }
 
-func (s *Api) SetRequestHandler(handler func(chargePointId string, connectorId int, featureName string, payload string) error) {
+func (s *Api) SetRequestHandler(handler func(w http.ResponseWriter, command CentralSystemCommand) error) {
 	s.requestHandler = handler
 }
 
@@ -83,7 +76,7 @@ func (s *Api) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// cast body to command
-	var cmd command
+	var cmd CentralSystemCommand
 	err = json.Unmarshal(body, &cmd)
 	if err != nil {
 		s.logger.Warn(fmt.Sprintf("api: error parsing command from %s: %s", r.RemoteAddr, err))
@@ -91,11 +84,19 @@ func (s *Api) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send command to websocket
-	err = s.requestHandler(cmd.ChargePointId, cmd.ConnectorId, cmd.FeatureName, cmd.Payload)
+	err = s.requestHandler(w, cmd)
 	if err != nil {
 		s.logger.Warn(fmt.Sprintf("api: error sending command %s to %s: %s", cmd.FeatureName, cmd.ChargePointId, err))
 		w.WriteHeader(http.StatusInternalServerError)
-		return
 	}
-	w.WriteHeader(http.StatusOK)
+	//w.Header().Add("Access-Control-Allow-Origin", "*")
+	//w.Header().Add("Content-Type", "application/json; charset=utf-8")
+	//if payload == "" {
+	//	w.WriteHeader(http.StatusNoContent)
+	//} else {
+	//	_, err := w.Write([]byte(payload))
+	//	if err != nil {
+	//		s.logger.Error("send api response", err)
+	//	}
+	//}
 }

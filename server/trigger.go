@@ -44,7 +44,7 @@ func (t *Trigger) triggerMeterValues() {
 		case <-ticker.C:
 			for _, connector := range t.connectors {
 				request := remotetrigger.NewTriggerMessageRequest(remotetrigger.MessageTrigger(message), connector.Id)
-				err := t.server.SendRequest(connector.ChargePointId, request)
+				_, err := t.server.SendRequest(connector.ChargePointId, request)
 				if err != nil {
 					t.logger.Error("send request:", err)
 				}
