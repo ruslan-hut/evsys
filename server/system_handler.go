@@ -761,6 +761,20 @@ func (h *SystemHandler) OnRemoteStopTransaction(chargePointId string, id string)
 	return request, nil
 }
 
+func (h *SystemHandler) OnGetConfiguration(chargePointId string, key string) (*core.GetConfigurationRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	keys := make([]string, 0)
+	if key != "" {
+		keys = append(keys, key)
+	}
+	request := core.NewGetConfigurationRequest(keys)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get configuration: %v", request.Key))
+	return request, nil
+}
+
 func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	h.mux.Lock()
 	defer h.mux.Unlock()

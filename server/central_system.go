@@ -62,6 +62,7 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	}
 	if callType != CallTypeRequest {
 		// silent exit, we only handle requests
+		cs.logger.Warn(fmt.Sprintf("charge point %s response: %s", chargePointId, string(data)))
 		return nil
 	}
 	callRequest, err := ParseMessage(message)
@@ -120,6 +121,8 @@ func (cs *CentralSystem) handleApiRequest(chargePointId string, connectorId int,
 		request, err = cs.coreHandler.OnRemoteStartTransaction(chargePointId, connectorId, payload)
 	case core.RemoteStopTransactionFeatureName:
 		request, err = cs.coreHandler.OnRemoteStopTransaction(chargePointId, payload)
+	case core.GetConfigurationFeatureName:
+		request, err = cs.coreHandler.OnGetConfiguration(chargePointId, payload)
 	default:
 		err = fmt.Errorf("feature not supported: %s", feature)
 	}
