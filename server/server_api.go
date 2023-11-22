@@ -23,6 +23,11 @@ type Api struct {
 	logger         internal.LogHandler
 }
 
+type apiResponse struct {
+	Status string `json:"status"`
+	Error  string `json:"error"`
+}
+
 func NewServerApi(conf *config.Config, logger internal.LogHandler) *Api {
 	server := Api{
 		conf:   conf,
@@ -86,17 +91,21 @@ func (s *Api) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// send command to websocket
 	err = s.requestHandler(w, cmd)
 	if err != nil {
-		s.logger.Warn(fmt.Sprintf("api: error sending command %s to %s: %s", cmd.FeatureName, cmd.ChargePointId, err))
-		w.WriteHeader(http.StatusInternalServerError)
+		rs := apiResponse{
+			Status: "error",
+			Error:  err.Error(),
+		}
+		payload, err := json.Marshal(rs)
+		if err != nil {
+			s.logger.Warn(fmt.Sprintf("api: error encoding response: %s", err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		//w.Header().Add("Content-Type", "application/json; charset=utf-8")
+		_, err = w.Write(payload)
+		if err != nil {
+			s.logger.Error("api: send response", err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 	}
-	//w.Header().Add("Access-Control-Allow-Origin", "*")
-	//w.Header().Add("Content-Type", "application/json; charset=utf-8")
-	//if payload == "" {
-	//	w.WriteHeader(http.StatusNoContent)
-	//} else {
-	//	_, err := w.Write([]byte(payload))
-	//	if err != nil {
-	//		s.logger.Error("send api response", err)
-	//	}
-	//}
 }

@@ -109,6 +109,15 @@ func (pool *Pool) Start() {
 	}
 }
 
+func (pool *Pool) recipientAvailable(clientId string) bool {
+	for client := range pool.clients {
+		if client.id == clientId {
+			return true
+		}
+	}
+	return false
+}
+
 func (ws *WebSocket) ID() string {
 	return ws.id
 }
@@ -337,6 +346,9 @@ func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 
 // SendRequest send request to the websocket and return the unique id of the request
 func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, error) {
+	if !s.pool.recipientAvailable(clientId) {
+		return "", fmt.Errorf("%s is not available", clientId)
+	}
 	callRequest, err := CreateCallRequest(request)
 	if err != nil {
 		return "", fmt.Errorf("error creating call request: %s", err)

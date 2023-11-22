@@ -154,14 +154,13 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 
 	select {
 	case payload := <-response:
-		//w.Header().Add("Access-Control-Allow-Origin", "*")
 		if payload == "" {
 			w.WriteHeader(http.StatusNoContent)
 		} else {
 			w.Header().Add("Content-Type", "application/json; charset=utf-8")
 			_, err := w.Write([]byte(payload))
 			if err != nil {
-				cs.logger.Error("send api response", err)
+				cs.logger.Error("cs command send response", err)
 			}
 		}
 	case <-time.After(10 * time.Second):
