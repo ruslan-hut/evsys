@@ -146,11 +146,14 @@ func ParseResultUnchecked(data []interface{}) (*CallResultUnchecked, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid message unique id in request")
 	}
-	payload := data[2].(string)
+	payload, err := json.Marshal(data[2])
+	if err != nil {
+		return nil, fmt.Errorf("invalid message payload in request")
+	}
 	callResult := CallResultUnchecked{
 		TypeId:   typeId,
 		UniqueId: uniqueId,
-		Payload:  payload,
+		Payload:  string(payload),
 	}
 	return &callResult, nil
 }
