@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"evsys/internal"
 	"evsys/models"
 	"evsys/ocpp/core"
@@ -778,6 +779,20 @@ func (h *SystemHandler) OnGetConfiguration(chargePointId string, key string) (*c
 	request := core.NewGetConfigurationRequest(keys)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get configuration: %v", request.Key))
 	return request, nil
+}
+
+func (h *SystemHandler) OnChangeConfiguration(chargePointId string, payload string) (*core.ChangeConfigurationRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	var request core.ChangeConfigurationRequest
+	err := json.Unmarshal([]byte(payload), &request)
+	if err != nil {
+		return nil, fmt.Errorf("invalid payload")
+	}
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("change configuration: %v=%v", request.Key, request.Value))
+	return &request, nil
 }
 
 func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {

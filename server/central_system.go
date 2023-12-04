@@ -138,6 +138,8 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		request, err = cs.coreHandler.OnRemoteStopTransaction(command.ChargePointId, command.Payload)
 	case core.GetConfigurationFeatureName:
 		request, err = cs.coreHandler.OnGetConfiguration(command.ChargePointId, command.Payload)
+	case core.ChangeConfigurationFeatureName:
+		request, err = cs.coreHandler.OnChangeConfiguration(command.ChargePointId, command.Payload)
 	default:
 		err = fmt.Errorf("feature not supported: %s", command.FeatureName)
 	}
