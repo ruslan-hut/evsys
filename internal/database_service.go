@@ -22,6 +22,7 @@ type Database interface {
 
 	GetUserTag(idTag string) (*models.UserTag, error)
 	AddUserTag(userTag *models.UserTag) error
+	UpdateTagLastSeen(userTag *models.UserTag) error
 	GetActiveUserTags(chargePointId string, listVersion int) ([]models.UserTag, error)
 
 	GetPaymentMethod(userId string) (*models.PaymentMethod, error)

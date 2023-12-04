@@ -303,9 +303,10 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			// add user tag if not found, new tag is enabled if acceptTags mode is on
 			if userTag == nil {
 				userTag = &models.UserTag{
-					IdTag:     id,
-					IsEnabled: h.acceptTags,
-					Note:      fmt.Sprintf("added at %s", time.Now().Format("2006-01-02 15:04:05")),
+					IdTag:          id,
+					IsEnabled:      h.acceptTags,
+					Note:           fmt.Sprintf("added by %s", chargePointId),
+					DateRegistered: time.Now(),
 				}
 				err = h.database.AddUserTag(userTag)
 				if err != nil {
@@ -317,6 +318,10 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			}
 			username = userTag.Username
 			info = userTag.Note
+			// tags with usernames are updated by API backend
+			if username == "" {
+				_ = h.database.UpdateTagLastSeen(userTag)
+			}
 		}
 	}
 
