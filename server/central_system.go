@@ -9,6 +9,7 @@ import (
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/localauth"
 	"evsys/ocpp/remotetrigger"
+	"evsys/ocpp/smartcharging"
 	"evsys/pusher"
 	"evsys/telegram"
 	"evsys/types"
@@ -142,6 +143,8 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		request, err = cs.coreHandler.OnChangeConfiguration(command.ChargePointId, command.Payload)
 	case core.ResetFeatureName:
 		request, err = cs.coreHandler.OnReset(command.ChargePointId, command.Payload)
+	case smartcharging.SetChargingProfileFeatureName:
+		request, err = cs.coreHandler.OnSetChargingProfile(command.ChargePointId, command.ConnectorId, command.Payload)
 	default:
 		err = fmt.Errorf("feature not supported: %s", command.FeatureName)
 	}

@@ -8,6 +8,7 @@ import (
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/localauth"
 	"evsys/ocpp/remotetrigger"
+	"evsys/ocpp/smartcharging"
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
@@ -793,6 +794,21 @@ func (h *SystemHandler) OnChangeConfiguration(chargePointId string, payload stri
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("change configuration: %v=%v", request.Key, request.Value))
 	return &request, nil
+}
+
+func (h *SystemHandler) OnSetChargingProfile(chargePointId string, connectorId int, payload string) (*smartcharging.SetChargingProfileRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	var profile types.ChargingProfile
+	err := json.Unmarshal([]byte(payload), &profile)
+	if err != nil {
+		return nil, fmt.Errorf("invalid payload")
+	}
+	request := smartcharging.NewSetChargingProfileRequest(connectorId, &profile)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("set charge profile: connector %d; lvl=%v", connectorId, request.ChargingProfile.StackLevel))
+	return request, nil
 }
 
 func (h *SystemHandler) OnReset(chargePointId string, payload string) (*core.ResetRequest, error) {
