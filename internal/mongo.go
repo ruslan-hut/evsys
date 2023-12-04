@@ -416,7 +416,12 @@ func (m *MongoDB) GetActiveUserTags(chargePointId string, listVersion int) ([]mo
 	}
 	defer m.disconnect(connection)
 
-	filter := bson.D{{"is_enabled", true}}
+	filter := bson.D{
+		{"$and", bson.A{
+			bson.D{{"is_active", true}},
+			bson.D{{"local", true}},
+		}},
+	}
 	collection := connection.Database(m.database).Collection(collectionUserTags)
 	cursor, err := collection.Find(m.ctx, filter)
 	if err != nil {
