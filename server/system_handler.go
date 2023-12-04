@@ -795,6 +795,16 @@ func (h *SystemHandler) OnChangeConfiguration(chargePointId string, payload stri
 	return &request, nil
 }
 
+func (h *SystemHandler) OnReset(chargePointId string, payload string) (*core.ResetRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	request := core.NewResetRequest(core.ResetType(payload))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("reset: %v", request.Type))
+	return request, nil
+}
+
 func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
