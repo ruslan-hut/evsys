@@ -320,11 +320,6 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			}
 			username = userTag.Username
 			info = userTag.Note
-			// tags with usernames are updated by API backend
-			if username == "" {
-				h.logger.Warn(fmt.Sprintf("user tag %s has no username", id))
-				_ = h.database.UpdateTagLastSeen(userTag)
-			}
 		}
 	}
 
@@ -403,6 +398,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		} else {
 			transaction.IdTagNote = idTag.Note
 			transaction.Username = idTag.Username
+			_ = h.database.UpdateTagLastSeen(idTag)
 		}
 		if h.billing != nil {
 			err = h.billing.OnTransactionStart(transaction)
