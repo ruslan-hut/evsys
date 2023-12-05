@@ -690,6 +690,10 @@ func (m *MongoDB) AddSubscription(subscription *models.UserSubscription) error {
 	}
 	defer m.disconnect(connection)
 
+	if subscription.UserID == 0 || subscription.User == "" {
+		return fmt.Errorf("wrong user id")
+	}
+
 	collection := connection.Database(m.database).Collection(collectionSubscriptions)
 	_, err = collection.InsertOne(m.ctx, subscription)
 	return err
