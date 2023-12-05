@@ -807,7 +807,21 @@ func (h *SystemHandler) OnSetChargingProfile(chargePointId string, connectorId i
 		return nil, fmt.Errorf("invalid payload")
 	}
 	request := smartcharging.NewSetChargingProfileRequest(connectorId, &profile)
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("set charge profile: connector %d; lvl=%v", connectorId, request.ChargingProfile.StackLevel))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("set charge profile: connector %d; %v", connectorId, request.ChargingProfile.ChargingProfilePurpose))
+	return request, nil
+}
+
+func (h *SystemHandler) OnGetCompositeSchedule(chargePointId string, connectorId int, payload string) (*smartcharging.GetCompositeScheduleRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	duration, err := strconv.Atoi(payload)
+	if err != nil {
+		return nil, fmt.Errorf("invalid payload")
+	}
+	request := smartcharging.NewGetCompositeScheduleRequest(connectorId, duration)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get schedule: connector %v; duration %v", request.ConnectorId, request.Duration))
 	return request, nil
 }
 
