@@ -322,6 +322,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			info = userTag.Note
 			// tags with usernames are updated by API backend
 			if username == "" {
+				h.logger.Warn(fmt.Sprintf("user tag %s has no username", id))
 				_ = h.database.UpdateTagLastSeen(userTag)
 			}
 		}
