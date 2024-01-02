@@ -118,6 +118,10 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 		return err
 	}
 
+	if ws.IsClosed() {
+		cs.logger.FeatureEvent(action, chargePointId, "websocket closed, response not sent")
+		return nil
+	}
 	err = cs.server.SendResponse(ws, confirmation)
 	return err
 }

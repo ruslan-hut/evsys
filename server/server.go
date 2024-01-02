@@ -130,6 +130,10 @@ func (ws *WebSocket) SetUniqueId(uniqueId string) {
 	ws.uniqueId = uniqueId
 }
 
+func (ws *WebSocket) IsClosed() bool {
+	return ws.isClosed
+}
+
 func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
 	// initialize and start the pool for sending and receiving messages
 	pool := NewPool(logger)
