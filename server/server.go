@@ -19,8 +19,19 @@ const (
 )
 
 type envelope struct {
-	recipient string
-	message   CallRequest
+	recipient   string
+	callRequest *CallRequest
+	callResult  *CallResult
+}
+
+func (e *envelope) getMessageData() ([]byte, error) {
+	if e.callRequest != nil {
+		return e.callRequest.MarshalJSON()
+	}
+	if e.callResult != nil {
+		return e.callResult.MarshalJSON()
+	}
+	return nil, fmt.Errorf("envelope has no message data")
 }
 
 type Server struct {
@@ -87,11 +98,10 @@ func (pool *Pool) Start() {
 					delete(pool.clients, client)
 				}
 			}
-		case envelope := <-pool.send:
+		case env := <-pool.send:
 			for client := range pool.clients {
-				if client.id == envelope.recipient {
-					request := envelope.message
-					data, err := request.MarshalJSON()
+				if client.id == env.recipient {
+					data, err := env.getMessageData()
 					if err != nil {
 						pool.logger.Error("encode request:", err)
 						break
@@ -240,9 +250,6 @@ func (ws *WebSocket) readPump() {
 		ws.close()
 	}()
 	for {
-		if ws.isClosed {
-			break
-		}
 		_, message, err := ws.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
@@ -269,9 +276,6 @@ func (ws *WebSocket) writePump() {
 		ws.close()
 	}()
 	for {
-		if ws.isClosed {
-			break
-		}
 		select {
 		case message, ok := <-ws.send:
 			if !ok {
@@ -294,6 +298,9 @@ func (ws *WebSocket) writePump() {
 func (ws *WebSocket) writeMessage(messageType int, message []byte) error {
 	ws.mutex.Lock()
 	defer ws.mutex.Unlock()
+	if ws.isClosed {
+		return fmt.Errorf("write cancelled, socket is closed")
+	}
 	return ws.conn.WriteMessage(messageType, message)
 }
 
@@ -333,18 +340,25 @@ func (s *Server) Start() error {
 
 func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 	callResult, _ := CreateCallResult(response, ws.UniqueId())
-	data, err := callResult.MarshalJSON()
-	if err != nil {
-		return fmt.Errorf("error encoding response: %s", err)
+	//data, err := callResult.MarshalJSON()
+	//if err != nil {
+	//	return fmt.Errorf("error encoding response: %s", err)
+	//}
+
+	env := &envelope{
+		recipient:  ws.ID(),
+		callResult: callResult,
 	}
-	socket, ok := ws.(*WebSocket)
-	if !ok {
-		return fmt.Errorf("error casting websocket %s", ws.ID())
-	}
-	if socket.isClosed {
-		return fmt.Errorf("websocket %s is closed", ws.ID())
-	}
-	socket.send <- data
+	s.pool.send <- env
+
+	//socket, ok := ws.(*WebSocket)
+	//if !ok {
+	//	return fmt.Errorf("error casting websocket %s", ws.ID())
+	//}
+	//if socket.isClosed {
+	//	return fmt.Errorf("websocket %s is closed", ws.ID())
+	//}
+	//socket.send <- data
 	return nil
 }
 
@@ -357,11 +371,11 @@ func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, err
 	if err != nil {
 		return "", fmt.Errorf("error creating call request: %s", err)
 	}
-	envelope := &envelope{
-		recipient: clientId,
-		message:   callRequest,
+	env := &envelope{
+		recipient:   clientId,
+		callRequest: &callRequest,
 	}
-	s.pool.send <- envelope
+	s.pool.send <- env
 	return callRequest.UniqueId, nil
 }
 
