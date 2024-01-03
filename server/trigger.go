@@ -46,7 +46,7 @@ func (t *Trigger) triggerMeterValues() {
 				request := remotetrigger.NewTriggerMessageRequest(remotetrigger.MessageTrigger(message), connector.Id)
 				_, err := t.server.SendRequest(connector.ChargePointId, request)
 				if err != nil {
-					t.logger.Error("send request:", err)
+					t.logger.FeatureEvent(featureNameTrigger, connector.ChargePointId, fmt.Sprintf("error sending request: %v", err))
 				}
 			}
 		}
