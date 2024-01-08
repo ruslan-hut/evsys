@@ -254,7 +254,14 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 	defer m.disconnect(connection)
 
 	filter := bson.D{{"connector_id", connector.Id}, {"charge_point_id", connector.ChargePointId}}
-	update := bson.M{"$set": connector}
+	update := bson.M{"$set": bson.M{
+		"status":                 connector.Status,
+		"status_time":            connector.StatusTime,
+		"info":                   connector.Info,
+		"error_code":             connector.ErrorCode,
+		"vendor_id":              connector.VendorId,
+		"current_transaction_id": connector.CurrentTransactionId,
+	}}
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
