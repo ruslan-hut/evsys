@@ -278,54 +278,21 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {
-	authStatus := types.AuthorizationStatusAccepted
+	h.mux.Lock()
+	defer h.mux.Unlock()
+
+	authStatus := types.AuthorizationStatusBlocked
+
+	userTag := h.getUserTag(request.IdTag)
+	if userTag.IsEnabled {
+		authStatus = types.AuthorizationStatusAccepted
+	}
+
+	// block authorization if charge point is disabled
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		if !state.model.IsEnabled {
 			authStatus = types.AuthorizationStatusBlocked
-		}
-	} else {
-		authStatus = types.AuthorizationStatusBlocked
-	}
-	h.mux.Lock()
-	defer h.mux.Unlock()
-
-	username := ""
-	info := ""
-
-	// charge point can add a prefix to the id tag, separated by a colon
-	source, id := splitIdTag(request.IdTag)
-
-	if id == "" {
-		authStatus = types.AuthorizationStatusInvalid
-	} else {
-		// auth logic with database
-		if h.database != nil && authStatus == types.AuthorizationStatusAccepted {
-			// status will be changed if user tag is found and enabled
-			authStatus = types.AuthorizationStatusBlocked
-			userTag, err := h.database.GetUserTag(id)
-			if err != nil {
-				h.logger.Error("failed to get user tag from database", err)
-			}
-			// add user tag if not found, new tag is enabled if acceptTags mode is on
-			if userTag == nil {
-				userTag = &models.UserTag{
-					IdTag:          id,
-					Source:         source,
-					IsEnabled:      h.acceptTags,
-					Note:           fmt.Sprintf("added by %s", chargePointId),
-					DateRegistered: time.Now(),
-				}
-				err = h.database.AddUserTag(userTag)
-				if err != nil {
-					h.logger.Error("failed to add user tag to database", err)
-				}
-			}
-			if userTag.IsEnabled {
-				authStatus = types.AuthorizationStatusAccepted
-			}
-			username = userTag.Username
-			info = userTag.Note
 		}
 	}
 
@@ -333,16 +300,16 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 		ChargePointId: chargePointId,
 		ConnectorId:   0,
 		Time:          h.getTime(),
-		Username:      username,
-		IdTag:         fmt.Sprintf("%s %s", source, id),
+		Username:      userTag.Username,
+		IdTag:         fmt.Sprintf("%s %s", userTag.Source, userTag.IdTag),
 		Status:        string(authStatus),
-		Info:          info,
+		Info:          userTag.Note,
 		TransactionId: 0,
 		Payload:       request,
 	}
 	go h.notifyEventListeners(internal.Authorize, eventMessage)
 
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", id, authStatus))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", userTag.IdTag, authStatus))
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
@@ -378,8 +345,10 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 	}
 
+	userTag := h.getUserTag(request.IdTag)
+
 	transaction := &models.Transaction{
-		IdTag:         request.IdTag,
+		IdTag:         userTag.IdTag,
 		IsFinished:    false,
 		ConnectorId:   request.ConnectorId,
 		ChargePointId: chargePointId,
@@ -398,14 +367,11 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		if err != nil {
 			h.logger.Error("update connector", err)
 		}
-		idTag, err := h.database.GetUserTag(transaction.IdTag)
-		if err != nil {
-			h.logger.Error(fmt.Sprintf("get user tag %s", transaction.IdTag), err)
-		} else {
-			transaction.IdTagNote = idTag.Note
-			transaction.Username = idTag.Username
-			_ = h.database.UpdateTagLastSeen(idTag)
-		}
+
+		transaction.IdTagNote = userTag.Note
+		transaction.Username = userTag.Username
+		_ = h.database.UpdateTagLastSeen(userTag)
+
 		if h.billing != nil {
 			err = h.billing.OnTransactionStart(transaction)
 			if err != nil {
@@ -940,4 +906,41 @@ func splitIdTag(idTag string) (string, string) {
 		return s[0], s[1]
 	}
 	return "", idTag
+}
+
+func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
+	// charge point can add a prefix to the id tag, separated by a colon
+	source, id := splitIdTag(idTag)
+	if id == "" {
+		h.logger.Warn("received empty id tag")
+		return &models.UserTag{
+			IdTag:     id,
+			Source:    source,
+			IsEnabled: false,
+		}
+	}
+
+	if h.database == nil {
+		return &models.UserTag{
+			IdTag:     id,
+			Source:    source,
+			IsEnabled: h.acceptTags,
+		}
+	}
+
+	userTag, _ := h.database.GetUserTag(id)
+	if userTag == nil {
+		userTag = &models.UserTag{
+			IdTag:          id,
+			Source:         source,
+			IsEnabled:      h.acceptTags,
+			DateRegistered: time.Now(),
+		}
+		err := h.database.AddUserTag(userTag)
+		if err != nil {
+			h.logger.Error("add user tag to database", err)
+		}
+	}
+
+	return userTag
 }
