@@ -13,6 +13,7 @@ import (
 	"evsys/utility"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -288,9 +289,13 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	}
 	h.mux.Lock()
 	defer h.mux.Unlock()
+
 	username := ""
 	info := ""
-	id := request.IdTag
+
+	// charge point can add a prefix to the id tag, separated by a colon
+	source, id := splitIdTag(request.IdTag)
+
 	if id == "" {
 		authStatus = types.AuthorizationStatusInvalid
 	} else {
@@ -306,6 +311,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			if userTag == nil {
 				userTag = &models.UserTag{
 					IdTag:          id,
+					Source:         source,
 					IsEnabled:      h.acceptTags,
 					Note:           fmt.Sprintf("added by %s", chargePointId),
 					DateRegistered: time.Now(),
@@ -328,7 +334,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 		ConnectorId:   0,
 		Time:          h.getTime(),
 		Username:      username,
-		IdTag:         id,
+		IdTag:         fmt.Sprintf("%s %s", source, id),
 		Status:        string(authStatus),
 		Info:          info,
 		TransactionId: 0,
@@ -926,4 +932,12 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		}
 		go h.notifyEventListeners(internal.Alert, eventMessage)
 	}
+}
+
+func splitIdTag(idTag string) (string, string) {
+	if strings.Contains(idTag, ":") {
+		s := strings.Split(idTag, ":")
+		return s[0], s[1]
+	}
+	return "", idTag
 }
