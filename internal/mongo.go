@@ -257,6 +257,7 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 	update := bson.M{"$set": bson.M{
 		"status":                 connector.Status,
 		"status_time":            connector.StatusTime,
+		"state":                  connector.State,
 		"info":                   connector.Info,
 		"error_code":             connector.ErrorCode,
 		"vendor_id":              connector.VendorId,

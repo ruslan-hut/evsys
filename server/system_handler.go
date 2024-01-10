@@ -594,6 +594,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		defer connector.Unlock()
 		connector.Status = string(request.Status)
 		connector.StatusTime = request.Timestamp.Time
+		connector.State = h.stateFromStatus(request.Status)
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
 		connector.ErrorCode = string(request.ErrorCode)
@@ -607,7 +608,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			}
 		}
 		currentTransactionId = connector.CurrentTransactionId
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v", request.ConnectorId, request.Status))
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v (%s)", request.ConnectorId, request.Status, connector.State))
 	} else {
 		h.mux.Lock()
 		defer h.mux.Unlock()
@@ -943,4 +944,26 @@ func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
 	}
 
 	return userTag
+}
+
+func (h *SystemHandler) stateFromStatus(status core.ChargePointStatus) string {
+	switch status {
+	case core.ChargePointStatusAvailable:
+		return "available"
+	case core.ChargePointStatusPreparing:
+		return "occupied"
+	case core.ChargePointStatusCharging:
+		return "occupied"
+	case core.ChargePointStatusSuspendedEV:
+		return "occupied"
+	case core.ChargePointStatusSuspendedEVSE:
+		return "occupied"
+	case core.ChargePointStatusFinishing:
+		return "occupied"
+	case core.ChargePointStatusUnavailable:
+		return "unavailable"
+	case core.ChargePointStatusFaulted:
+		return "unavailable"
+	}
+	return string(status)
 }
