@@ -151,6 +151,8 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		request, err = cs.coreHandler.OnSetChargingProfile(command.ChargePointId, command.ConnectorId, command.Payload)
 	case smartcharging.GetCompositeScheduleFeatureName:
 		request, err = cs.coreHandler.OnGetCompositeSchedule(command.ChargePointId, command.ConnectorId, command.Payload)
+	case firmware.GetDiagnosticsFeatureName:
+		request, err = cs.coreHandler.OnGetDiagnostics(command.ChargePointId, command.Payload)
 	default:
 		err = fmt.Errorf("feature not supported: %s", command.FeatureName)
 	}

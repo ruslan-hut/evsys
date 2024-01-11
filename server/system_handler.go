@@ -799,6 +799,19 @@ func (h *SystemHandler) OnGetCompositeSchedule(chargePointId string, connectorId
 	return request, nil
 }
 
+func (h *SystemHandler) OnGetDiagnostics(chargePointId string, payload string) (*firmware.GetDiagnosticsRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	if payload == "" {
+		return nil, fmt.Errorf("empty location")
+	}
+	request := firmware.NewGetDiagnosticsRequest(payload)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get diagnostics: location %s", payload))
+	return request, nil
+}
+
 func (h *SystemHandler) OnReset(chargePointId string, payload string) (*core.ResetRequest, error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {
