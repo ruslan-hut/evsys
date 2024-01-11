@@ -808,7 +808,7 @@ func (h *SystemHandler) OnGetDiagnostics(chargePointId string, payload string) (
 		return nil, fmt.Errorf("empty location")
 	}
 	request := firmware.NewGetDiagnosticsRequest(payload)
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get diagnostics: location %s", payload))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("location: %s***", payload[0:10]))
 	return request, nil
 }
 
