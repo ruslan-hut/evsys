@@ -573,7 +573,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 							h.logger.Error("add transaction meter value", err)
 						}
 					} else {
-						h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("transaction: %d %v", transactionId, request.MeterValue))
+						h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("transaction: %d - %v", transactionId, value))
 					}
 				}
 			}
