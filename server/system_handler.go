@@ -577,6 +577,8 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 			}
 		}
 
+	} else {
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
 	}
 	return core.NewMeterValuesResponse(), nil
 }
