@@ -612,7 +612,6 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			}
 		}
 		currentTransactionId = connector.CurrentTransactionId
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated connector #%v status to %v (%s)", request.ConnectorId, request.Status, connector.State))
 	} else {
 		h.mux.Lock()
 		defer h.mux.Unlock()
@@ -626,8 +625,17 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 				h.logger.Error("update status", err)
 			}
 		}
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("updated main controller status to %v", request.Status))
 	}
+
+	connectorName := "main controller"
+	if request.ConnectorId > 0 {
+		connectorName = fmt.Sprintf("connector #%v", request.ConnectorId)
+	}
+	errorCode := ""
+	if request.ErrorCode != core.NoError {
+		errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
+	}
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%s: %v%s", connectorName, request.Status, errorCode))
 
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
@@ -637,7 +645,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		IdTag:         "",
 		Status:        string(request.Status),
 		TransactionId: currentTransactionId,
-		Info:          request.Info,
+		Info:          fmt.Sprintf("%s%s", request.Info, errorCode),
 		Payload:       request,
 	}
 	go h.notifyEventListeners(internal.StatusNotification, eventMessage)
