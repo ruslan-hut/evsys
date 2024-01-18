@@ -153,6 +153,8 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		request, err = cs.coreHandler.OnGetCompositeSchedule(command.ChargePointId, command.ConnectorId, command.Payload)
 	case firmware.GetDiagnosticsFeatureName:
 		request, err = cs.coreHandler.OnGetDiagnostics(command.ChargePointId, command.Payload)
+	case "GetServerStatus":
+		_, err = w.Write(cs.server.GetStatus())
 	default:
 		err = fmt.Errorf("feature not supported: %s", command.FeatureName)
 	}

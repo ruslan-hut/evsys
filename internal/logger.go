@@ -112,9 +112,6 @@ func (l *Logger) RawDataEvent(direction, data string) {
 }
 
 func (l *Logger) logLine(importance Importance, text string) {
-	if importance == Raw {
-		return
-	}
 	if importance == Info && l.database != nil {
 		return
 	}

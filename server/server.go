@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/ocpp"
@@ -346,25 +347,11 @@ func (s *Server) Start() error {
 
 func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 	callResult, _ := CreateCallResult(response, ws.UniqueId())
-	//data, err := callResult.MarshalJSON()
-	//if err != nil {
-	//	return fmt.Errorf("error encoding response: %s", err)
-	//}
-
 	env := &envelope{
 		recipient:  ws.ID(),
 		callResult: callResult,
 	}
 	s.pool.send <- env
-
-	//socket, ok := ws.(*WebSocket)
-	//if !ok {
-	//	return fmt.Errorf("error casting websocket %s", ws.ID())
-	//}
-	//if socket.isClosed {
-	//	return fmt.Errorf("websocket %s is closed", ws.ID())
-	//}
-	//socket.send <- data
 	return nil
 }
 
@@ -385,10 +372,20 @@ func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, err
 	return callRequest.UniqueId, nil
 }
 
-func (s *Server) GetActiveConnections() map[string]bool {
-	connections := make(map[string]bool)
-	for client := range s.pool.clients {
-		connections[client.id] = !client.isClosed
+type Status struct {
+	ConnectedClients string `json:"connected_clients"`
+	TotalClients     int    `json:"total_clients"`
+}
+
+func (s *Server) GetStatus() []byte {
+	status := &Status{
+		ConnectedClients: fmt.Sprintf("%v", s.pool.clients),
+		TotalClients:     len(s.pool.clients),
 	}
-	return connections
+	data, err := json.Marshal(status)
+	if err != nil {
+		s.logger.Error("marshal status:", err)
+		return []byte{}
+	}
+	return data
 }
