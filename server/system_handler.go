@@ -202,10 +202,13 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
 	cp := models.ChargePoint{
-		Id:        chargePointId,
-		IsEnabled: true,
-		Status:    string(core.ChargePointStatusAvailable),
-		ErrorCode: string(core.NoError),
+		Id:          chargePointId,
+		Title:       fmt.Sprintf("(new) %s", chargePointId),
+		IsEnabled:   true,
+		Status:      string(core.ChargePointStatusAvailable),
+		ErrorCode:   string(core.NoError),
+		AccessType:  "private",
+		AccessLevel: 10, // only users with equal or higher level can access this charge point
 	}
 	if h.database != nil {
 		err := h.database.AddChargePoint(&cp)

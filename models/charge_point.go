@@ -16,6 +16,8 @@ type ChargePoint struct {
 	StatusTime       time.Time `json:"status_time" bson:"status_time"`
 	Info             string    `json:"info" bson:"info"`
 	Address          string    `json:"address" bson:"address"`
+	AccessType       string    `json:"access_type" bson:"access_type"`
+	AccessLevel      int       `json:"access_level" bson:"access_level"`
 	Location         Location  `json:"location" bson:"location"`
 	ErrorCode        string    `json:"error_code" bson:"error_code"`
 	IsOnline         bool      `json:"is_online" bson:"is_online"`
