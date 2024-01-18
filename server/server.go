@@ -119,6 +119,12 @@ func (pool *Pool) Start() {
 	}
 }
 
+func (pool *Pool) checkAddClient(client *WebSocket) {
+	if !pool.recipientAvailable(client.id) {
+		pool.register <- client
+	}
+}
+
 func (pool *Pool) recipientAvailable(clientId string) bool {
 	for client := range pool.clients {
 		if client.id == clientId {
@@ -238,7 +244,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		watchdog:       s.watchdog,
 		mutex:          &sync.Mutex{},
 	}
-	s.pool.register <- &ws
+	s.pool.checkAddClient(&ws)
 	s.watchdog.OnOnlineStatusChanged(id, true)
 
 	go ws.readPump()
@@ -267,6 +273,7 @@ func (ws *WebSocket) readPump() {
 				continue
 			}
 		}
+		ws.pool.checkAddClient(ws)
 		go ws.watchdog.OnOnlineStatusChanged(ws.id, true)
 	}
 }
