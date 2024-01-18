@@ -117,6 +117,11 @@ func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *in
 func (h *SystemHandler) OnStart() error {
 	if h.database != nil {
 
+		err := h.database.ResetOnlineStatus()
+		if err != nil {
+			h.logger.Error("reset online status", err)
+		}
+
 		// load charge points from database
 		chargePoints, err := h.database.GetChargePoints()
 		if err != nil {

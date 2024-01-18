@@ -209,6 +209,24 @@ func (m *MongoDB) UpdateOnlineStatus(chargePointId string, isOnline bool) error 
 	return nil
 }
 
+// ResetOnlineStatus reset online status for all charge points on server start
+func (m *MongoDB) ResetOnlineStatus() error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{}
+	update := bson.M{"$set": bson.M{"is_online": false, "event_time": time.Now()}}
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	_, err = collection.UpdateMany(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (m *MongoDB) AddChargePoint(chargePoint *models.ChargePoint) error {
 	existedChargePoint, _ := m.GetChargePoint(chargePoint.Id)
 	if existedChargePoint != nil {

@@ -12,6 +12,7 @@ type Database interface {
 	UpdateChargePoint(chargePoint *models.ChargePoint) error
 	UpdateChargePointStatus(chargePoint *models.ChargePoint) error
 	UpdateOnlineStatus(chargePointId string, isOnline bool) error
+	ResetOnlineStatus() error
 	AddChargePoint(chargePoint *models.ChargePoint) error
 	GetChargePoint(id string) (*models.ChargePoint, error)
 
