@@ -378,8 +378,16 @@ type Status struct {
 }
 
 func (s *Server) GetStatus() []byte {
+	clientList := ""
+	for client := range s.pool.clients {
+		clientList += client.id + ","
+	}
+	// remove the last comma
+	if len(clientList) > 0 {
+		clientList = clientList[:len(clientList)-1]
+	}
 	status := &Status{
-		ConnectedClients: fmt.Sprintf("%v", s.pool.clients),
+		ConnectedClients: clientList,
 		TotalClients:     len(s.pool.clients),
 	}
 	data, err := json.Marshal(status)

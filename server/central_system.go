@@ -155,6 +155,7 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		request, err = cs.coreHandler.OnGetDiagnostics(command.ChargePointId, command.Payload)
 	case "GetServerStatus":
 		_, err = w.Write(cs.server.GetStatus())
+		return err
 	default:
 		err = fmt.Errorf("feature not supported: %s", command.FeatureName)
 	}
