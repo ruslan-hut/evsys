@@ -533,10 +533,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 }
 
 func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterValuesRequest) (*core.MeterValuesResponse, error) {
-	_, ok := h.getChargePoint(chargePointId)
+	chp, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewMeterValuesResponse(), nil
 	}
+	connector := h.getConnector(chp, request.ConnectorId)
 
 	transactionId := request.TransactionId
 	if transactionId != nil && h.database != nil {
@@ -556,11 +557,13 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 						currentValue = utility.ToInt(value.Value)
 
 						transactionMeter := &models.TransactionMeter{
-							Id:        transaction.Id,
-							Value:     currentValue,
-							Time:      time.Now(),
-							Unit:      string(value.Unit),
-							Measurand: string(value.Measurand),
+							Id:              transaction.Id,
+							Value:           currentValue,
+							Time:            time.Now(),
+							Unit:            string(value.Unit),
+							Measurand:       string(value.Measurand),
+							ConnectorId:     connector.Id,
+							ConnectorStatus: connector.Status,
 						}
 
 						err = h.billing.OnMeterValue(transaction, transactionMeter)
