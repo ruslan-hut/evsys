@@ -123,8 +123,8 @@ func (pool *Pool) Start() {
 func (pool *Pool) checkAddClient(client *WebSocket) {
 	if !pool.recipientAvailable(client.id) {
 		pool.register <- client
-		go client.watchdog.OnOnlineStatusChanged(client.id, true)
 	}
+	go client.watchdog.OnOnlineStatusChanged(client.id, true)
 }
 
 func (pool *Pool) recipientAvailable(clientId string) bool {
