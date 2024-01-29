@@ -76,6 +76,7 @@ func NewPool(logger internal.LogHandler) *Pool {
 		send:       make(chan *envelope),
 		broadcast:  make(chan []byte),
 		logger:     logger,
+		mutex:      &sync.Mutex{},
 	}
 }
 
