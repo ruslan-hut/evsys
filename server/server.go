@@ -65,6 +65,7 @@ type Pool struct {
 	broadcast  chan []byte
 	send       chan *envelope
 	logger     internal.LogHandler
+	mutex      *sync.Mutex
 }
 
 func NewPool(logger internal.LogHandler) *Pool {
@@ -82,14 +83,9 @@ func (pool *Pool) Start() {
 	for {
 		select {
 		case client := <-pool.register:
-			pool.clients[client] = true
-			pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("registered new connection: total connections %v", len(pool.clients)))
+			pool.checkAddClient(client)
 		case client := <-pool.unregister:
-			if _, ok := pool.clients[client]; ok {
-				delete(pool.clients, client)
-				close(client.send)
-				pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("unregistered: total connections %v", len(pool.clients)))
-			}
+			pool.deleteClient(client)
 		case message := <-pool.broadcast:
 			for client := range pool.clients {
 				select {
@@ -121,8 +117,11 @@ func (pool *Pool) Start() {
 }
 
 func (pool *Pool) checkAddClient(client *WebSocket) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
 	if !pool.recipientAvailable(client.id) {
-		pool.register <- client
+		pool.clients[client] = true
+		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("registered new connection: total connections %v", len(pool.clients)))
 	}
 	go client.watchdog.OnOnlineStatusChanged(client.id, true)
 }
@@ -134,6 +133,17 @@ func (pool *Pool) recipientAvailable(clientId string) bool {
 		}
 	}
 	return false
+}
+
+// delete client from pool
+func (pool *Pool) deleteClient(client *WebSocket) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	if _, ok := pool.clients[client]; ok {
+		delete(pool.clients, client)
+		close(client.send)
+		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("unregistered: total connections %v", len(pool.clients)))
+	}
 }
 
 func (ws *WebSocket) ID() string {
@@ -246,7 +256,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		watchdog:       s.watchdog,
 		mutex:          &sync.Mutex{},
 	}
-	s.pool.checkAddClient(&ws)
+	s.pool.register <- &ws
 
 	go ws.readPump()
 	go ws.writePump()
@@ -266,6 +276,7 @@ func (ws *WebSocket) readPump() {
 			}
 			break
 		}
+		ws.pool.register <- ws
 		ws.logger.RawDataEvent("IN", string(message))
 		if ws.messageHandler != nil {
 			err = ws.messageHandler(ws, message)
@@ -274,7 +285,6 @@ func (ws *WebSocket) readPump() {
 				continue
 			}
 		}
-		ws.pool.checkAddClient(ws)
 	}
 }
 
