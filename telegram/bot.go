@@ -153,19 +153,21 @@ func (b *TgBot) sendMessage(id int64, text string) {
 }
 
 func (b *TgBot) OnStatusNotification(event *internal.EventMessage) {
+	// only send notifications about Faulted status
+	if event.Status != "Faulted" {
+		return
+	}
 	var msg string
 	if event.ConnectorId == 0 {
-		//msg = fmt.Sprintf("*%v*: `%v`", event.ChargePointId, event.Status)
-		// don`t send status updates for charger itself, only for connectors
-		return
+		msg = fmt.Sprintf("*%v*: `%v`", event.ChargePointId, event.Status)
 	} else {
 		msg = fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 		if event.TransactionId >= 0 {
 			msg += fmt.Sprintf("Transaction ID: %v\n", event.TransactionId)
 		}
-		if event.Info != "" {
-			msg += fmt.Sprintf("%v\n", sanitize(event.Info))
-		}
+	}
+	if event.Info != "" {
+		msg += fmt.Sprintf("%v\n", sanitize(event.Info))
 	}
 	b.event <- MessageContent{Text: msg}
 }
