@@ -142,7 +142,6 @@ func (pool *Pool) deleteClient(client *WebSocket) {
 	defer pool.mutex.Unlock()
 	if _, ok := pool.clients[client]; ok {
 		delete(pool.clients, client)
-		close(client.send)
 		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("unregistered: total connections %v", len(pool.clients)))
 	}
 }
