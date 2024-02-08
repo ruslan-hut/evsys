@@ -623,10 +623,10 @@ func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) 
 	defer m.disconnect(connection)
 
 	collection := connection.Database(m.database).Collection(collectionMeterValues)
-	//_, err = collection.InsertOne(m.ctx, meterValue)
-	filter := bson.D{{"transaction_id", meterValue.Id}}
-	set := bson.M{"$set": meterValue}
-	_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
+	_, err = collection.InsertOne(m.ctx, meterValue)
+	//filter := bson.D{{"transaction_id", meterValue.Id}}
+	//set := bson.M{"$set": meterValue}
+	//_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
 	return err
 }
 
@@ -647,6 +647,28 @@ func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.Transact
 		return nil, err
 	}
 	return &meterValue, nil
+}
+
+// ReadAllTransactionMeterValues read all transaction meter values sorted by timestamp
+func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.TransactionMeter, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", transactionId}}
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	opts := options.Find().SetSort(bson.D{{"timestamp", 1}})
+	cursor, err := collection.Find(m.ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	var meterValues []models.TransactionMeter
+	if err = cursor.All(m.ctx, &meterValues); err != nil {
+		return nil, err
+	}
+	return meterValues, nil
 }
 
 func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
