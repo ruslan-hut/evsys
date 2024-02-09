@@ -8,13 +8,13 @@ listen:
   type: port
   bind_ip: 0.0.0.0
   port: ${PORT}
-  tls_enabled: true
+  tls_enabled: ${TLS_ENABLED}
   cert_file: ${CERT_FILE}
   key_file: ${KEY_FILE}
 api:
   bind_ip: 0.0.0.0
   port: ${API_PORT}
-  tls_enabled: true
+  tls_enabled: ${API_TLS_ENABLED}
   cert_file: ${CERT_FILE}
   key_file: ${KEY_FILE}
 mongo:

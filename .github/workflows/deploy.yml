@@ -15,9 +15,11 @@ jobs:
 
       - name: Prepare configuration file
         run: |
-          sed -i 's|${TIME_ZONE}|'"TIME_ZONE"'|g' evsys.yml
-          sed -i 's|${PORT}|'"PORT"'|g' evsys.yml
-          sed -i 's|${API_PORT}|'"API_PORT"'|g' evsys.yml
+          sed -i 's|${TIME_ZONE}|'"$TIME_ZONE"'|g' evsys.yml
+          sed -i 's|${PORT}|'"$PORT"'|g' evsys.yml
+          sed -i 's|${TLS_ENABLED}|'"$TLS_ENABLED"'|g' evsys.yml
+          sed -i 's|${API_PORT}|'"$API_PORT"'|g' evsys.yml
+          sed -i 's|${API_TLS_ENABLED}|'"$API_TLS_ENABLED"'|g' evsys.yml
           sed -i 's|${CERT_FILE}|'"$CERT_FILE"'|g' evsys.yml
           sed -i 's|${KEY_FILE}|'"$KEY_FILE"'|g' evsys.yml
           sed -i 's|${MONGO_HOST}|'"$MONGO_HOST"'|g' evsys.yml
@@ -31,7 +33,9 @@ jobs:
         env:
           TIME_ZONE: ${{ vars.TIME_ZONE }}
           PORT: ${{ vars.PORT }}
+          TLS_ENABLED: ${{ vars.TLS_ENABLED }}
           API_PORT: ${{ vars.API_PORT }}
+          API_TLS_ENABLED: ${{ vars.API_TLS_ENABLED }}
           CERT_FILE: ${{ vars.CERT_FILE }}
           KEY_FILE: ${{ vars.KEY_FILE }}
           MONGO_HOST: ${{ vars.MONGO_HOST }}
