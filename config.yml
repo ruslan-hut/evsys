@@ -17,12 +17,6 @@ api:
   tls_enabled: true
   cert_file: c:/cert/cert.pem
   key_file: c:/cert/key.pem
-pusher:
-  enabled: false
-  app_id:
-  key:
-  secret:
-  cluster: eu
 mongo:
   enabled: false
   host: 127.0.0.1

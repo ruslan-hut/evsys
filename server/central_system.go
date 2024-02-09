@@ -10,7 +10,6 @@ import (
 	"evsys/ocpp/localauth"
 	"evsys/ocpp/remotetrigger"
 	"evsys/ocpp/smartcharging"
-	"evsys/pusher"
 	"evsys/telegram"
 	"evsys/types"
 	"evsys/utility"
@@ -231,24 +230,10 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 		log.Println("database is disabled")
 	}
 
-	var messageService internal.MessageService
-	if conf.Pusher.Enabled {
-		messageService, err = pusher.NewPusher(conf)
-		if conf.Pusher.Enabled && err != nil {
-			return cs, fmt.Errorf("pusher setup failed: %s", err)
-		}
-		if messageService != nil {
-			log.Println("pusher service is configured and enabled")
-		}
-	} else {
-		log.Println("message pushing service service is disabled")
-	}
-
 	// logger with database and push service for the message handling
 	logService := internal.NewLogger(location)
 	logService.SetDebugMode(conf.IsDebug)
 	logService.SetDatabase(database)
-	logService.SetMessageService(messageService)
 
 	cs.logger = logService
 
