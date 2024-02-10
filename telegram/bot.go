@@ -159,7 +159,7 @@ func (b *TgBot) OnStatusNotification(event *internal.EventMessage) {
 	}
 	var msg string
 	if event.ConnectorId == 0 {
-		msg = fmt.Sprintf("*%v*: `%v`", event.ChargePointId, event.Status)
+		msg = fmt.Sprintf("*%v*: `%v`\n", event.ChargePointId, event.Status)
 	} else {
 		msg = fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 		if event.TransactionId >= 0 {
