@@ -1,0 +1,33 @@
+---
+
+is_debug: false
+time_zone: ${TIME_ZONE}
+accept_unknown_tag: false
+accept_unknown_chp: false
+listen:
+  type: port
+  bind_ip: 0.0.0.0
+  port: ${PORT}
+  tls_enabled: ${TLS_ENABLED}
+  cert_file: ${CERT_FILE}
+  key_file: ${KEY_FILE}
+api:
+  bind_ip: 0.0.0.0
+  port: ${API_PORT}
+  tls_enabled: ${API_TLS_ENABLED}
+  cert_file: ${CERT_FILE}
+  key_file: ${KEY_FILE}
+mongo:
+  enabled: true
+  host: ${MONGO_HOST}
+  port: ${MONGO_PORT}
+  user: ${MONGO_USER}
+  password: ${MONGO_PASS}
+  database: ${MONGO_DB}
+payment:
+  enabled: true
+  api_url: ${PAYMENT_API_URL}
+  api_key: ${PAYMENT_API_KEY}
+telegram:
+  enabled: true
+  telegram_api_key: ${TELEGRAM_API_KEY}
