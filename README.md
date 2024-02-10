@@ -87,7 +87,7 @@ In this structure you have to specify the charging point id, connector id if nee
   "unknownKey": []
 }
 ``` 
-To see connected points id'd you can use the following command, which is not listed in OCPP standard, but implemented in EVSYS:
+To see connected points id's you can use the following command, which is not listed in OCPP standard, but implemented in EVSYS:
 ```json
 {
   "charge_point_id": "",
