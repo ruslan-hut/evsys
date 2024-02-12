@@ -560,6 +560,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 							Id:              transaction.Id,
 							Value:           currentValue,
 							Time:            time.Now(),
+							Minute:          time.Now().Unix() / 60,
 							Unit:            string(value.Unit),
 							Measurand:       string(value.Measurand),
 							ConnectorId:     connector.Id,
