@@ -649,7 +649,6 @@ func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.Transact
 	return &meterValue, nil
 }
 
-// ReadAllTransactionMeterValues read all transaction meter values sorted by timestamp
 func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.TransactionMeter, error) {
 	connection, err := m.connect()
 	if err != nil {
@@ -659,7 +658,7 @@ func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.Tra
 
 	filter := bson.D{{"transaction_id", transactionId}}
 	collection := connection.Database(m.database).Collection(collectionMeterValues)
-	opts := options.Find().SetSort(bson.D{{"timestamp", 1}})
+	opts := options.Find().SetSort(bson.D{{"time", 1}})
 	cursor, err := collection.Find(m.ctx, filter, opts)
 	if err != nil {
 		return nil, err

@@ -555,12 +555,13 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 					if value.Context == types.ReadingContextTrigger && value.Measurand == types.MeasurandEnergyActiveImportRegister {
 
 						currentValue = utility.ToInt(value.Value)
+						currentTime := time.Now()
 
 						transactionMeter := &models.TransactionMeter{
 							Id:              transaction.Id,
 							Value:           currentValue,
-							Time:            time.Now(),
-							Minute:          time.Now().Unix() / 60,
+							Time:            currentTime,
+							Minute:          currentTime.Unix() / 60,
 							Unit:            string(value.Unit),
 							Measurand:       string(value.Measurand),
 							ConnectorId:     connector.Id,
