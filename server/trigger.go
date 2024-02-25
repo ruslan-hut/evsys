@@ -20,7 +20,7 @@ type Trigger struct {
 
 func NewTrigger(server *Server, logger internal.LogHandler) *Trigger {
 	return &Trigger{
-		connectors: make(map[int]*models.Connector, 0),
+		connectors: make(map[int]*models.Connector),
 		Register:   make(chan *models.Connector),
 		Unregister: make(chan int),
 		server:     server,
@@ -35,7 +35,7 @@ func (t *Trigger) Start() {
 
 func (t *Trigger) triggerMeterValues() {
 	message := "MeterValues"
-	waitStep := 5
+	waitStep := 20
 	ticker := time.NewTicker(time.Duration(waitStep) * time.Second)
 	defer ticker.Stop()
 

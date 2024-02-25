@@ -428,18 +428,15 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	// stop requests for meter values
 	h.trigger.Unregister <- request.TransactionId
+	delete(state.transactions, request.TransactionId)
 
-	var err error
-	transaction, ok := state.transactions[request.TransactionId]
-	if !ok && h.database != nil {
-		transaction, err = h.database.GetTransaction(request.TransactionId)
-		if err != nil {
-			h.logger.Error("get transaction", err)
-		}
-		ok = err == nil
+	if h.database == nil {
+		return core.NewStopTransactionResponse(), nil
 	}
-	if !ok {
-		h.logger.Warn(fmt.Sprintf("transaction #%v not found", request.TransactionId))
+
+	transaction, err := h.database.GetTransaction(request.TransactionId)
+	if err != nil {
+		h.logger.Error(fmt.Sprintf("on stop: transaction #%v not found", request.TransactionId), err)
 		return core.NewStopTransactionResponse(), nil
 	}
 
@@ -456,8 +453,19 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	if err != nil {
 		h.logger.Error("update connector", err)
 	}
+
 	if transaction.IsFinished {
 		h.logger.Warn(fmt.Sprintf("transaction #%v is already finished", request.TransactionId))
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			TransactionId: request.TransactionId,
+			Username:      transaction.Username,
+			IdTag:         transaction.IdTag,
+			Info:          "Transaction is already finished",
+			Payload:       request,
+		}
+		go h.notifyEventListeners(internal.Alert, eventMessage)
 		return core.NewStopTransactionResponse(), nil
 	}
 
@@ -885,7 +893,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 	}
 	for _, transaction := range transactions {
 		h.logger.Warn(fmt.Sprintf("transaction #%v was not finished correctly", transaction.Id))
-		h.trigger.Unregister <- transaction.ConnectorId
+		h.trigger.Unregister <- transaction.Id
 
 		transaction.Init()
 		transaction.Lock()
@@ -917,6 +925,11 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 			h.logger.Error("update transaction", err)
 		}
 		transaction.Unlock()
+
+		state, _ := h.getChargePoint(transaction.ChargePointId)
+		if state != nil {
+			delete(state.transactions, transaction.Id)
+		}
 
 		err = h.database.DeleteTransactionMeterValues(transaction.Id)
 		if err != nil {
