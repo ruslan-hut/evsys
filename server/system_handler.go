@@ -655,6 +655,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	errorCode := ""
 	if request.ErrorCode != core.NoError {
 		errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
+		observeError(chargePointId, request.VendorErrorCode)
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%s: %v%s", connectorName, request.Status, errorCode))
 
