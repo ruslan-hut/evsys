@@ -17,6 +17,10 @@ api:
   tls_enabled: ${API_TLS_ENABLED}
   cert_file: ${CERT_FILE}
   key_file: ${KEY_FILE}
+metrics:
+  enabled: true
+  bind_ip: 127.0.0.1
+  port: ${METRICS_PORT}
 mongo:
   enabled: true
   host: ${MONGO_HOST}

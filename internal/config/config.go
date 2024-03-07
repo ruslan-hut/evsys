@@ -26,6 +26,11 @@ type Config struct {
 		CertFile string `yaml:"cert_file" env-default:""`
 		KeyFile  string `yaml:"key_file" env-default:""`
 	}
+	Metrics struct {
+		Enabled bool   `yaml:"enabled" env-default:"false"`
+		BindIP  string `yaml:"bind_ip" env-default:"127.0.0.1"`
+		Port    string `yaml:"port" env-default:"5003"`
+	}
 	Mongo struct {
 		Enabled  bool   `yaml:"enabled" env-default:"false"`
 		Host     string `yaml:"host" env-default:"127.0.0.1"`

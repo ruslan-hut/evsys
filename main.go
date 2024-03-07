@@ -2,6 +2,7 @@ package main
 
 import (
 	"evsys/internal/config"
+	"evsys/metrics"
 	"evsys/server"
 	"flag"
 	"fmt"
@@ -23,6 +24,13 @@ func main() {
 	if conf.IsDebug {
 		log.Println("debug mode is enabled")
 	}
+
+	go func() {
+		err := metrics.Listen(conf)
+		if err != nil {
+			log.Println("metrics server failed", err)
+		}
+	}()
 
 	centralSystem, err := server.NewCentralSystem(conf)
 	if err != nil {

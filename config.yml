@@ -17,6 +17,10 @@ api:
   tls_enabled: true
   cert_file: c:/cert/cert.pem
   key_file: c:/cert/key.pem
+metrics:
+  enabled: true
+  bind_ip: 127.0.0.1
+  port: 5003
 mongo:
   enabled: false
   host: 127.0.0.1
