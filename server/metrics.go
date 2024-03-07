@@ -15,7 +15,7 @@ var errorCounts = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "ocpp",
 	Name:      "vendor_error_count",
 	Help:      "Total number of errors by vendor code.",
-}, []string{"code,charge_point_id"})
+}, []string{"code", "charge_point_id"})
 
 func observeConnections(count int) {
 	connectionsGauge.Set(float64(count))
