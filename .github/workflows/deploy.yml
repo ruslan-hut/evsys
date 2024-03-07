@@ -24,6 +24,7 @@ jobs:
           sed -i 's|${API_TLS_ENABLED}|'"$API_TLS_ENABLED"'|g' evsys.yml
           sed -i 's|${CERT_FILE}|'"$CERT_FILE"'|g' evsys.yml
           sed -i 's|${KEY_FILE}|'"$KEY_FILE"'|g' evsys.yml
+          sed -i 's|${METRICS_PORT}|'"$METRICS_PORT"'|g' evsys.yml
           sed -i 's|${MONGO_HOST}|'"$MONGO_HOST"'|g' evsys.yml
           sed -i 's|${MONGO_PORT}|'"$MONGO_PORT"'|g' evsys.yml
           sed -i 's|${MONGO_USER}|'"$MONGO_USER"'|g' evsys.yml
@@ -40,6 +41,7 @@ jobs:
           API_TLS_ENABLED: ${{ vars.API_TLS_ENABLED }}
           CERT_FILE: ${{ vars.CERT_FILE }}
           KEY_FILE: ${{ vars.KEY_FILE }}
+          METRICS_PORT: ${{ vars.METRICS_PORT }}
           MONGO_HOST: ${{ vars.MONGO_HOST }}
           MONGO_PORT: ${{ vars.MONGO_PORT }}
           MONGO_USER: ${{ secrets.MONGO_USER }}
