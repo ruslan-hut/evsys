@@ -1,9 +1,11 @@
 name: Deploy to wattbrews.me
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to deploy'
+        required: true
 
 jobs:
   build:
