@@ -10,6 +10,7 @@ import (
 	"evsys/ocpp/localauth"
 	"evsys/ocpp/remotetrigger"
 	"evsys/ocpp/smartcharging"
+	"evsys/power"
 	"evsys/telegram"
 	"evsys/types"
 	"evsys/utility"
@@ -27,6 +28,7 @@ type CentralSystem struct {
 	firmwareHandler   firmware.SystemHandler
 	remoteTrigger     remotetrigger.SystemHandler
 	localAuth         localauth.SystemHandler
+	powerManager      PowerManager
 	location          *time.Location
 	supportedProtocol []string
 	pendingRequests   map[string]chan string
@@ -92,14 +94,22 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	switch action {
 	case core.BootNotificationFeatureName:
 		confirmation, err = cs.coreHandler.OnBootNotification(chargePointId, request.(*core.BootNotificationRequest))
+		if err == nil {
+			_ = cs.powerManager.OnChargePointBoot(chargePointId)
+		}
 	case core.AuthorizeFeatureName:
 		confirmation, err = cs.coreHandler.OnAuthorize(chargePointId, request.(*core.AuthorizeRequest))
 	case core.HeartbeatFeatureName:
 		confirmation, err = cs.coreHandler.OnHeartbeat(chargePointId, request.(*core.HeartbeatRequest))
 	case core.StartTransactionFeatureName:
-		confirmation, err = cs.coreHandler.OnStartTransaction(chargePointId, request.(*core.StartTransactionRequest))
+		err = cs.powerManager.BeforeNewTransaction(chargePointId)
+		if err == nil {
+			confirmation, err = cs.coreHandler.OnStartTransaction(chargePointId, request.(*core.StartTransactionRequest))
+		}
+		_ = cs.powerManager.CheckPowerLimit(chargePointId)
 	case core.StopTransactionFeatureName:
 		confirmation, err = cs.coreHandler.OnStopTransaction(chargePointId, request.(*core.StopTransactionRequest))
+		_ = cs.powerManager.CheckPowerLimit(chargePointId)
 	case core.MeterValuesFeatureName:
 		confirmation, err = cs.coreHandler.OnMeterValues(chargePointId, request.(*core.MeterValuesRequest))
 	case core.StatusNotificationFeatureName:
@@ -216,7 +226,7 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 		return cs, fmt.Errorf("time zone initialization failed: %s", err)
 	}
 	cs.location = location
-	var database internal.Database
+	var database *internal.MongoDB
 
 	if conf.Mongo.Enabled {
 		database, err = internal.NewMongoClient(conf)
@@ -276,6 +286,9 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	wsServer.SetWatchdog(systemHandler)
 
 	cs.server = wsServer
+
+	// power manager
+	cs.powerManager = power.NewLoadBalancer(database, wsServer, logService)
 
 	trigger := NewTrigger(wsServer, logService)
 	systemHandler.SetTrigger(trigger)

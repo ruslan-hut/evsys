@@ -18,6 +18,7 @@ type Connector struct {
 	ErrorCode            string    `json:"error_code" bson:"error_code"`
 	Type                 string    `json:"type" bson:"type"`
 	Power                int       `json:"power" bson:"power"`
+	CurrentPowerLimit    int       `json:"current_power_limit" bson:"current_power_limit"`
 	CurrentTransactionId int       `json:"current_transaction_id" bson:"current_transaction_id"`
 	mutex                *sync.Mutex
 }

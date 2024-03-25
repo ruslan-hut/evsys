@@ -374,7 +374,7 @@ func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, err
 	}
 	callRequest, err := CreateCallRequest(request)
 	if err != nil {
-		return "", fmt.Errorf("error creating call request: %s", err)
+		return "", fmt.Errorf("creating call request: %s", err)
 	}
 	env := &envelope{
 		recipient:   clientId,

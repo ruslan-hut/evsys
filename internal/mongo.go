@@ -16,6 +16,7 @@ const (
 	collectionLog            = "sys_log"
 	collectionUserTags       = "user_tags"
 	collectionUsers          = "users"
+	collectionLocations      = "locations"
 	collectionChargePoints   = "charge_points"
 	collectionConnectors     = "connectors"
 	collectionTransactions   = "transactions"
@@ -136,6 +137,42 @@ func (m *MongoDB) GetChargePoints() ([]models.ChargePoint, error) {
 		return nil, err
 	}
 	return chargePoints, nil
+}
+
+// GetLocation get location data with all nested charge points and connectors
+func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	pipeline := mongo.Pipeline{
+		bson.D{{"$match", bson.D{{"_id", locationId}}}},
+		bson.D{{"$lookup", bson.D{
+			{"from", collectionChargePoints},
+			{"localField", "id"},
+			{"foreignField", "location_id"},
+			{"as", "evses"},
+		}}},
+		bson.D{{"$unwind", "$evses"}},
+		bson.D{{"$lookup", bson.D{
+			{"from", collectionConnectors},
+			{"localField", "evses.charge_point_id"},
+			{"foreignField", "charge_point_id"},
+			{"as", "evses.connectors"},
+		}}},
+	}
+	collection := connection.Database(m.database).Collection(collectionLocations)
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var location models.Location
+	if err = cursor.All(m.ctx, &location); err != nil {
+		return nil, err
+	}
+	return &location, nil
 }
 
 func (m *MongoDB) GetConnectors() ([]*models.Connector, error) {
@@ -281,6 +318,23 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 		"vendor_id":              connector.VendorId,
 		"current_transaction_id": connector.CurrentTransactionId,
 	}}
+	collection := connection.Database(m.database).Collection(collectionConnectors)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) UpdateConnectorCurrentPower(connector *models.Connector) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"connector_id", connector.Id}, {"charge_point_id", connector.ChargePointId}}
+	update := bson.M{"$set": bson.M{"current_power_limit": connector.CurrentPowerLimit}}
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	if err != nil {
