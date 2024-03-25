@@ -31,6 +31,9 @@ func (a *Affleck) SetPayment(payment internal.PaymentService) {
 // OnTransactionStart set payment plan for transaction
 func (a *Affleck) OnTransactionStart(transaction *models.Transaction) error {
 	if a.database != nil {
+		if transaction.Username == "" {
+			return nil
+		}
 		plan, _ := a.database.GetUserPaymentPlan(transaction.Username)
 		if plan != nil {
 			transaction.Plan = *plan
