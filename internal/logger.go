@@ -16,11 +16,10 @@ const (
 )
 
 type Logger struct {
-	messageService MessageService
-	database       Database
-	location       *time.Location
-	debugMode      bool
-	writer         chan *LogEvent
+	database  Database
+	location  *time.Location
+	debugMode bool
+	writer    chan *LogEvent
 }
 
 type LogEvent struct {
@@ -46,12 +45,6 @@ func (l *Logger) startWriter() {
 		messageText := fmt.Sprintf("[%s] %s: %s", message.ChargePointId, message.Feature, message.Text)
 		l.logLine(event.Importance, messageText)
 
-		if l.messageService != nil {
-			if err := l.messageService.Send(message); err != nil {
-				l.logLine(Error, fmt.Sprintln("error sending message:", err))
-			}
-		}
-
 		if l.database != nil {
 			if err := l.database.WriteLogMessage(message); err != nil {
 				l.logLine(Error, fmt.Sprintln("write log to database failed:", err))
@@ -62,10 +55,6 @@ func (l *Logger) startWriter() {
 
 func (l *Logger) SetDebugMode(debugMode bool) {
 	l.debugMode = debugMode
-}
-
-func (l *Logger) SetMessageService(messageService MessageService) {
-	l.messageService = messageService
 }
 
 func (l *Logger) SetDatabase(database Database) {
