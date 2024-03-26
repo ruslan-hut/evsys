@@ -338,7 +338,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	connector.Lock()
 	defer connector.Unlock()
 
-	if connector.CurrentTransactionId >= 0 {
+	if connector.CurrentTransactionId >= 0 && h.database != nil {
 
 		transaction, _ := h.database.GetTransaction(connector.CurrentTransactionId)
 		if transaction != nil {
@@ -473,7 +473,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	}
 
 	if transaction.IsFinished {
-		h.logger.Warn(fmt.Sprintf("transaction #%v is already finished", request.TransactionId))
+		h.logger.Warn(fmt.Sprintf("transaction #%d is already finished", request.TransactionId))
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   transaction.ConnectorId,
@@ -549,12 +549,12 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		IdTag:         transaction.IdTag,
 		Status:        connector.Status,
 		TransactionId: transaction.Id,
-		Info:          fmt.Sprintf("consumed %s kW; %v €", consumed, price),
+		Info:          fmt.Sprintf("consumed %s kW; %s €", consumed, price),
 		Payload:       request,
 	}
 	go h.notifyEventListeners(internal.TransactionStop, eventMessage)
 
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %v %v", request.TransactionId, request.Reason))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %d %s", request.TransactionId, request.Reason))
 	return core.NewStopTransactionResponse(), nil
 }
 
