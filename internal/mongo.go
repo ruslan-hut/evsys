@@ -169,7 +169,7 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 		return nil, err
 	}
 	var locations []*models.Location
-	if err = cursor.All(m.ctx, locations); err != nil {
+	if err = cursor.All(m.ctx, &locations); err != nil {
 		return nil, err
 	}
 	if len(locations) == 0 {
