@@ -829,6 +829,21 @@ func (h *SystemHandler) OnGetCompositeSchedule(chargePointId string, connectorId
 	return request, nil
 }
 
+func (h *SystemHandler) OnClearChargingProfile(chargePointId string, payload string) (*smartcharging.ClearChargingProfileRequest, error) {
+	_, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return nil, fmt.Errorf("charge point not found")
+	}
+	var request smartcharging.ClearChargingProfileRequest
+	err := json.Unmarshal([]byte(payload), &request)
+	if err != nil {
+		return nil, fmt.Errorf("invalid payload")
+	}
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId,
+		fmt.Sprintf("connector %v; purpose %v; stack level %v", request.ConnectorId, request.ChargingProfilePurpose, request.StackLevel))
+	return &request, nil
+}
+
 func (h *SystemHandler) OnGetDiagnostics(chargePointId string, payload string) (*firmware.GetDiagnosticsRequest, error) {
 	_, ok := h.getChargePoint(chargePointId)
 	if !ok {

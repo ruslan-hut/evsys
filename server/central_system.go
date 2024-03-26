@@ -160,6 +160,8 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		request, err = cs.coreHandler.OnSetChargingProfile(command.ChargePointId, command.ConnectorId, command.Payload)
 	case smartcharging.GetCompositeScheduleFeatureName:
 		request, err = cs.coreHandler.OnGetCompositeSchedule(command.ChargePointId, command.ConnectorId, command.Payload)
+	case smartcharging.ClearChargingProfileFeatureName:
+		request, err = cs.coreHandler.OnClearChargingProfile(command.ChargePointId, command.Payload)
 	case firmware.GetDiagnosticsFeatureName:
 		request, err = cs.coreHandler.OnGetDiagnostics(command.ChargePointId, command.Payload)
 	case "GetServerStatus":
