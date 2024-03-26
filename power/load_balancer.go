@@ -85,6 +85,7 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) error {
 	if activeConnectors == 0 {
 		return nil
 	}
+	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("active connectors: %d; 150=%v; 100=%v", activeConnectors, active150, active100))
 
 	powerLimit := 50
 	//if activeConnectors == 1 {
