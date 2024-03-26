@@ -168,11 +168,14 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 	if err != nil {
 		return nil, err
 	}
-	var location models.Location
-	if err = cursor.All(m.ctx, &location); err != nil {
+	var locations []*models.Location
+	if err = cursor.All(m.ctx, locations); err != nil {
 		return nil, err
 	}
-	return &location, nil
+	if len(locations) == 0 {
+		return nil, fmt.Errorf("not found")
+	}
+	return locations[0], nil
 }
 
 func (m *MongoDB) GetConnectors() ([]*models.Connector, error) {
