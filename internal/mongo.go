@@ -147,21 +147,54 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 	}
 	defer m.disconnect(connection)
 
-	pipeline := mongo.Pipeline{
+	pipeline := bson.A{
 		bson.D{{"$match", bson.D{{"id", locationId}}}},
-		bson.D{{"$lookup", bson.D{
-			{"from", collectionChargePoints},
-			{"localField", "id"},
-			{"foreignField", "location_id"},
-			{"as", "evses"},
-		}}},
-		bson.D{{"$unwind", "$evses"}},
-		bson.D{{"$lookup", bson.D{
-			{"from", collectionConnectors},
-			{"localField", "evses.charge_point_id"},
-			{"foreignField", "charge_point_id"},
-			{"as", "evses.connectors"},
-		}}},
+		bson.D{
+			{"$lookup",
+				bson.D{
+					{"from", collectionChargePoints},
+					{"localField", "id"},
+					{"foreignField", "location_id"},
+					{"as", "evses"},
+				},
+			},
+		},
+		bson.D{{"$unwind", bson.D{{"path", "$evses"}}}},
+		bson.D{
+			{"$lookup",
+				bson.D{
+					{"from", collectionConnectors},
+					{"localField", "evses.charge_point_id"},
+					{"foreignField", "charge_point_id"},
+					{"as", "evses.connectors"},
+				},
+			},
+		},
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$id"},
+					{"root", bson.D{{"$mergeObjects", "$$ROOT"}}},
+					{"evses", bson.D{{"$push", "$evses"}}},
+				},
+			},
+		},
+		bson.D{
+			{"$replaceRoot",
+				bson.D{
+					{"newRoot",
+						bson.D{
+							{"$mergeObjects",
+								bson.A{
+									"$root",
+									bson.D{{"evses", "$evses"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 	collection := connection.Database(m.database).Collection(collectionLocations)
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
