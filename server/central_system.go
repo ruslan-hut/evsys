@@ -237,24 +237,31 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 			log.Println("mongodb is configured and enabled")
 		}
 	} else {
+		database = nil
 		log.Println("database is disabled")
 	}
 
 	// logger with database and push service for the message handling
 	logService := internal.NewLogger(location)
 	logService.SetDebugMode(conf.IsDebug)
-	logService.SetDatabase(database)
+	if database != nil {
+		logService.SetDatabase(database)
+	}
 
 	cs.logger = logService
 
 	// billing
 	affleck := billing.NewAffleck()
-	affleck.SetDatabase(database)
 	affleck.SetLogger(logService)
+	if database != nil {
+		affleck.SetDatabase(database)
+	}
 
 	// system events handler
 	systemHandler := NewSystemHandler(location)
-	systemHandler.SetDatabase(database)
+	if database != nil {
+		systemHandler.SetDatabase(database)
+	}
 	systemHandler.SetBillingService(affleck)
 	systemHandler.SetLogger(logService)
 	systemHandler.SetParameters(conf.IsDebug, conf.AcceptUnknownTag, conf.AcceptUnknownChp)
@@ -262,8 +269,10 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	// payment service
 	if conf.Payment.Enabled {
 		payment := billing.NewPaymentService(conf)
-		payment.SetDatabase(database)
 		payment.SetLogger(logService)
+		if database != nil {
+			payment.SetDatabase(database)
+		}
 		systemHandler.SetPaymentService(payment)
 	}
 
@@ -272,7 +281,9 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 		if err != nil {
 			return cs, fmt.Errorf("telegram bot setup failed: %s", err)
 		} else {
-			telegramBot.SetDatabase(database)
+			if database != nil {
+				telegramBot.SetDatabase(database)
+			}
 			telegramBot.Start()
 			systemHandler.AddEventListener(telegramBot)
 			log.Println("telegram bot is configured and enabled")

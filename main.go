@@ -25,12 +25,16 @@ func main() {
 		log.Println("debug mode is enabled")
 	}
 
-	go func() {
-		err := metrics.Listen(conf)
-		if err != nil {
-			log.Println("metrics server failed", err)
-		}
-	}()
+	if conf.Metrics.Enabled {
+		go func() {
+			err = metrics.Listen(conf)
+			if err != nil {
+				log.Println("metrics server failed", err)
+			}
+		}()
+	} else {
+		log.Println("metrics server is disabled")
+	}
 
 	centralSystem, err := server.NewCentralSystem(conf)
 	if err != nil {

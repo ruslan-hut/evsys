@@ -1,6 +1,6 @@
 ---
 
-is_debug: false
+is_debug: true
 time_zone: Europe/Madrid
 accept_unknown_tag: false
 accept_unknown_chp: false
@@ -18,7 +18,7 @@ api:
   cert_file: c:/cert/cert.pem
   key_file: c:/cert/key.pem
 metrics:
-  enabled: true
+  enabled: false
   bind_ip: 127.0.0.1
   port: 5003
 mongo:
