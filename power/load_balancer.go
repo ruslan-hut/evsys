@@ -83,20 +83,9 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) error {
 	for _, chp := range location.Evses {
 		if chp.SmartCharging {
 			for _, connector := range chp.Connectors {
-				if connector.CurrentTransactionId >= 0 {
-					lb.log.FeatureEvent(featureName, chp.Id, fmt.Sprintf("setting power limit to %d for connector %d", powerLimitPerConnector, connector.Id))
-					request := smartcharging.NewSetChargingProfileRequest(
-						connector.Id, smartcharging.NewTransactionChargingProfile(
-							connector.CurrentTransactionId,
-							powerLimitPerConnector))
-					_, err := lb.server.SendRequest(chp.Id, request)
-					if err != nil {
-						lb.log.FeatureEvent(featureName, chp.Id, fmt.Sprintf("error sending request: %s", err))
-					}
-					err = lb.database.UpdateConnectorCurrentPower(connector)
-					if err != nil {
-						lb.log.FeatureEvent(featureName, chp.Id, fmt.Sprintf("error updating connector power: %s", err))
-					}
+				err := lb.updateConnectorPower(powerLimitPerConnector, connector)
+				if err != nil {
+					lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error updating connector: %s", err))
 				}
 			}
 		}
@@ -108,9 +97,11 @@ func (lb *LoadBalancer) getLocation(chargePointId string) (*models.Location, *mo
 	chp, err := lb.database.GetChargePoint(chargePointId)
 	if err != nil {
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error getting charge point: %s", err))
+		return nil, nil
 	}
 	if chp == nil {
-		lb.log.FeatureEvent(featureName, chargePointId, "charge point not found")
+		lb.log.FeatureEvent(featureName, chargePointId, "charge point not found in database")
+		return nil, nil
 	}
 	if !chp.SmartCharging || chp.LocationId == "" {
 		return nil, nil
@@ -120,4 +111,27 @@ func (lb *LoadBalancer) getLocation(chargePointId string) (*models.Location, *mo
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error getting location: %s %s", chp.LocationId, err))
 	}
 	return location, chp
+}
+
+func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *models.Connector) error {
+	chargePointId := connector.ChargePointId
+	if connector.CurrentTransactionId >= 0 {
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting power limit to %dA for connector %d", powerLimit, connector.Id))
+		request := smartcharging.NewSetChargingProfileRequest(
+			connector.Id, smartcharging.NewTransactionChargingProfile(
+				connector.CurrentTransactionId,
+				powerLimit))
+		_, err := lb.server.SendRequest(chargePointId, request)
+		if err != nil {
+			return fmt.Errorf("sending profile update request: %s", err)
+		}
+		connector.CurrentPowerLimit = powerLimit
+	} else {
+		connector.CurrentPowerLimit = 0
+	}
+	err := lb.database.UpdateConnectorCurrentPower(connector)
+	if err != nil {
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("database error: %s", err))
+	}
+	return nil
 }

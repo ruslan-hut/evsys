@@ -148,7 +148,7 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 	defer m.disconnect(connection)
 
 	pipeline := mongo.Pipeline{
-		bson.D{{"$match", bson.D{{"_id", locationId}}}},
+		bson.D{{"$match", bson.D{{"id", locationId}}}},
 		bson.D{{"$lookup", bson.D{
 			{"from", collectionChargePoints},
 			{"localField", "id"},
