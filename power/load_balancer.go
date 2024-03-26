@@ -63,27 +63,49 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) error {
 	if location.PowerLimit == 0 {
 		return nil
 	}
+	active150 := false
+	active100 := false
 	// all active connectors on smart charging points
-	totalConnectors := 0
+	activeConnectors := 0
 	for _, chp := range location.Evses {
 		if chp.SmartCharging {
 			for _, connector := range chp.Connectors {
 				if connector.CurrentTransactionId >= 0 {
-					totalConnectors++
+					activeConnectors++
+					if connector.CurrentPowerLimit == 150 {
+						active150 = true
+					}
+					if connector.CurrentPowerLimit == 100 {
+						active100 = true
+					}
 				}
 			}
 		}
 	}
-	if totalConnectors == 0 {
+	if activeConnectors == 0 {
 		return nil
 	}
-	// calculate power limit per connector
-	powerLimitPerConnector := 10 * ((location.PowerLimit / 10) / totalConnectors)
+
+	powerLimit := 50
+	//if activeConnectors == 1 {
+	//	powerLimit = 150
+	//} else if activeConnectors == 2 {
+	//	powerLimit = 100
+	//}
+	if !active150 {
+		powerLimit = 150
+	} else if !active100 {
+		powerLimit = 100
+	}
+
 	// send set charging profile request to each active connector
 	for _, chp := range location.Evses {
 		if chp.SmartCharging {
 			for _, connector := range chp.Connectors {
-				err := lb.updateConnectorPower(powerLimitPerConnector, connector)
+				if connector.CurrentTransactionId >= 0 && connector.CurrentPowerLimit > 0 {
+					continue
+				}
+				err := lb.updateConnectorPower(powerLimit, connector)
 				if err != nil {
 					lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error updating connector: %s", err))
 				}
@@ -114,6 +136,10 @@ func (lb *LoadBalancer) getLocation(chargePointId string) (*models.Location, *mo
 }
 
 func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *models.Connector) error {
+	if connector.CurrentTransactionId < 0 && connector.CurrentPowerLimit == 0 {
+		// no need to update - connector is not active and has no limit set
+		return nil
+	}
 	chargePointId := connector.ChargePointId
 	if connector.CurrentTransactionId >= 0 {
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting power limit to %dA for connector %d", powerLimit, connector.Id))
@@ -127,6 +153,7 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *models.C
 		}
 		connector.CurrentPowerLimit = powerLimit
 	} else {
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("cleared power limit for connector %d", connector.Id))
 		connector.CurrentPowerLimit = 0
 	}
 	err := lb.database.UpdateConnectorCurrentPower(connector)
