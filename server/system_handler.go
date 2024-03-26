@@ -27,9 +27,25 @@ type ChargePointState struct {
 	diagnosticsStatus firmware.DiagnosticsStatus
 	firmwareStatus    firmware.Status
 	connectors        map[int]*models.Connector // No assumptions about the # of connectors
-	transactions      map[int]*models.Transaction
+	transactions      map[int]*int
 	errorCode         core.ChargePointErrorCode
-	model             models.ChargePoint
+	model             *models.ChargePoint
+}
+
+func newChargePointState(chp *models.ChargePoint) ChargePointState {
+	return ChargePointState{
+		connectors:   make(map[int]*models.Connector),
+		transactions: make(map[int]*int),
+		model:        chp,
+	}
+}
+
+func (st *ChargePointState) registerTransaction(transactionId int) {
+	st.transactions[transactionId] = &transactionId
+}
+
+func (st *ChargePointState) unregisterTransaction(transactionId int) {
+	delete(st.transactions, transactionId)
 }
 
 type SystemHandler struct {
@@ -55,6 +71,14 @@ func NewSystemHandler(location *time.Location) *SystemHandler {
 		mux:            &sync.Mutex{},
 	}
 	return handler
+}
+
+func (h *SystemHandler) updateActiveTransactionsCounter() {
+	count := 0
+	for _, cp := range h.chargePoints {
+		count += len(cp.transactions)
+	}
+	observeTransactions(count)
 }
 
 func (h *SystemHandler) getTime() time.Time {
@@ -141,11 +165,7 @@ func (h *SystemHandler) OnStart() error {
 		}
 
 		for _, cp := range chargePoints {
-			state := ChargePointState{
-				connectors:   make(map[int]*models.Connector),
-				transactions: make(map[int]*models.Transaction),
-				model:        cp,
-			}
+			state := newChargePointState(&cp)
 			state.status = core.GetStatus(cp.Status)
 			state.errorCode = core.GetErrorCode(cp.ErrorCode)
 			if !cp.IsEnabled {
@@ -155,6 +175,9 @@ func (h *SystemHandler) OnStart() error {
 				if c.ChargePointId == cp.Id {
 					c.Init()
 					state.connectors[c.Id] = c
+					if c.CurrentTransactionId != -1 {
+						state.registerTransaction(c.CurrentTransactionId)
+					}
 				}
 			}
 			h.chargePoints[cp.Id] = state
@@ -173,6 +196,8 @@ func (h *SystemHandler) OnStart() error {
 		// load firmware status from database
 		// load diagnostics status from database
 	}
+
+	h.updateActiveTransactionsCounter()
 
 	if h.trigger == nil {
 		return fmt.Errorf("trigger is not set")
@@ -219,11 +244,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 			h.logger.Error("failed to add charge point to database: %s", err)
 		}
 	}
-	h.chargePoints[chargePointId] = ChargePointState{
-		connectors:   make(map[int]*models.Connector),
-		transactions: make(map[int]*models.Transaction),
-		model:        cp,
-	}
+	h.chargePoints[chargePointId] = newChargePointState(&cp)
 }
 
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
@@ -267,7 +288,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 				state.model.FirmwareVersion = request.FirmwareVersion
 				state.model.Model = request.ChargePointModel
 				state.model.Vendor = request.ChargePointVendor
-				err := h.database.UpdateChargePoint(&state.model)
+				err := h.database.UpdateChargePoint(state.model)
 				if err != nil {
 					h.logger.Error("update charge point", err)
 				}
@@ -381,7 +402,8 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	newTransactionId += 1
 
 	connector.CurrentTransactionId = transaction.Id
-	state.transactions[transaction.Id] = transaction
+	state.registerTransaction(transaction.Id)
+	h.updateActiveTransactionsCounter()
 
 	if h.database != nil {
 		err := h.database.AddTransaction(transaction)
@@ -446,7 +468,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	// stop requests for meter values
 	h.trigger.Unregister <- request.TransactionId
-	delete(state.transactions, request.TransactionId)
+	state.unregisterTransaction(request.TransactionId)
+	h.updateActiveTransactionsCounter()
 
 	if h.database == nil {
 		return core.NewStopTransactionResponse(), nil
@@ -660,7 +683,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		state.model.StatusTime = request.Timestamp.Time
 		state.model.Info = request.Info
 		if h.database != nil {
-			err := h.database.UpdateChargePointStatus(&state.model)
+			err := h.database.UpdateChargePointStatus(state.model)
 			if err != nil {
 				h.logger.Error("update status", err)
 			}
@@ -967,7 +990,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 
 		state, _ := h.getChargePoint(transaction.ChargePointId)
 		if state != nil {
-			delete(state.transactions, transaction.Id)
+			state.unregisterTransaction(transaction.Id)
 		}
 
 		err = h.database.DeleteTransactionMeterValues(transaction.Id)
@@ -989,6 +1012,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		}
 		go h.notifyEventListeners(internal.Alert, eventMessage)
 	}
+	h.updateActiveTransactionsCounter()
 }
 
 func splitIdTag(idTag string) (string, string) {

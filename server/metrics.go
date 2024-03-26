@@ -11,6 +11,12 @@ var connectionsGauge = promauto.NewGauge(prometheus.GaugeOpts{
 	Help:      "Number of active ws connections",
 })
 
+var activeTransactionsGauge = promauto.NewGauge(prometheus.GaugeOpts{
+	Namespace: "server",
+	Name:      "transactions_active",
+	Help:      "Number of active transactions",
+})
+
 var errorCounts = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "ocpp",
 	Name:      "vendor_error_count",
@@ -19,6 +25,10 @@ var errorCounts = promauto.NewCounterVec(prometheus.CounterOpts{
 
 func observeConnections(count int) {
 	connectionsGauge.Set(float64(count))
+}
+
+func observeTransactions(count int) {
+	activeTransactionsGauge.Set(float64(count))
 }
 
 func observeError(chargePointId, code string) {
