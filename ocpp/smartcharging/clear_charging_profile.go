@@ -25,6 +25,6 @@ func NewClearDefaultChargingProfileRequest() *ClearChargingProfileRequest {
 	return &ClearChargingProfileRequest{
 		Id:                     &id,
 		StackLevel:             &stackLevel,
-		ChargingProfilePurpose: types.ChargingProfilePurposeChargePointMaxProfile,
+		ChargingProfilePurpose: types.ChargingProfilePurposeTxDefaultProfile,
 	}
 }

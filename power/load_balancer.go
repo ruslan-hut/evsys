@@ -39,7 +39,7 @@ func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) error {
 		lb.log.FeatureEvent(featureName, chargePointId, "clearing default charging profile")
 		request = smartcharging.NewClearDefaultChargingProfileRequest()
 	} else {
-		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting default charging profile to %d", location.DefaultPowerLimit))
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting default charging profile to %dA", location.DefaultPowerLimit))
 		request = smartcharging.NewSetChargingProfileRequest(0, smartcharging.NewDefaultChargingProfile(location.DefaultPowerLimit))
 	}
 	_, err := lb.server.SendRequest(chargePointId, request)

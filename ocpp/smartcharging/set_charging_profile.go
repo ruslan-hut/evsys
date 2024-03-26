@@ -29,7 +29,7 @@ func NewDefaultChargingProfile(limit int) *types.ChargingProfile {
 	return &types.ChargingProfile{
 		ChargingProfileId:      1,
 		StackLevel:             1,
-		ChargingProfilePurpose: types.ChargingProfilePurposeChargePointMaxProfile,
+		ChargingProfilePurpose: types.ChargingProfilePurposeTxDefaultProfile,
 		ChargingProfileKind:    types.ChargingProfileKindRecurring,
 		RecurrencyKind:         types.RecurrencyKindDaily,
 		ChargingSchedule: &types.ChargingSchedule{
