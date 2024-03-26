@@ -350,7 +350,8 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			Payload:       request,
 		}
 		go h.notifyEventListeners(internal.Alert, eventMessage)
-		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
+		//return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
+		return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), connector.CurrentTransactionId), nil
 	}
 
 	userTag := h.getUserTag(request.IdTag)
