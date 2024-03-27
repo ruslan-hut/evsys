@@ -94,22 +94,14 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	switch action {
 	case core.BootNotificationFeatureName:
 		confirmation, err = cs.coreHandler.OnBootNotification(chargePointId, request.(*core.BootNotificationRequest))
-		if err == nil {
-			_ = cs.powerManager.OnChargePointBoot(chargePointId)
-		}
 	case core.AuthorizeFeatureName:
 		confirmation, err = cs.coreHandler.OnAuthorize(chargePointId, request.(*core.AuthorizeRequest))
 	case core.HeartbeatFeatureName:
 		confirmation, err = cs.coreHandler.OnHeartbeat(chargePointId, request.(*core.HeartbeatRequest))
 	case core.StartTransactionFeatureName:
-		err = cs.powerManager.BeforeNewTransaction(chargePointId)
-		if err == nil {
-			confirmation, err = cs.coreHandler.OnStartTransaction(chargePointId, request.(*core.StartTransactionRequest))
-		}
-		_ = cs.powerManager.CheckPowerLimit(chargePointId)
+		confirmation, err = cs.coreHandler.OnStartTransaction(chargePointId, request.(*core.StartTransactionRequest))
 	case core.StopTransactionFeatureName:
 		confirmation, err = cs.coreHandler.OnStopTransaction(chargePointId, request.(*core.StopTransactionRequest))
-		_ = cs.powerManager.CheckPowerLimit(chargePointId)
 	case core.MeterValuesFeatureName:
 		confirmation, err = cs.coreHandler.OnMeterValues(chargePointId, request.(*core.MeterValuesRequest))
 	case core.StatusNotificationFeatureName:
@@ -132,6 +124,17 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 		return nil
 	}
 	err = cs.server.SendResponse(ws, confirmation)
+
+	// call the power manager to check the power limit
+	switch action {
+	case core.StartTransactionFeatureName:
+		go cs.powerManager.CheckPowerLimit(chargePointId)
+	case core.StopTransactionFeatureName:
+		go cs.powerManager.CheckPowerLimit(chargePointId)
+	case core.BootNotificationFeatureName:
+		cs.powerManager.OnChargePointBoot(chargePointId)
+	}
+
 	return err
 }
 

@@ -27,12 +27,12 @@ func NewLoadBalancer(database Repository, server Handler, log internal.LogHandle
 	}
 }
 
-func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) error {
+func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) {
 	lb.mutex.Lock()
 	defer lb.mutex.Unlock()
 	location, _ := lb.getLocation(chargePointId)
 	if location == nil {
-		return nil
+		return
 	}
 	var request ocpp.Request
 	if location.DefaultPowerLimit == 0 {
@@ -46,22 +46,17 @@ func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) error {
 	if err != nil {
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error sending request: %s", err))
 	}
-	return nil
 }
 
-func (lb *LoadBalancer) BeforeNewTransaction(string) error {
-	return nil
-}
-
-func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) error {
+func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	lb.mutex.Lock()
 	defer lb.mutex.Unlock()
 	location, _ := lb.getLocation(chargePointId)
 	if location == nil {
-		return nil
+		return
 	}
 	if location.PowerLimit == 0 {
-		return nil
+		return
 	}
 	active150 := false
 	active100 := false
@@ -78,12 +73,18 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) error {
 					if connector.CurrentPowerLimit == 100 {
 						active100 = true
 					}
+				} else if connector.CurrentPowerLimit > 0 {
+					// clear power limit for connector with no active transaction
+					err := lb.updateConnectorPower(0, connector)
+					if err != nil {
+						lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error updating connector: %s", err))
+					}
 				}
 			}
 		}
 	}
 	if activeConnectors == 0 {
-		return nil
+		return
 	}
 	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("active connectors: %d; 150=%v; 100=%v", activeConnectors, active150, active100))
 
@@ -113,7 +114,6 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) error {
 			}
 		}
 	}
-	return nil
 }
 
 func (lb *LoadBalancer) getLocation(chargePointId string) (*models.Location, *models.ChargePoint) {
