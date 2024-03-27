@@ -407,22 +407,13 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	h.updateActiveTransactionsCounter()
 
 	if h.database != nil {
-		err := h.database.AddTransaction(transaction)
-		if err != nil {
-			h.logger.Error("add transaction", err)
-		}
-
-		err = h.database.UpdateConnector(connector)
-		if err != nil {
-			h.logger.Error("update connector", err)
-		}
 
 		transaction.IdTagNote = userTag.Note
 		transaction.Username = userTag.Username
 		_ = h.database.UpdateTagLastSeen(userTag)
 
 		if h.billing != nil {
-			err = h.billing.OnTransactionStart(transaction)
+			err := h.billing.OnTransactionStart(transaction)
 			if err != nil {
 				h.logger.Warn(fmt.Sprintf("billing: %v", err))
 				eventMessage := &internal.EventMessage{
@@ -437,6 +428,18 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			}
 		}
 
+		// billing module may set payment plan for transaction
+		// but it does not store transaction in database
+
+		err := h.database.AddTransaction(transaction)
+		if err != nil {
+			h.logger.Error("add transaction", err)
+		}
+
+		err = h.database.UpdateConnector(connector)
+		if err != nil {
+			h.logger.Error("update connector", err)
+		}
 	}
 
 	h.trigger.Register <- connector
