@@ -402,6 +402,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	newTransactionId += 1
 
 	connector.CurrentTransactionId = transaction.Id
+	connector.CurrentPowerLimit = 0
 	state.registerTransaction(transaction.Id)
 	h.updateActiveTransactionsCounter()
 
@@ -490,6 +491,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	defer connector.Unlock()
 
 	connector.CurrentTransactionId = -1
+	connector.CurrentPowerLimit = 0
 	err = h.database.UpdateConnector(connector)
 	if err != nil {
 		h.logger.Error("update connector", err)
@@ -669,6 +671,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		connector.ErrorCode = string(request.ErrorCode)
 		if request.Status == core.ChargePointStatusAvailable {
 			connector.CurrentTransactionId = -1
+			connector.CurrentPowerLimit = 0
 		}
 		if h.database != nil {
 			err := h.database.UpdateConnector(connector)

@@ -48,6 +48,35 @@ func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) {
 	}
 }
 
+func (lb *LoadBalancer) OnSystemStart() {
+	locations, err := lb.database.GetLocations()
+	if err != nil {
+		lb.log.FeatureEvent(featureName, "", fmt.Sprintf("error getting locations: %s", err))
+		return
+	}
+	// check all connectors and reset power limit in database
+	for _, location := range locations {
+		chargers := 0
+		connectors := 0
+		for _, chp := range location.Evses {
+			if chp.SmartCharging {
+				chargers++
+				for _, connector := range chp.Connectors {
+					connectors++
+					if connector.CurrentTransactionId < 0 && connector.CurrentPowerLimit != 0 {
+						connector.CurrentPowerLimit = 0
+						err = lb.database.UpdateConnectorCurrentPower(connector)
+						if err != nil {
+							lb.log.FeatureEvent(featureName, "", fmt.Sprintf("database error: %s", err))
+						}
+					}
+				}
+			}
+		}
+		lb.log.FeatureEvent(featureName, location.Id, fmt.Sprintf("location %s: %d chargers, %d connectors", location.Name, chargers, connectors))
+	}
+}
+
 func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	lb.mutex.Lock()
 	defer lb.mutex.Unlock()

@@ -211,6 +211,74 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 	return locations[0], nil
 }
 
+// GetLocations get all locations with all nested charge points and connectors
+func (m *MongoDB) GetLocations() ([]*models.Location, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	pipeline := bson.A{
+		bson.D{
+			{"$lookup",
+				bson.D{
+					{"from", collectionChargePoints},
+					{"localField", "id"},
+					{"foreignField", "location_id"},
+					{"as", "evses"},
+				},
+			},
+		},
+		bson.D{{"$unwind", bson.D{{"path", "$evses"}}}},
+		bson.D{
+			{"$lookup",
+				bson.D{
+					{"from", collectionConnectors},
+					{"localField", "evses.charge_point_id"},
+					{"foreignField", "charge_point_id"},
+					{"as", "evses.connectors"},
+				},
+			},
+		},
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$id"},
+					{"root", bson.D{{"$mergeObjects", "$$ROOT"}}},
+					{"evses", bson.D{{"$push", "$evses"}}},
+				},
+			},
+		},
+		bson.D{
+			{"$replaceRoot",
+				bson.D{
+					{"newRoot",
+						bson.D{
+							{"$mergeObjects",
+								bson.A{
+									"$root",
+									bson.D{{"evses", "$evses"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	collection := connection.Database(m.database).Collection(collectionLocations)
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var locations []*models.Location
+	if err = cursor.All(m.ctx, &locations); err != nil {
+		return nil, err
+	}
+	return locations, nil
+}
+
 func (m *MongoDB) GetConnectors() ([]*models.Connector, error) {
 	connection, err := m.connect()
 	if err != nil {
@@ -353,6 +421,7 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 		"error_code":             connector.ErrorCode,
 		"vendor_id":              connector.VendorId,
 		"current_transaction_id": connector.CurrentTransactionId,
+		"current_power_limit":    connector.CurrentPowerLimit,
 	}}
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	_, err = collection.UpdateOne(m.ctx, filter, update)

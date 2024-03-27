@@ -218,6 +218,8 @@ func (cs *CentralSystem) Start() {
 		}
 	}()
 
+	go cs.powerManager.OnSystemStart()
+
 	select {}
 }
 
