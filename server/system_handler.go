@@ -428,7 +428,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			}
 		}
 
-		// billing module may set payment plan for transaction
+		// billing module may set payment plan for transaction,
 		// but it does not store transaction in database
 
 		err := h.database.AddTransaction(transaction)
@@ -689,6 +689,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		state.model.StatusTime = request.Timestamp.Time
 		state.model.Info = request.Info
 		if h.database != nil {
+			h.logger.FeatureEvent(request.GetFeatureName(), state.model.Id, fmt.Sprintf("%v", state.model))
 			err := h.database.UpdateChargePointStatus(state.model)
 			if err != nil {
 				h.logger.Error("update status", err)
