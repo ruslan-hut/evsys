@@ -139,6 +139,9 @@ func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *in
 }
 
 func (h *SystemHandler) OnStart() error {
+	h.mux.Lock()
+	defer h.mux.Unlock()
+
 	totalPoints := 0
 	totalConnectors := 0
 
@@ -651,8 +654,6 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core.StatusNotificationRequest) (*core.StatusNotificationResponse, error) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
-	id := utility.NewUUID()
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("connector=%d; status=%s; id=%s", request.ConnectorId, request.Status, id))
 
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
@@ -687,7 +688,6 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		state.model.StatusTime = request.Timestamp.Time
 		state.model.Info = request.Info
 		if h.database != nil {
-			h.logger.FeatureEvent(request.GetFeatureName(), state.model.Id, fmt.Sprintf("id=%s", id))
 			err := h.database.UpdateChargePointStatus(state.model)
 			if err != nil {
 				h.logger.Error("update status", err)
