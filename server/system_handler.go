@@ -390,6 +390,8 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	transaction := &models.Transaction{
 		IdTag:         userTag.IdTag,
+		IdTagNote:     userTag.Note,
+		Username:      userTag.Username,
 		IsFinished:    false,
 		ConnectorId:   request.ConnectorId,
 		ChargePointId: chargePointId,
@@ -407,8 +409,6 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	if h.database != nil {
 
-		transaction.IdTagNote = userTag.Note
-		transaction.Username = userTag.Username
 		_ = h.database.UpdateTagLastSeen(userTag)
 
 		if h.billing != nil {
