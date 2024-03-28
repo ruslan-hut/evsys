@@ -32,8 +32,8 @@ type ChargePointState struct {
 	model             *models.ChargePoint
 }
 
-func newChargePointState(chp *models.ChargePoint) ChargePointState {
-	return ChargePointState{
+func newChargePointState(chp *models.ChargePoint) *ChargePointState {
+	return &ChargePointState{
 		connectors:   make(map[int]*models.Connector),
 		transactions: make(map[int]*int),
 		model:        chp,
@@ -49,7 +49,7 @@ func (st *ChargePointState) unregisterTransaction(transactionId int) {
 }
 
 type SystemHandler struct {
-	chargePoints   map[string]ChargePointState
+	chargePoints   map[string]*ChargePointState
 	database       internal.Database
 	billing        internal.BillingService
 	payment        internal.PaymentService
@@ -65,7 +65,7 @@ type SystemHandler struct {
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
-		chargePoints:   make(map[string]ChargePointState),
+		chargePoints:   make(map[string]*ChargePointState),
 		eventListeners: make([]internal.EventHandler, 0),
 		location:       location,
 		mux:            &sync.Mutex{},
@@ -139,6 +139,9 @@ func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *in
 }
 
 func (h *SystemHandler) OnStart() error {
+	totalPoints := 0
+	totalConnectors := 0
+
 	if h.database != nil {
 
 		err := h.database.ResetOnlineStatus()
@@ -154,25 +157,18 @@ func (h *SystemHandler) OnStart() error {
 			})
 			return fmt.Errorf("failed to load charge points from database: %s", err)
 		}
-
-		// load connectors from database
-		connectors, err := h.database.GetConnectors()
-		if err != nil {
-			h.notifyEventListeners(internal.Information, &internal.EventMessage{
-				Info: fmt.Sprintf("Start failed; load connectors from database: %s", err),
-			})
-			return fmt.Errorf("failed to load connectors from database: %s", err)
-		}
+		totalPoints = len(chargePoints)
 
 		for _, cp := range chargePoints {
-			state := newChargePointState(&cp)
+			state := newChargePointState(cp)
 			state.status = core.GetStatus(cp.Status)
 			state.errorCode = core.GetErrorCode(cp.ErrorCode)
 			if !cp.IsEnabled {
 				state.status = core.ChargePointStatusUnavailable
 			}
-			for _, c := range connectors {
-				if c.ChargePointId == cp.Id {
+			if cp.Connectors != nil {
+				totalConnectors += len(cp.Connectors)
+				for _, c := range cp.Connectors {
 					c.Init()
 					state.connectors[c.Id] = c
 					if c.CurrentTransactionId != -1 {
@@ -182,7 +178,7 @@ func (h *SystemHandler) OnStart() error {
 			}
 			h.chargePoints[cp.Id] = state
 		}
-		h.logger.Debug(fmt.Sprintf("loaded %d charge points, %d connectors from database", len(chargePoints), len(connectors)))
+		h.logger.FeatureEvent("Start", "", fmt.Sprintf("loaded %d charge points, %d connectors from database", totalPoints, totalConnectors))
 
 		// load transactions from database
 		transaction, err := h.database.GetLastTransaction()
@@ -215,7 +211,7 @@ func (h *SystemHandler) OnStart() error {
 	go h.checkAndFinishTransactions()
 
 	go h.notifyEventListeners(internal.Information, &internal.EventMessage{
-		Info: "Central system started",
+		Info: fmt.Sprintf("Started with %d charge points, %d connectors", totalPoints, totalConnectors),
 	})
 
 	return nil
@@ -229,7 +225,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 		h.logger.Warn("invalid charge point id")
 		return
 	}
-	cp := models.ChargePoint{
+	cp := &models.ChargePoint{
 		Id:          chargePointId,
 		Title:       fmt.Sprintf("(new) %s", chargePointId),
 		IsEnabled:   true,
@@ -239,12 +235,12 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 		AccessLevel: 10, // only users with equal or higher level can access this charge point
 	}
 	if h.database != nil {
-		err := h.database.AddChargePoint(&cp)
+		err := h.database.AddChargePoint(cp)
 		if err != nil {
 			h.logger.Error("failed to add charge point to database: %s", err)
 		}
 	}
-	h.chargePoints[chargePointId] = newChargePointState(&cp)
+	h.chargePoints[chargePointId] = newChargePointState(cp)
 }
 
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
@@ -272,7 +268,7 @@ func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState,
 			state, ok = h.chargePoints[chargePointId]
 		}
 	}
-	return &state, ok
+	return state, ok
 }
 
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.BootNotificationRequest) (*core.BootNotificationResponse, error) {

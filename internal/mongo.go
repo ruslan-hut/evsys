@@ -118,18 +118,30 @@ func (m *MongoDB) ReadLog() (interface{}, error) {
 	return logMessages, nil
 }
 
-func (m *MongoDB) GetChargePoints() ([]models.ChargePoint, error) {
+// GetChargePoints returns data of all charge points with all nested connectors
+func (m *MongoDB) GetChargePoints() ([]*models.ChargePoint, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
 	}
 	defer m.disconnect(connection)
 
-	var chargePoints []models.ChargePoint
+	pipeline := bson.A{
+		bson.D{
+			{"$lookup",
+				bson.D{
+					{"from", collectionConnectors},
+					{"localField", "charge_point_id"},
+					{"foreignField", "charge_point_id"},
+					{"as", "connectors"},
+				},
+			},
+		},
+	}
+
+	var chargePoints []*models.ChargePoint
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
-	filter := bson.D{}
-	//opts := options.Find()
-	cursor, err := collection.Find(m.ctx, filter)
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, err
 	}

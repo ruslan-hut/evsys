@@ -8,7 +8,7 @@ type Database interface {
 	ReadLog() (interface{}, error)
 	GetLastStatus() ([]models.ChargePointStatus, error)
 
-	GetChargePoints() ([]models.ChargePoint, error)
+	GetChargePoints() ([]*models.ChargePoint, error)
 	UpdateChargePoint(chargePoint *models.ChargePoint) error
 	UpdateChargePointStatus(chargePoint *models.ChargePoint) error
 	UpdateOnlineStatus(chargePointId string, isOnline bool) error
