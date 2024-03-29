@@ -939,16 +939,18 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 				Info:          info,
 			}
 			go h.notifyEventListeners(internal.Alert, eventMessage)
-		}
-		if chp.Connectors != nil {
-			for _, c := range chp.Connectors {
-				// if point comes online, register all connectors with active transactions
-				// if point goes offline, unregister
-				if c.CurrentTransactionId != -1 {
-					if isOnline {
-						h.trigger.Register <- c
-					} else {
-						h.trigger.Unregister <- c.CurrentTransactionId
+
+			// check active transactions only if online status is changed
+			if chp.Connectors != nil {
+				for _, c := range chp.Connectors {
+					// if point comes online, register all connectors with active transactions
+					// if point goes offline, unregister
+					if c.CurrentTransactionId != -1 {
+						if isOnline {
+							h.trigger.Register <- c
+						} else {
+							h.trigger.Unregister <- c.CurrentTransactionId
+						}
 					}
 				}
 			}
