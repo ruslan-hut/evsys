@@ -407,14 +407,32 @@ func (m *MongoDB) GetChargePoint(id string) (*models.ChargePoint, error) {
 	}
 	defer m.disconnect(connection)
 
-	filter := bson.D{{"charge_point_id", id}}
+	pipeline := bson.A{
+		bson.D{{"$match", bson.D{{"charge_point_id", id}}}},
+		bson.D{
+			{"$lookup",
+				bson.D{
+					{"from", collectionConnectors},
+					{"localField", "charge_point_id"},
+					{"foreignField", "charge_point_id"},
+					{"as", "connectors"},
+				},
+			},
+		},
+	}
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
-	var chargePoint models.ChargePoint
-	err = collection.FindOne(m.ctx, filter).Decode(&chargePoint)
+	var chargePoints []*models.ChargePoint
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, err
 	}
-	return &chargePoint, nil
+	if err = cursor.All(m.ctx, &chargePoints); err != nil {
+		return nil, err
+	}
+	if len(chargePoints) == 0 {
+		return nil, fmt.Errorf("not found")
+	}
+	return chargePoints[0], nil
 }
 
 func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
