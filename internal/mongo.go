@@ -1072,7 +1072,10 @@ func (m *MongoDB) OnlineCounter() (map[string]int, error) {
 	}
 	defer m.disconnect(connection)
 
-	online := make(map[string]int)
+	type onlineCounter struct {
+		LocationId string `bson:"_id"`
+		Online     int    `bson:"online"`
+	}
 
 	pipeline := bson.A{
 		bson.D{{"$match", bson.D{{"is_online", true}}}},
@@ -1086,7 +1089,7 @@ func (m *MongoDB) OnlineCounter() (map[string]int, error) {
 		},
 	}
 
-	var result []bson.M
+	var result []*onlineCounter
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
@@ -1095,12 +1098,9 @@ func (m *MongoDB) OnlineCounter() (map[string]int, error) {
 	if err = cursor.All(m.ctx, &result); err != nil {
 		return nil, err
 	}
-	for _, item := range result {
-		id, ok := item["_id"].(string)
-		if !ok {
-			continue
-		}
-		online[id], _ = item["online"].(int)
+	online := make(map[string]int)
+	for _, r := range result {
+		online[r.LocationId] = r.Online
 	}
 	return online, nil
 }
