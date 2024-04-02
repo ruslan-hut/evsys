@@ -7,6 +7,7 @@ type Database interface {
 	WriteLogMessage(data Data) error
 	ReadLog() (interface{}, error)
 	GetLastStatus() ([]models.ChargePointStatus, error)
+	OnlineCounter() (map[string]int, error)
 
 	GetChargePoints() ([]*models.ChargePoint, error)
 	UpdateChargePoint(chargePoint *models.ChargePoint) error

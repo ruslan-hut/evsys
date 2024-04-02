@@ -1064,3 +1064,43 @@ func (m *MongoDB) SavePaymentOrder(order *models.PaymentOrder) error {
 	}
 	return nil
 }
+
+func (m *MongoDB) OnlineCounter() (map[string]int, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	online := make(map[string]int)
+
+	pipeline := bson.A{
+		bson.D{{"$match", bson.D{{"is_online", true}}}},
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$location_id"},
+					{"online", bson.D{{"$sum", 1}}},
+				},
+			},
+		},
+	}
+
+	var result []bson.M
+	collection := connection.Database(m.database).Collection(collectionChargePoints)
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	if err = cursor.All(m.ctx, &result); err != nil {
+		return nil, err
+	}
+	for _, item := range result {
+		id, ok := item["_id"].(string)
+		if !ok {
+			continue
+		}
+		online[id], _ = item["online"].(int)
+	}
+	return online, nil
+}

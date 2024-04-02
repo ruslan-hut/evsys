@@ -124,7 +124,6 @@ func (pool *Pool) checkAddClient(client *WebSocket) {
 		pool.clients[client] = true
 		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("registered new connection: total connections %v", len(pool.clients)))
 	}
-	observeConnections(len(pool.clients))
 	go client.watchdog.OnOnlineStatusChanged(client.id, true)
 }
 
@@ -145,7 +144,6 @@ func (pool *Pool) deleteClient(client *WebSocket) {
 		delete(pool.clients, client)
 		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("unregistered: total connections %v", len(pool.clients)))
 	}
-	observeConnections(len(pool.clients))
 }
 
 func (ws *WebSocket) ID() string {

@@ -74,11 +74,16 @@ func NewSystemHandler(location *time.Location) *SystemHandler {
 }
 
 func (h *SystemHandler) updateActiveTransactionsCounter() {
-	count := 0
+	// calculate transactions per locations
+	locations := make(map[string]int)
 	for _, cp := range h.chargePoints {
-		count += len(cp.transactions)
+		if cp.model.LocationId != "" {
+			locations[cp.model.LocationId] += len(cp.transactions)
+		}
 	}
-	observeTransactions(count)
+	for location, count := range locations {
+		observeTransactions(location, count)
+	}
 }
 
 func (h *SystemHandler) getTime() time.Time {
@@ -702,7 +707,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	errorCode := ""
 	if request.ErrorCode != core.NoError {
 		errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
-		observeError(chargePointId, request.VendorErrorCode)
+		observeError(state.model.LocationId, chargePointId, request.VendorErrorCode)
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%s: %v%s", connectorName, request.Status, errorCode))
 
@@ -959,6 +964,16 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	err = h.database.UpdateOnlineStatus(id, isOnline)
 	if err != nil {
 		h.logger.Error("update online status", err)
+	}
+
+	// observe online status per locations
+	onlineCounter, err := h.database.OnlineCounter()
+	if err != nil {
+		h.logger.Error("online counter", err)
+		return
+	}
+	for location, count := range onlineCounter {
+		observeConnections(location, count)
 	}
 }
 
