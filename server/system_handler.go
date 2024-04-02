@@ -972,9 +972,12 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 		h.logger.Error("online counter", err)
 		return
 	}
+	message := "online counter: "
 	for location, count := range onlineCounter {
+		message += fmt.Sprintf("%s: %d; ", location, count)
 		observeConnections(location, count)
 	}
+	h.logger.FeatureEvent("OnlineStatus", id, message)
 }
 
 func (h *SystemHandler) checkAndFinishTransactions() {
