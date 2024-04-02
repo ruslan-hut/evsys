@@ -959,25 +959,24 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 					}
 				}
 			}
+
+			// observe online status per locations
+			onlineCounter, err := h.database.OnlineCounter()
+			if err != nil {
+				h.logger.Error("online counter", err)
+				return
+			}
+			if onlineCounter != nil {
+				for location, count := range onlineCounter {
+					observeConnections(location, count)
+				}
+			}
 		}
 	}
 	err = h.database.UpdateOnlineStatus(id, isOnline)
 	if err != nil {
 		h.logger.Error("update online status", err)
 	}
-
-	// observe online status per locations
-	onlineCounter, err := h.database.OnlineCounter()
-	if err != nil {
-		h.logger.Error("online counter", err)
-		return
-	}
-	message := "online counter: "
-	for location, count := range onlineCounter {
-		message += fmt.Sprintf("%s: %d; ", location, count)
-		observeConnections(location, count)
-	}
-	h.logger.FeatureEvent("OnlineStatus", id, message)
 }
 
 func (h *SystemHandler) checkAndFinishTransactions() {
