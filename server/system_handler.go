@@ -926,6 +926,7 @@ func (h *SystemHandler) OnReset(chargePointId string, payload string) (*core.Res
 func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
+
 	chp, err := h.database.GetChargePoint(id)
 	if chp != nil {
 		// don't send event and update database if status is not changed and charge point is offline
@@ -959,23 +960,24 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 					}
 				}
 			}
-
-			// observe online status per locations
-			onlineCounter, err := h.database.OnlineCounter()
-			if err != nil {
-				h.logger.Error("online counter", err)
-				return
-			}
-			if onlineCounter != nil {
-				for location, count := range onlineCounter {
-					observeConnections(location, count)
-				}
-			}
 		}
 	}
+
 	err = h.database.UpdateOnlineStatus(id, isOnline)
 	if err != nil {
 		h.logger.Error("update online status", err)
+	}
+
+	// observe online status per locations
+	onlineCounter, err := h.database.OnlineCounter()
+	if err != nil {
+		h.logger.Error("online counter", err)
+		return
+	}
+	if onlineCounter != nil {
+		for location, count := range onlineCounter {
+			observeConnections(location, count)
+		}
 	}
 }
 
