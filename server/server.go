@@ -123,8 +123,8 @@ func (pool *Pool) checkAddClient(client *WebSocket) {
 	if !pool.recipientAvailable(client.id) {
 		pool.clients[client] = true
 		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("registered new connection: total connections %v", len(pool.clients)))
-		go client.watchdog.OnOnlineStatusChanged(client.id, true)
 	}
+	go client.watchdog.OnOnlineStatusChanged(client.id, true)
 }
 
 func (pool *Pool) recipientAvailable(clientId string) bool {
