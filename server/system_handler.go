@@ -209,9 +209,11 @@ func (h *SystemHandler) OnStart() error {
 	h.trigger.Start()
 	// registering all connectors with active transactions
 	for _, cp := range h.chargePoints {
-		for _, c := range cp.connectors {
-			if c.CurrentTransactionId != -1 {
-				h.trigger.Register <- c
+		if cp.model.IsOnline {
+			for _, c := range cp.connectors {
+				if c.CurrentTransactionId != -1 {
+					h.trigger.Register <- c
+				}
 			}
 		}
 	}
