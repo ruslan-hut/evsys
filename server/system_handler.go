@@ -666,22 +666,28 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	if !ok {
 		return core.NewStatusNotificationResponse(), nil
 	}
-	currentTransactionId := 0
+
+	currentTransactionId := -1
 	state.errorCode = request.ErrorCode
+
 	if request.ConnectorId > 0 {
+
 		connector := h.getConnector(state, request.ConnectorId)
 		connector.Lock()
 		defer connector.Unlock()
+
 		connector.Status = string(request.Status)
 		connector.StatusTime = request.Timestamp.Time
 		connector.State = h.stateFromStatus(request.Status)
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
 		connector.ErrorCode = string(request.ErrorCode)
+
 		if request.Status == core.ChargePointStatusAvailable {
 			connector.CurrentTransactionId = -1
 			connector.CurrentPowerLimit = 0
 		}
+
 		if h.database != nil {
 			err := h.database.UpdateConnector(connector)
 			if err != nil {
@@ -689,6 +695,20 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			}
 		}
 		currentTransactionId = connector.CurrentTransactionId
+
+		// stop listen on meter values if charge point is suspended
+		if request.Status == core.ChargePointStatusSuspendedEV || request.Status == core.ChargePointStatusSuspendedEVSE {
+			if currentTransactionId >= 0 {
+				h.trigger.Unregister <- currentTransactionId
+			}
+		}
+		// start listen on meter values if charge point is charging
+		if request.Status == core.ChargePointStatusCharging {
+			if currentTransactionId >= 0 {
+				h.trigger.Register <- connector
+			}
+		}
+
 	} else {
 		state.status = request.Status
 		state.model.Status = string(request.Status)
