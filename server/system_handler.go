@@ -209,12 +209,8 @@ func (h *SystemHandler) OnStart() error {
 	h.trigger.Start()
 	// registering all connectors with active transactions
 	for _, cp := range h.chargePoints {
-		if cp.model.IsOnline {
-			for _, c := range cp.connectors {
-				if c.CurrentTransactionId != -1 {
-					h.trigger.Register <- c
-				}
-			}
+		for _, c := range cp.connectors {
+			h.checkListenTransaction(c, cp.model.IsOnline)
 		}
 	}
 
@@ -448,7 +444,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		}
 	}
 
-	h.trigger.Register <- connector
+	h.checkListenTransaction(connector, state.model.IsOnline)
 
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
@@ -696,18 +692,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		}
 		currentTransactionId = connector.CurrentTransactionId
 
-		// stop listen on meter values if charge point is suspended
-		if request.Status == core.ChargePointStatusSuspendedEV || request.Status == core.ChargePointStatusSuspendedEVSE {
-			if currentTransactionId >= 0 {
-				h.trigger.Unregister <- currentTransactionId
-			}
-		}
-		// start listen on meter values if charge point is charging
-		if request.Status == core.ChargePointStatusCharging {
-			if currentTransactionId >= 0 {
-				h.trigger.Register <- connector
-			}
-		}
+		h.checkListenTransaction(connector, state.model.IsOnline)
 
 	} else {
 		state.status = request.Status
@@ -971,15 +956,7 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 			// check active transactions only if online status is changed
 			if chp.Connectors != nil {
 				for _, c := range chp.Connectors {
-					// if point comes online, register all connectors with active transactions
-					// if point goes offline, unregister
-					if c.CurrentTransactionId != -1 {
-						if isOnline {
-							h.trigger.Register <- c
-						} else {
-							h.trigger.Unregister <- c.CurrentTransactionId
-						}
-					}
+					h.checkListenTransaction(c, isOnline)
 				}
 			}
 		}
@@ -1074,6 +1051,19 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		go h.notifyEventListeners(internal.Alert, eventMessage)
 	}
 	h.updateActiveTransactionsCounter()
+}
+
+func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOnline bool) {
+	if connector.CurrentTransactionId >= 0 {
+		if !isOnline {
+			h.trigger.Unregister <- connector.CurrentTransactionId
+		} else if connector.Status == string(core.ChargePointStatusCharging) {
+			h.trigger.Register <- connector
+		} else {
+			h.trigger.Unregister <- connector.CurrentTransactionId
+
+		}
+	}
 }
 
 func splitIdTag(idTag string) (string, string) {
