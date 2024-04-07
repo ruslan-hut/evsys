@@ -1057,11 +1057,10 @@ func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOn
 	if connector.CurrentTransactionId >= 0 {
 		if !isOnline {
 			h.trigger.Unregister <- connector.CurrentTransactionId
-		} else if connector.Status == string(core.ChargePointStatusCharging) {
-			h.trigger.Register <- connector
-		} else {
+		} else if connector.Status == string(core.ChargePointStatusSuspendedEV) || connector.Status == string(core.ChargePointStatusSuspendedEVSE) {
 			h.trigger.Unregister <- connector.CurrentTransactionId
-
+		} else {
+			h.trigger.Register <- connector
 		}
 	}
 }
