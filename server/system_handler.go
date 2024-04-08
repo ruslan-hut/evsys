@@ -270,7 +270,6 @@ func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Conn
 	}
 	// create new connector
 	connector = models.NewConnector(id, cps.model.Id)
-	connector.Init()
 	cps.connectors[id] = connector
 	if h.database != nil {
 		err := h.database.AddConnector(connector)
@@ -389,7 +388,10 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	connector := h.getConnector(state, request.ConnectorId)
 	connector.Lock()
-	defer connector.Unlock()
+	defer func() {
+		connector.Unlock()
+		h.checkListenTransaction(connector, state.model.IsOnline)
+	}()
 
 	if connector.CurrentTransactionId >= 0 && h.database != nil {
 
@@ -474,8 +476,6 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		}
 	}
 
-	h.checkListenTransaction(connector, state.model.IsOnline)
-
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
 		ConnectorId:   transaction.ConnectorId,
@@ -502,8 +502,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		return core.NewStopTransactionResponse(), nil
 	}
 
-	// stop requests for meter values
-	h.trigger.Unregister <- request.TransactionId
 	state.unregisterTransaction(request.TransactionId)
 	h.updateActiveTransactionsCounter()
 
@@ -523,7 +521,10 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	connector := h.getConnector(state, transaction.ConnectorId)
 	connector.Lock()
-	defer connector.Unlock()
+	defer func() {
+		connector.Unlock()
+		h.checkListenTransaction(connector, state.model.IsOnline)
+	}()
 
 	connector.CurrentTransactionId = -1
 	connector.CurrentPowerLimit = 0
