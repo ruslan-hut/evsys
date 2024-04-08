@@ -43,3 +43,54 @@ func observeError(location, chargePointId, code string) {
 	}
 	errorCounts.With(prometheus.Labels{"location": location, "code": code, "charge_point_id": chargePointId}).Inc()
 }
+
+var transactionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+	Namespace: "ocpp",
+	Name:      "transaction_count",
+	Help:      "Total number of transactions.",
+}, []string{"location", "charge_point_id"})
+
+func countTransaction(location, chargePointId string) {
+	if len(location) == 0 || len(chargePointId) == 0 {
+		return
+	}
+	transactionCounter.With(
+		prometheus.Labels{
+			"location":        location,
+			"charge_point_id": chargePointId,
+		}).Inc()
+}
+
+var powerCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+	Namespace: "ocpp",
+	Name:      "consumed_power",
+	Help:      "Consumed power.",
+}, []string{"location", "charge_point_id"})
+
+func countConsumedPower(location, chargePointId string, power float64) {
+	if len(location) == 0 || len(chargePointId) == 0 {
+		return
+	}
+	powerCounter.With(
+		prometheus.Labels{
+			"location":        location,
+			"charge_point_id": chargePointId,
+		}).Add(power)
+}
+
+var powerRate = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: "ocpp",
+	Name:      "current_power_rate",
+	Help:      "Power rate on current transactions.",
+}, []string{"location", "charge_point_id"})
+
+func observePowerRate(location, chargePointId string, power float64) {
+	if len(location) == 0 {
+		return
+	}
+	powerRate.With(
+		prometheus.Labels{
+			"location":        location,
+			"charge_point_id": chargePointId,
+		}).Set(power)
+}

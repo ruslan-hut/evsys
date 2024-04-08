@@ -600,20 +600,29 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		go h.payment.TransactionPayment(transaction)
 	}
 
-	consumed := utility.IntToString(transaction.MeterStop - transaction.MeterStart)
-	price := utility.IntAsPrice(transaction.PaymentAmount)
-	eventMessage := &internal.EventMessage{
-		ChargePointId: chargePointId,
-		ConnectorId:   transaction.ConnectorId,
-		Time:          transaction.TimeStart,
-		Username:      transaction.Username,
-		IdTag:         transaction.IdTag,
-		Status:        connector.Status,
-		TransactionId: transaction.Id,
-		Info:          fmt.Sprintf("consumed %s kW; %s €", consumed, price),
-		Payload:       request,
-	}
-	go h.notifyEventListeners(internal.TransactionStop, eventMessage)
+	go func() {
+		consumedPower := transaction.MeterStop - transaction.MeterStart
+		if consumedPower < 0 {
+			consumedPower = 0
+		}
+		countTransaction(state.model.LocationId, chargePointId)
+		countConsumedPower(state.model.LocationId, chargePointId, float64(consumedPower))
+
+		consumed := utility.IntToString(consumedPower)
+		price := utility.IntAsPrice(transaction.PaymentAmount)
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			Time:          transaction.TimeStart,
+			Username:      transaction.Username,
+			IdTag:         transaction.IdTag,
+			Status:        connector.Status,
+			TransactionId: transaction.Id,
+			Info:          fmt.Sprintf("consumed %s kW; %s €", consumed, price),
+			Payload:       request,
+		}
+		h.notifyEventListeners(internal.TransactionStop, eventMessage)
+	}()
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("stopped transaction %d %s", request.TransactionId, request.Reason))
 	return core.NewStopTransactionResponse(), nil
@@ -643,6 +652,16 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 						currentValue = utility.ToInt(value.Value)
 						currentTime := time.Now()
+
+						consumed := currentValue - transaction.MeterStart
+						if consumed > 0 {
+							// calculate power rate
+							duration := currentTime.Sub(transaction.TimeStart)
+							if duration > 0 {
+								power := float64(consumed) / duration.Seconds() / 3600
+								observePowerRate(chp.model.LocationId, chargePointId, power)
+							}
+						}
 
 						transactionMeter := &models.TransactionMeter{
 							Id:              transaction.Id,
