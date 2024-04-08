@@ -256,14 +256,26 @@ func (h *SystemHandler) addChargePoint(chargePointId string) *ChargePointState {
 
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
 	connector, ok := cps.connectors[id]
-	if !ok {
-		connector = models.NewConnector(id, cps.model.Id)
-		cps.connectors[id] = connector
-		if h.database != nil {
-			err := h.database.AddConnector(connector)
-			if err != nil {
-				h.logger.Error("failed to add connector to database", err)
-			}
+	if ok {
+		return connector
+	}
+	// check if connector is in database
+	if h.database != nil {
+		c, _ := h.database.GetConnector(id, cps.model.Id)
+		if c != nil {
+			c.Init()
+			cps.connectors[id] = c
+			return c
+		}
+	}
+	// create new connector
+	connector = models.NewConnector(id, cps.model.Id)
+	connector.Init()
+	cps.connectors[id] = connector
+	if h.database != nil {
+		err := h.database.AddConnector(connector)
+		if err != nil {
+			h.logger.Error("failed to add connector to database", err)
 		}
 	}
 	return connector
@@ -688,7 +700,10 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 
 		connector := h.getConnector(state, request.ConnectorId)
 		connector.Lock()
-		defer connector.Unlock()
+		defer func() {
+			connector.Unlock()
+			h.checkListenTransaction(connector, state.model.IsOnline)
+		}()
 
 		connector.Status = string(request.Status)
 		connector.StatusTime = request.Timestamp.Time
@@ -709,8 +724,6 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			}
 		}
 		currentTransactionId = connector.CurrentTransactionId
-
-		h.checkListenTransaction(connector, state.model.IsOnline)
 
 	} else {
 		state.status = request.Status
