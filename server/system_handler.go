@@ -952,35 +952,45 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
 
-	chp, err := h.database.GetChargePoint(id)
-	if chp != nil {
-		// don't send event and update database if status is not changed and charge point is offline
-		if !isOnline && !chp.IsOnline {
-			return
-		}
-		if chp.IsOnline != isOnline {
-			info := fmt.Sprintf("comes online; was offline %v", utility.TimeAgo(chp.EventTime))
-			if !isOnline {
-				info = "goes OFFLINE"
-			}
-			eventMessage := &internal.EventMessage{
-				ChargePointId: id,
-				ConnectorId:   0,
-				Time:          h.getTime(),
-				Info:          info,
-			}
-			go h.notifyEventListeners(internal.Alert, eventMessage)
+	state, ok := h.getChargePoint(id)
+	if !ok {
+		h.logger.Warn(fmt.Sprintf("online status: charge point %s not found", id))
+		return
+	}
+	if state.model == nil {
+		return
+	}
 
-			// check active transactions only if online status is changed
-			if chp.Connectors != nil {
-				for _, c := range chp.Connectors {
-					h.checkListenTransaction(c, isOnline)
-				}
+	// don't send event and update database if status is not changed and charge point is offline
+	if !isOnline && !state.model.IsOnline {
+		return
+	}
+
+	if state.model.IsOnline != isOnline {
+		info := fmt.Sprintf("comes online; was offline %v", utility.TimeAgo(state.model.EventTime))
+		if !isOnline {
+			info = "goes OFFLINE"
+		}
+		eventMessage := &internal.EventMessage{
+			ChargePointId: id,
+			ConnectorId:   0,
+			Time:          h.getTime(),
+			Info:          info,
+		}
+		go h.notifyEventListeners(internal.Alert, eventMessage)
+
+		// check active transactions only if online status is changed
+		if state.connectors != nil {
+			for _, c := range state.connectors {
+				h.checkListenTransaction(c, isOnline)
 			}
 		}
 	}
 
-	err = h.database.UpdateOnlineStatus(id, isOnline)
+	state.model.IsOnline = isOnline
+	state.model.EventTime = h.getTime()
+
+	err := h.database.UpdateOnlineStatus(id, isOnline)
 	if err != nil {
 		h.logger.Error("update online status", err)
 	}
@@ -1072,8 +1082,8 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 }
 
 func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOnline bool) {
-	h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 	if connector.CurrentTransactionId >= 0 {
+		h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 		if !isOnline {
 			h.trigger.Unregister <- connector.CurrentTransactionId
 		} else if connector.Status == string(core.ChargePointStatusSuspendedEV) || connector.Status == string(core.ChargePointStatusSuspendedEVSE) {
