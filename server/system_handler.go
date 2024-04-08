@@ -168,23 +168,8 @@ func (h *SystemHandler) OnStart() error {
 		totalPoints = len(chargePoints)
 
 		for _, cp := range chargePoints {
-			state := newChargePointState(cp)
-			state.status = core.GetStatus(cp.Status)
-			state.errorCode = core.GetErrorCode(cp.ErrorCode)
-			if !cp.IsEnabled {
-				state.status = core.ChargePointStatusUnavailable
-			}
-			if cp.Connectors != nil {
-				totalConnectors += len(cp.Connectors)
-				for _, c := range cp.Connectors {
-					c.Init()
-					state.connectors[c.Id] = c
-					if c.CurrentTransactionId != -1 {
-						state.registerTransaction(c.CurrentTransactionId)
-					}
-				}
-			}
-			h.chargePoints[cp.Id] = state
+			h.initializeChargePointState(cp)
+			totalConnectors += len(cp.Connectors)
 		}
 		h.logger.FeatureEvent("Start", "", fmt.Sprintf("loaded %d charge points, %d connectors from database", totalPoints, totalConnectors))
 
@@ -223,13 +208,33 @@ func (h *SystemHandler) OnStart() error {
 	return nil
 }
 
+func (h *SystemHandler) initializeChargePointState(chp *models.ChargePoint) *ChargePointState {
+	state := newChargePointState(chp)
+	state.status = core.GetStatus(chp.Status)
+	state.errorCode = core.GetErrorCode(chp.ErrorCode)
+	if !chp.IsEnabled {
+		state.status = core.ChargePointStatusUnavailable
+	}
+	if chp.Connectors != nil {
+		for _, c := range chp.Connectors {
+			c.Init()
+			state.connectors[c.Id] = c
+			if c.CurrentTransactionId != -1 {
+				state.registerTransaction(c.CurrentTransactionId)
+			}
+		}
+	}
+	h.chargePoints[chp.Id] = state
+	return state
+}
+
 /**
  * Add a new charge point to the system and database
  */
-func (h *SystemHandler) addChargePoint(chargePointId string) {
+func (h *SystemHandler) addChargePoint(chargePointId string) *ChargePointState {
 	if chargePointId == "" {
 		h.logger.Warn("invalid charge point id")
-		return
+		return nil
 	}
 	cp := &models.ChargePoint{
 		Id:          chargePointId,
@@ -246,7 +251,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string) {
 			h.logger.Error("failed to add charge point to database: %s", err)
 		}
 	}
-	h.chargePoints[chargePointId] = newChargePointState(cp)
+	return h.initializeChargePointState(cp)
 }
 
 func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
@@ -267,14 +272,27 @@ func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Conn
 // select charge point
 func (h *SystemHandler) getChargePoint(chargePointId string) (*ChargePointState, bool) {
 	state, ok := h.chargePoints[chargePointId]
-	if !ok {
-		h.logger.Warn(fmt.Sprintf("unknown charging point: %s", chargePointId))
-		if h.acceptPoints {
-			h.addChargePoint(chargePointId)
-			state, ok = h.chargePoints[chargePointId]
+	if ok {
+		return state, ok
+	}
+
+	if h.database != nil {
+		chargePoint, _ := h.database.GetChargePoint(chargePointId)
+		if chargePoint != nil {
+			state = h.initializeChargePointState(chargePoint)
+			return state, true
 		}
 	}
-	return state, ok
+
+	h.logger.Warn(fmt.Sprintf("unknown charging point: %s", chargePointId))
+	if h.acceptPoints {
+		state = h.addChargePoint(chargePointId)
+	}
+
+	if state == nil {
+		return nil, false
+	}
+	return state, true
 }
 
 func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.BootNotificationRequest) (*core.BootNotificationResponse, error) {
