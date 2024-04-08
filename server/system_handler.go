@@ -1054,6 +1054,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 }
 
 func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOnline bool) {
+	h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 	if connector.CurrentTransactionId >= 0 {
 		if !isOnline {
 			h.trigger.Unregister <- connector.CurrentTransactionId
