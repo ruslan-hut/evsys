@@ -1124,6 +1124,8 @@ func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOn
 		} else {
 			h.trigger.Register <- connector
 		}
+	} else {
+		h.trigger.Unregister <- connector.CurrentTransactionId
 	}
 }
 
