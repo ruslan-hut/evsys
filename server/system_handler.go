@@ -655,10 +655,10 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 						consumed := currentValue - transaction.MeterStart
 						if consumed > 0 {
-							// calculate power rate
+							// calculate power rate as kW per hour
 							duration := currentTime.Sub(transaction.TimeStart)
 							if duration > 0 {
-								power := float64(consumed) / duration.Seconds() / 3600
+								power := float64(consumed) * (3600 / 1000) / duration.Seconds()
 								observePowerRate(chp.model.LocationId, chargePointId, power)
 							}
 						}
