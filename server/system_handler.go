@@ -504,6 +504,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	state.unregisterTransaction(request.TransactionId)
 	h.updateActiveTransactionsCounter()
+	observePowerRate(state.model.LocationId, chargePointId, 0)
 
 	if h.database == nil {
 		return core.NewStopTransactionResponse(), nil
