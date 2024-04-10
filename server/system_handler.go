@@ -50,6 +50,7 @@ func (st *ChargePointState) unregisterTransaction(transactionId int) {
 
 type SystemHandler struct {
 	chargePoints   map[string]*ChargePointState
+	lastMeter      map[int]*models.TransactionMeter
 	database       internal.Database
 	billing        internal.BillingService
 	payment        internal.PaymentService
@@ -66,6 +67,7 @@ type SystemHandler struct {
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
 		chargePoints:   make(map[string]*ChargePointState),
+		lastMeter:      make(map[int]*models.TransactionMeter),
 		eventListeners: make([]internal.EventHandler, 0),
 		location:       location,
 		mux:            &sync.Mutex{},
@@ -504,6 +506,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	state.unregisterTransaction(request.TransactionId)
 	h.updateActiveTransactionsCounter()
+	delete(h.lastMeter, request.TransactionId)
 	observePowerRate(state.model.LocationId, chargePointId, 0)
 
 	if h.database == nil {
@@ -654,15 +657,17 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 						currentValue = utility.ToInt(value.Value)
 						currentTime := time.Now()
 
-						consumed := currentValue - transaction.MeterStart
-						if consumed > 0 {
-							// calculate power rate as kW per hour
-							duration := currentTime.Sub(transaction.TimeStart)
-							if duration > 0 {
-								power := float64(consumed) * (3600 / 1000) / duration.Seconds()
-								observePowerRate(chp.model.LocationId, chargePointId, power)
+						// calculate power rate as kW per hour
+						power := 0.0
+						lastMeter, found := h.lastMeter[transaction.Id]
+						if found {
+							consumed := currentValue - lastMeter.Value
+							duration := currentTime.Sub(lastMeter.Time)
+							if consumed > 0 && duration > 0 {
+								power = float64(consumed) * (3600 / 1000) / duration.Seconds()
 							}
 						}
+						observePowerRate(chp.model.LocationId, chargePointId, power)
 
 						transactionMeter := &models.TransactionMeter{
 							Id:              transaction.Id,
@@ -674,6 +679,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 							ConnectorId:     connector.Id,
 							ConnectorStatus: connector.Status,
 						}
+						h.lastMeter[transaction.Id] = transactionMeter
 
 						err = h.billing.OnMeterValue(transaction, transactionMeter)
 						if err != nil {
