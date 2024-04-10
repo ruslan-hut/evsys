@@ -859,6 +859,46 @@ func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.Tra
 	return meterValues, nil
 }
 
+// ReadLastMeterValues returns last meter values for all transactions
+func (m *MongoDB) ReadLastMeterValues() ([]*models.TransactionMeter, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	type result struct {
+		TransactionId int `bson:"_id"`
+		Latest        *models.TransactionMeter
+	}
+
+	pipeline := bson.A{
+		bson.D{{"$sort", bson.D{{"time", -1}}}},
+		bson.D{
+			{"$group",
+				bson.D{
+					{"_id", "$transaction_id"},
+					{"latest", bson.D{{"$first", "$$ROOT"}}},
+				},
+			},
+		},
+	}
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var results []result
+	if err = cursor.All(m.ctx, &results); err != nil {
+		return nil, err
+	}
+	var meterValues []*models.TransactionMeter
+	for _, res := range results {
+		meterValues = append(meterValues, res.Latest)
+	}
+	return meterValues, nil
+}
+
 func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
 	connection, err := m.connect()
 	if err != nil {

@@ -184,6 +184,14 @@ func (h *SystemHandler) OnStart() error {
 			newTransactionId = transaction.Id + 1
 		}
 
+		// load last meter values from database; used to calculate power rate
+		meterValues, err := h.database.ReadLastMeterValues()
+		if meterValues != nil {
+			for _, mv := range meterValues {
+				h.lastMeter[mv.Id] = mv
+			}
+		}
+
 		// load firmware status from database
 		// load diagnostics status from database
 	}

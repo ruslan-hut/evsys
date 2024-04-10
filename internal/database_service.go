@@ -45,6 +45,7 @@ type Database interface {
 	ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error)
 	ReadAllTransactionMeterValues(transactionId int) ([]models.TransactionMeter, error)
 	DeleteTransactionMeterValues(transactionId int) error
+	ReadLastMeterValues() ([]*models.TransactionMeter, error)
 
 	GetSubscriptions() ([]models.UserSubscription, error)
 	AddSubscription(subscription *models.UserSubscription) error
