@@ -669,9 +669,13 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 						}
 						observePowerRate(chp.model.LocationId, chargePointId, power)
 
+						// for meter value, power rate is in W per hour
+						powerRate := int(power * 1000)
+
 						transactionMeter := &models.TransactionMeter{
 							Id:              transaction.Id,
 							Value:           currentValue,
+							PowerRate:       powerRate,
 							Time:            currentTime,
 							Minute:          currentTime.Unix() / 60,
 							Unit:            string(value.Unit),
