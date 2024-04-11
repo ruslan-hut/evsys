@@ -819,6 +819,23 @@ func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) 
 	return err
 }
 
+func (m *MongoDB) AddSampleMeterValue(meterValue *models.TransactionMeter) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionMeterValues)
+	filter := bson.D{
+		{"transaction_id", meterValue.Id},
+		{"measurand", meterValue.Measurand},
+	}
+	set := bson.M{"$set": meterValue}
+	_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
+	return err
+}
+
 // ReadTransactionMeterValue read last transaction meter value sorted by timestamp
 func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error) {
 	connection, err := m.connect()

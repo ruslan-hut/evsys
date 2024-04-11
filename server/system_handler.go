@@ -647,23 +647,30 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 	}
 	connector := h.getConnector(chp, request.ConnectorId)
 
+	if request.TransactionId == nil {
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
+		return core.NewMeterValuesResponse(), nil
+	}
+
 	transactionId := request.TransactionId
 	if transactionId != nil && h.database != nil {
 
 		transaction, err := h.database.GetTransaction(*transactionId)
 
 		currentValue := 0
+		currentTime := time.Now()
+
 		if err != nil {
 			h.logger.Error("get transaction failed", err)
 		} else {
 
 			for _, sampledValue := range request.MeterValue {
 				for _, value := range sampledValue.SampledValue {
+
+					currentValue = utility.ToInt(value.Value)
+
 					// read value of active energy import register only for triggered messages
 					if value.Context == types.ReadingContextTrigger && value.Measurand == types.MeasurandEnergyActiveImportRegister {
-
-						currentValue = utility.ToInt(value.Value)
-						currentTime := time.Now()
 
 						// calculate power rate as kW per hour
 						power := 0.0
@@ -711,7 +718,19 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 							h.logger.Error("add transaction meter value", err)
 						}
 					} else {
-						h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("transaction: %d - %v", transactionId, value))
+						//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("transaction: %d - %v", transactionId, value))
+						transactionMeter := &models.TransactionMeter{
+							Id:              transaction.Id,
+							Value:           currentValue,
+							PowerRate:       0,
+							Time:            currentTime,
+							Minute:          currentTime.Unix() / 60,
+							Unit:            string(value.Unit),
+							Measurand:       string(value.Measurand),
+							ConnectorId:     connector.Id,
+							ConnectorStatus: connector.Status,
+						}
+						_ = h.database.AddSampleMeterValue(transactionMeter)
 					}
 				}
 			}

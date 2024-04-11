@@ -42,6 +42,7 @@ type Database interface {
 	GetNotBilledTransactions() ([]*models.Transaction, error)
 
 	AddTransactionMeterValue(meterValue *models.TransactionMeter) error
+	AddSampleMeterValue(meterValue *models.TransactionMeter) error
 	ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error)
 	ReadAllTransactionMeterValues(transactionId int) ([]models.TransactionMeter, error)
 	DeleteTransactionMeterValues(transactionId int) error
