@@ -649,6 +649,14 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 	if request.TransactionId == nil {
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
+		// check, if we received a triggered message, need to unregister connector
+		for _, sampledValues := range request.MeterValue {
+			for _, value := range sampledValues.SampledValue {
+				if value.Context == types.ReadingContextTrigger {
+					h.trigger.UnregisterConnector(connector)
+				}
+			}
+		}
 		return core.NewMeterValuesResponse(), nil
 	}
 

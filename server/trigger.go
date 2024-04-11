@@ -69,3 +69,11 @@ func (t *Trigger) listen() {
 		}
 	}
 }
+
+func (t *Trigger) UnregisterConnector(connector *models.Connector) {
+	for id, c := range t.connectors {
+		if c == connector {
+			t.Unregister <- id
+		}
+	}
+}
