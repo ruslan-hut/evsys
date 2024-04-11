@@ -82,7 +82,7 @@ var powerRateGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: "ocpp",
 	Name:      "current_power_rate",
 	Help:      "Power rate on current transactions.",
-}, []string{"location", "charge_point_id, connector_id"})
+}, []string{"location", "charge_point_id", "connector_id"})
 
 func observePowerRate(location, chargePointId, connectorId string, power float64) {
 	if len(location) == 0 {
