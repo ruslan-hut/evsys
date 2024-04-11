@@ -507,6 +507,10 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	h.mux.Lock()
 	defer h.mux.Unlock()
 
+	// removing all listeners and observers
+	h.trigger.Unregister <- request.TransactionId
+	delete(h.lastMeter, request.TransactionId)
+
 	state, ok := h.getChargePoint(chargePointId)
 	if !ok {
 		return core.NewStopTransactionResponse(), nil
@@ -514,7 +518,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	state.unregisterTransaction(request.TransactionId)
 	h.updateActiveTransactionsCounter()
-	delete(h.lastMeter, request.TransactionId)
 	observePowerRate(state.model.LocationId, chargePointId, 0)
 
 	if h.database == nil {
@@ -535,7 +538,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	connector.Lock()
 	defer func() {
 		connector.Unlock()
-		h.checkListenTransaction(connector, state.model.IsOnline)
 	}()
 
 	connector.CurrentTransactionId = -1
@@ -682,49 +684,56 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 						// calculate power rate as kW per hour
 						power := 0.0
+						seconds := 0.0
+
 						lastMeter, found := h.lastMeter[transaction.Id]
 						if found {
 							consumed := currentValue - lastMeter.Value
-							duration := currentTime.Sub(lastMeter.Time)
-							if consumed > 0 && duration > 0 {
-								power = float64(consumed) * (3600 / 1000) / duration.Seconds()
+							seconds = currentTime.Sub(lastMeter.Time).Seconds()
+							if consumed > 0 && seconds > 0.0 {
+								power = float64(consumed) * (3600 / 1000) / seconds
 							}
 						}
-						observePowerRate(chp.model.LocationId, chargePointId, power)
 
-						// for meter value, power rate is in W per hour
-						powerRate := int(power * 1000)
+						// for accurate power rate, we need at least 5 seconds between two meter values
+						if seconds > 5.0 {
+							observePowerRate(chp.model.LocationId, chargePointId, power)
 
-						transactionMeter := &models.TransactionMeter{
-							Id:              transaction.Id,
-							Value:           currentValue,
-							PowerRate:       powerRate,
-							Time:            currentTime,
-							Minute:          currentTime.Unix() / 60,
-							Unit:            string(value.Unit),
-							Measurand:       string(value.Measurand),
-							ConnectorId:     connector.Id,
-							ConnectorStatus: connector.Status,
-						}
-						h.lastMeter[transaction.Id] = transactionMeter
+							// for meter value, power rate is in W per hour
+							powerRate := int(power * 1000)
 
-						err = h.billing.OnMeterValue(transaction, transactionMeter)
-						if err != nil {
-							eventMessage := &internal.EventMessage{
-								ChargePointId: chargePointId,
-								ConnectorId:   transaction.ConnectorId,
-								Username:      transaction.Username,
-								IdTag:         transaction.IdTag,
-								Info:          fmt.Sprintf("billing failed %v", err),
-								Payload:       request,
+							transactionMeter := &models.TransactionMeter{
+								Id:              transaction.Id,
+								Value:           currentValue,
+								PowerRate:       powerRate,
+								Time:            currentTime,
+								Minute:          currentTime.Unix() / 60,
+								Unit:            string(value.Unit),
+								Measurand:       string(value.Measurand),
+								ConnectorId:     connector.Id,
+								ConnectorStatus: connector.Status,
 							}
-							go h.notifyEventListeners(internal.Alert, eventMessage)
+							h.lastMeter[transaction.Id] = transactionMeter
+
+							err = h.billing.OnMeterValue(transaction, transactionMeter)
+							if err != nil {
+								eventMessage := &internal.EventMessage{
+									ChargePointId: chargePointId,
+									ConnectorId:   transaction.ConnectorId,
+									Username:      transaction.Username,
+									IdTag:         transaction.IdTag,
+									Info:          fmt.Sprintf("billing failed %v", err),
+									Payload:       request,
+								}
+								go h.notifyEventListeners(internal.Alert, eventMessage)
+							}
+
+							err = h.database.AddTransactionMeterValue(transactionMeter)
+							if err != nil {
+								h.logger.Error("add transaction meter value", err)
+							}
 						}
 
-						err = h.database.AddTransactionMeterValue(transactionMeter)
-						if err != nil {
-							h.logger.Error("add transaction meter value", err)
-						}
 					} else {
 						//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("transaction: %d - %v", transactionId, value))
 						transactionMeter := &models.TransactionMeter{
