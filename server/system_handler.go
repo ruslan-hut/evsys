@@ -518,7 +518,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 
 	state.unregisterTransaction(request.TransactionId)
 	h.updateActiveTransactionsCounter()
-	observePowerRate(state.model.LocationId, chargePointId, 0)
 
 	if h.database == nil {
 		return core.NewStopTransactionResponse(), nil
@@ -539,6 +538,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	defer func() {
 		connector.Unlock()
 	}()
+	id := fmt.Sprintf("%d", transaction.ConnectorId)
+	observePowerRate(state.model.LocationId, chargePointId, id, 0)
 
 	connector.CurrentTransactionId = -1
 	connector.CurrentPowerLimit = 0
@@ -697,7 +698,8 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 						// for accurate power rate, we need at least 5 seconds between two meter values
 						if seconds > 5.0 {
-							observePowerRate(chp.model.LocationId, chargePointId, power)
+							id := fmt.Sprintf("%d", connector.Id)
+							observePowerRate(chp.model.LocationId, chargePointId, id, power)
 
 							// for meter value, power rate is in W per hour
 							powerRate := int(power * 1000)
