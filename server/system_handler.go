@@ -662,6 +662,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 		}
 		return core.NewMeterValuesResponse(), nil
 	}
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
 
 	transactionId := request.TransactionId
 	if transactionId != nil && h.database != nil {
