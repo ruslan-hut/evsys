@@ -662,7 +662,6 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 		}
 		return core.NewMeterValuesResponse(), nil
 	}
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
 
 	transactionId := request.TransactionId
 	if transactionId != nil && h.database != nil {
@@ -698,7 +697,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 						}
 
 						// for accurate power rate, we need at least 5 seconds between two meter values
-						if seconds > 5.0 {
+						if seconds > 5.0 || found == false {
 							id := fmt.Sprintf("%d", connector.Id)
 							observePowerRate(chp.model.LocationId, chargePointId, id, power)
 
