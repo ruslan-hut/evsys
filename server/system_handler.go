@@ -667,15 +667,16 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 	if transactionId != nil && h.database != nil {
 
 		transaction, err := h.database.GetTransaction(*transactionId)
-
 		currentValue := 0
-		currentTime := time.Now()
 
 		if err != nil {
 			h.logger.Error("get transaction failed", err)
 		} else {
 
 			for _, sampledValue := range request.MeterValue {
+
+				currentTime := sampledValue.Timestamp.Time
+
 				for _, value := range sampledValue.SampledValue {
 
 					currentValue = utility.ToInt(value.Value)
@@ -727,7 +728,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 									Info:          fmt.Sprintf("billing failed %v", err),
 									Payload:       request,
 								}
-								go h.notifyEventListeners(internal.Alert, eventMessage)
+								h.notifyEventListeners(internal.Alert, eventMessage)
 							}
 
 							err = h.database.AddTransactionMeterValue(transactionMeter)
@@ -1180,7 +1181,7 @@ func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOn
 		h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 		if !isOnline {
 			h.trigger.Unregister <- connector.CurrentTransactionId
-		} else if connector.Status == string(core.ChargePointStatusSuspendedEV) || connector.Status == string(core.ChargePointStatusSuspendedEVSE) {
+		} else if len(connector.Status) != 0 && connector.Status != string(core.ChargePointStatusCharging) {
 			h.trigger.Unregister <- connector.CurrentTransactionId
 		} else {
 			h.trigger.Register <- connector
