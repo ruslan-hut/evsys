@@ -803,7 +803,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		}
 		currentTransactionId = connector.CurrentTransactionId
 
-		if request.Status == core.ChargePointStatusSuspendedEV || request.Status == core.ChargePointStatusSuspendedEVSE {
+		if request.Status != core.ChargePointStatusCharging {
 			observePowerRate(state.model.LocationId, chargePointId, strconv.Itoa(connector.Id), 0)
 		}
 
