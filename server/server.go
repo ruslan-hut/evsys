@@ -61,8 +61,7 @@ type WebSocket struct {
 type Pool struct {
 	register   chan *WebSocket
 	unregister chan *WebSocket
-	clients    map[*WebSocket]bool
-	broadcast  chan []byte
+	clients    map[string]*WebSocket
 	send       chan *envelope
 	logger     internal.LogHandler
 	mutex      *sync.Mutex
@@ -72,9 +71,8 @@ func NewPool(logger internal.LogHandler) *Pool {
 	return &Pool{
 		register:   make(chan *WebSocket),
 		unregister: make(chan *WebSocket),
-		clients:    make(map[*WebSocket]bool),
+		clients:    make(map[string]*WebSocket),
 		send:       make(chan *envelope),
-		broadcast:  make(chan []byte),
 		logger:     logger,
 		mutex:      &sync.Mutex{},
 	}
@@ -87,31 +85,20 @@ func (pool *Pool) Start() {
 			pool.checkAddClient(client)
 		case client := <-pool.unregister:
 			pool.deleteClient(client)
-		case message := <-pool.broadcast:
-			for client := range pool.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(pool.clients, client)
-				}
-			}
 		case env := <-pool.send:
-			for client := range pool.clients {
-				if client.id == env.recipient {
-					data, err := env.getMessageData()
-					if err != nil {
-						pool.logger.Error("encode request:", err)
-						break
-					}
-					select {
-					case client.send <- data:
-					default:
-						close(client.send)
-						delete(pool.clients, client)
-					}
+			if client, ok := pool.clients[env.recipient]; ok {
+				data, err := env.getMessageData()
+				if err != nil {
+					pool.logger.Error("encode request:", err)
 					break
 				}
+				select {
+				case client.send <- data:
+				default:
+					close(client.send)
+					delete(pool.clients, client.id)
+				}
+				break
 			}
 		}
 	}
@@ -121,14 +108,14 @@ func (pool *Pool) checkAddClient(client *WebSocket) {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
 	if !pool.recipientAvailable(client.id) {
-		pool.clients[client] = true
+		pool.clients[client.id] = client
 		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("registered new connection: total connections %v", len(pool.clients)))
 	}
 	go client.watchdog.OnOnlineStatusChanged(client.id, true)
 }
 
 func (pool *Pool) recipientAvailable(clientId string) bool {
-	for client := range pool.clients {
+	for _, client := range pool.clients {
 		if client.id == clientId {
 			return true
 		}
@@ -140,8 +127,8 @@ func (pool *Pool) recipientAvailable(clientId string) bool {
 func (pool *Pool) deleteClient(client *WebSocket) {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
-	if _, ok := pool.clients[client]; ok {
-		delete(pool.clients, client)
+	if _, ok := pool.clients[client.id]; ok {
+		delete(pool.clients, client.id)
 		pool.logger.FeatureEvent(featureNameWebSocket, client.id, fmt.Sprintf("unregistered: total connections %v", len(pool.clients)))
 	}
 }
@@ -209,7 +196,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 	//s.logger.Debug(fmt.Sprintf("connection initiated from remote %s", r.RemoteAddr))
 
 	// check id above existed connections
-	for client := range s.pool.clients {
+	for _, client := range s.pool.clients {
 		if client.id == id {
 			s.logger.Debug(fmt.Sprintf("%s requested new connection", id))
 			s.pool.unregister <- client
@@ -389,7 +376,7 @@ type Status struct {
 
 func (s *Server) GetStatus() []byte {
 	clientList := ""
-	for client := range s.pool.clients {
+	for _, client := range s.pool.clients {
 		clientList += client.id + ","
 	}
 	// remove the last comma
