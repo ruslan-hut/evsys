@@ -72,7 +72,7 @@ func NewPool(logger internal.LogHandler) *Pool {
 		register:   make(chan *WebSocket),
 		unregister: make(chan *WebSocket),
 		clients:    make(map[string]*WebSocket),
-		send:       make(chan *envelope),
+		send:       make(chan *envelope, 256),
 		logger:     logger,
 		mutex:      &sync.Mutex{},
 	}
