@@ -32,6 +32,10 @@ payment:
   enabled: true
   api_url: ${PAYMENT_API_URL}
   api_key: ${PAYMENT_API_KEY}
+ocpi:
+  enabled: true
+  url: ${OCPI_URL}
+  token: ${OCPI_TOKEN}
 telegram:
   enabled: true
   telegram_api_key: ${TELEGRAM_API_KEY}

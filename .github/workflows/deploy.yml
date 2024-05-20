@@ -32,6 +32,8 @@ jobs:
           sed -i 's|${PAYMENT_API_URL}|'"$PAYMENT_API_URL"'|g' evsys.yml
           sed -i 's|${PAYMENT_API_KEY}|'"$PAYMENT_API_KEY"'|g' evsys.yml
           sed -i 's|${TELEGRAM_API_KEY}|'"$TELEGRAM_API_KEY"'|g' evsys.yml
+          sed -i 's|${OCPI_URL}|'"$OCPI_URL"'|g' evsys.yml
+          sed -i 's|${OCPI_TOKEN}|'"$OCPI_TOKEN"'|g' evsys.yml
         env:
           TIME_ZONE: ${{ vars.TIME_ZONE }}
           PORT: ${{ vars.PORT }}
@@ -49,6 +51,8 @@ jobs:
           PAYMENT_API_URL: ${{ secrets.PAYMENT_API_URL }}
           PAYMENT_API_KEY: ${{ secrets.PAYMENT_API_KEY }}
           TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
+          OCPI_URL: ${{ vars.OCPI_URL }}
+          OCPI_TOKEN: ${{ secrets.OCPI_TOKEN }}
 
       - name: Copy Configuration to Server
         uses: appleboy/scp-action@master

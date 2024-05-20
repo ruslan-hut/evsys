@@ -44,6 +44,11 @@ type Config struct {
 		ApiUrl  string `yaml:"api_url" env-default:""`
 		ApiKey  string `yaml:"api_key" env-default:""`
 	}
+	Ocpi struct {
+		Enabled bool   `yaml:"enabled" env-default:"false"`
+		Url     string `yaml:"url" env-default:""`
+		Token   string `yaml:"token" env-default:""`
+	}
 	Telegram struct {
 		Enabled bool   `yaml:"enabled" env-default:"false"`
 		ApiKey  string `yaml:"telegram_api_key" env-default:""`

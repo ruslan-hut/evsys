@@ -4,6 +4,7 @@ import (
 	"evsys/billing"
 	"evsys/internal"
 	"evsys/internal/config"
+	"evsys/ocpi/listener"
 	"evsys/ocpp"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
@@ -295,6 +296,12 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 			systemHandler.AddEventListener(telegramBot)
 			log.Println("telegram bot is configured and enabled")
 		}
+	}
+
+	if conf.Ocpi.Enabled {
+		ocpi := listener.New(conf.Ocpi.Url, conf.Ocpi.Token)
+		systemHandler.AddEventListener(ocpi)
+		log.Println("ocpi listener is configured and enabled")
 	}
 
 	// websocket listener

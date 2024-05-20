@@ -20,7 +20,10 @@ import (
 
 var newTransactionId = 0
 
-const defaultHeartbeatInterval = 600
+const (
+	defaultHeartbeatInterval = 600
+	sourceOCPI               = "OCPI"
+)
 
 type ChargePointState struct {
 	status            core.ChargePointStatus
@@ -446,6 +449,10 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		Id:            newTransactionId,
 	}
 	newTransactionId += 1
+
+	if userTag.Source == sourceOCPI {
+		transaction.SessionId = userTag.IdTag
+	}
 
 	connector.CurrentTransactionId = transaction.Id
 	connector.CurrentPowerLimit = 0
@@ -1208,6 +1215,16 @@ func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
 			IdTag:     id,
 			Source:    source,
 			IsEnabled: false,
+		}
+	}
+
+	// OCPI session tag - contains session id from OCPI operator
+	if source == sourceOCPI {
+		return &models.UserTag{
+			IdTag:     id,
+			Source:    source,
+			IsEnabled: true,
+			Note:      "OCPI session tag",
 		}
 	}
 
