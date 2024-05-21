@@ -28,6 +28,8 @@ type EventMessage struct {
 	Type          string      `json:"type" bson:"type"`
 	ChargePointId string      `json:"charge_point_id" bson:"charge_point_id"`
 	ConnectorId   int         `json:"connector_id" bson:"connector_id"`
+	LocationId    string      `json:"location_id" bson:"location_id"`
+	Evse          string      `json:"evse" bson:"evse"`
 	Time          time.Time   `json:"time" bson:"time"`
 	Username      string      `json:"username" bson:"username"`
 	IdTag         string      `json:"id_tag" bson:"id_tag"`

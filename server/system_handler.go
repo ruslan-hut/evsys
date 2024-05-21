@@ -51,6 +51,13 @@ func (st *ChargePointState) unregisterTransaction(transactionId int) {
 	delete(st.transactions, transactionId)
 }
 
+func (st *ChargePointState) EvseId(connectorId int) string {
+	if st.model == nil {
+		return ""
+	}
+	return st.model.EvseId(connectorId)
+}
+
 type SystemHandler struct {
 	chargePoints   map[string]*ChargePointState
 	lastMeter      map[int]*models.TransactionMeter
@@ -496,6 +503,8 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
 		ConnectorId:   transaction.ConnectorId,
+		LocationId:    state.model.LocationId,
+		Evse:          state.EvseId(transaction.ConnectorId),
 		Time:          transaction.TimeStart,
 		Username:      transaction.Username,
 		IdTag:         transaction.IdTag,
@@ -560,6 +569,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   transaction.ConnectorId,
+			LocationId:    state.model.LocationId,
+			Evse:          state.EvseId(transaction.ConnectorId),
 			TransactionId: request.TransactionId,
 			Username:      transaction.Username,
 			IdTag:         transaction.IdTag,
@@ -598,6 +609,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   transaction.ConnectorId,
+			LocationId:    state.model.LocationId,
+			Evse:          state.EvseId(transaction.ConnectorId),
 			Username:      transaction.Username,
 			IdTag:         transaction.IdTag,
 			Info:          fmt.Sprintf("billing failed %v", err),
@@ -635,6 +648,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
 			ConnectorId:   transaction.ConnectorId,
+			LocationId:    state.model.LocationId,
+			Evse:          state.EvseId(transaction.ConnectorId),
 			Time:          transaction.TimeStart,
 			Username:      transaction.Username,
 			IdTag:         transaction.IdTag,
@@ -841,9 +856,9 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	eventMessage := &internal.EventMessage{
 		ChargePointId: chargePointId,
 		ConnectorId:   request.ConnectorId,
+		LocationId:    state.model.LocationId,
+		Evse:          state.EvseId(request.ConnectorId),
 		Time:          h.getTime(),
-		Username:      "",
-		IdTag:         "",
 		Status:        string(request.Status),
 		TransactionId: currentTransactionId,
 		Info:          fmt.Sprintf("%s%s", request.Info, errorCode),

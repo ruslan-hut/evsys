@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type ChargePoint struct {
 	Id               string       `json:"charge_point_id" bson:"charge_point_id"`
@@ -25,4 +28,9 @@ type ChargePoint struct {
 	IsOnline         bool         `json:"is_online" bson:"is_online"`
 	EventTime        time.Time    `json:"event_time" bson:"event_time"`
 	Connectors       []*Connector `json:"connectors,omitempty" bson:"connectors,omitempty"`
+}
+
+// EvseId returns the unique identifier for an EVSE as needed for OCPI.
+func (cp *ChargePoint) EvseId(connectorId int) string {
+	return fmt.Sprintf("%s*%d", cp.Id, connectorId)
 }
