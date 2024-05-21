@@ -26,10 +26,10 @@ type EventHandler interface {
 
 type EventMessage struct {
 	Type          string      `json:"type,omitempty" bson:"type"`
-	ChargePointId string      `json:"charge_point_id" bson:"charge_point_id"`
-	ConnectorId   int         `json:"connector_id" bson:"connector_id"`
-	LocationId    string      `json:"location_id" bson:"location_id"`
-	Evse          string      `json:"evse" bson:"evse"`
+	ChargePointId string      `json:"charge_point_id,omitempty" bson:"charge_point_id"`
+	ConnectorId   int         `json:"connector_id,omitempty" bson:"connector_id"`
+	LocationId    string      `json:"location_id,omitempty" bson:"location_id"`
+	Evse          string      `json:"evse,omitempty" bson:"evse"`
 	Time          time.Time   `json:"time,omitempty" bson:"time"`
 	Username      string      `json:"username,omitempty" bson:"username"`
 	IdTag         string      `json:"id_tag,omitempty" bson:"id_tag"`

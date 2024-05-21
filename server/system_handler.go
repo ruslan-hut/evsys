@@ -1090,16 +1090,27 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 		}
 		eventMessage := &internal.EventMessage{
 			ChargePointId: id,
-			ConnectorId:   0,
 			Time:          h.getTime(),
 			Info:          info,
 		}
 		go h.notifyEventListeners(internal.Alert, eventMessage)
 
-		// check active transactions only if online status is changed
 		if state.connectors != nil {
+			status := state.model.Status
+			if !isOnline {
+				status = "Offline"
+			}
 			for _, c := range state.connectors {
+				// check active transactions only if online status is changed
 				h.checkListenTransaction(c, isOnline)
+
+				// for OCPI purpose, need to notify about every connector's state changes
+				eventMessage = &internal.EventMessage{
+					LocationId: state.model.LocationId,
+					Evse:       state.EvseId(c.Id),
+					Status:     status,
+				}
+				go h.notifyEventListeners(internal.StatusNotification, eventMessage)
 			}
 		}
 	}
