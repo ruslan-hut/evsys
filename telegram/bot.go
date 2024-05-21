@@ -127,7 +127,7 @@ func (b *TgBot) eventPump() {
 func (b *TgBot) sendPump() {
 	for {
 		if event, ok := <-b.send; ok {
-			b.sendMessage(event.ChatID, event.Text)
+			go b.sendMessage(event.ChatID, event.Text)
 		}
 	}
 }
