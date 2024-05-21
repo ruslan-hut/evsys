@@ -32,5 +32,8 @@ type ChargePoint struct {
 
 // EvseId returns the unique identifier for an EVSE as needed for OCPI.
 func (cp *ChargePoint) EvseId(connectorId int) string {
+	if connectorId == 0 {
+		return ""
+	}
 	return fmt.Sprintf("%s*%d", cp.Id, connectorId)
 }
