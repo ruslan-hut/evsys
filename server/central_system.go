@@ -4,7 +4,7 @@ import (
 	"evsys/billing"
 	"evsys/internal"
 	"evsys/internal/config"
-	"evsys/ocpi/listener"
+	"evsys/ocpi"
 	"evsys/ocpp"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
@@ -299,9 +299,10 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	}
 
 	if conf.Ocpi.Enabled {
-		ocpi := listener.New(conf.Ocpi.Url, conf.Ocpi.Token)
-		systemHandler.AddEventListener(ocpi)
-		log.Println("ocpi listener is configured and enabled")
+		ocpiClient := ocpi.New(conf.Ocpi.Url, conf.Ocpi.Token)
+		systemHandler.AddEventListener(ocpiClient)
+		systemHandler.SetAuthService(ocpiClient)
+		log.Println("ocpi client is configured and enabled")
 	}
 
 	// websocket listener

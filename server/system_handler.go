@@ -58,12 +58,24 @@ func (st *ChargePointState) EvseId(connectorId int) string {
 	return st.model.EvseId(connectorId)
 }
 
+type authResult struct {
+	allowed bool
+	expired bool
+	blocked bool
+	info    string
+}
+
+type AuthService interface {
+	Authorize(locationId, idTag string) (bool, bool, bool, string)
+}
+
 type SystemHandler struct {
 	chargePoints   map[string]*ChargePointState
 	lastMeter      map[int]*models.TransactionMeter
 	database       internal.Database
 	billing        internal.BillingService
 	payment        internal.PaymentService
+	auth           AuthService
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
 	trigger        *Trigger
@@ -113,6 +125,10 @@ func (h *SystemHandler) SetBillingService(billing internal.BillingService) {
 
 func (h *SystemHandler) SetPaymentService(payment internal.PaymentService) {
 	h.payment = payment
+}
+
+func (h *SystemHandler) SetAuthService(auth AuthService) {
+	h.auth = auth
 }
 
 func (h *SystemHandler) SetParameters(debug bool, acceptTags bool, acceptPoints bool) {
@@ -357,19 +373,42 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {
 	h.mux.Lock()
 	defer h.mux.Unlock()
-
-	authStatus := types.AuthorizationStatusBlocked
-
-	userTag := h.getUserTag(request.IdTag)
-	if userTag.IsEnabled {
-		authStatus = types.AuthorizationStatusAccepted
+	state, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("unknown chargepoint; authorization blocked; id:%s", request.IdTag))
+		return core.NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked)), nil
+	}
+	if !state.model.IsEnabled {
+		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("chargepoint disabled; authorization blocked; id:%s", request.IdTag))
+		return core.NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked)), nil
 	}
 
-	// block authorization if charge point is disabled
-	state, ok := h.getChargePoint(chargePointId)
-	if ok {
-		if !state.model.IsEnabled {
+	authStatus := types.AuthorizationStatusInvalid
+	userTag := &models.UserTag{
+		IdTag: request.IdTag,
+	}
+
+	// if enabled, try to authorize with connected auth service; here goes the OCPI authorization
+	result, err := h.authorize(state.model.LocationId, request.IdTag)
+	if err == nil {
+		if result.allowed {
+			authStatus = types.AuthorizationStatusAccepted
+		} else if result.expired {
+			authStatus = types.AuthorizationStatusExpired
+		} else if result.blocked {
 			authStatus = types.AuthorizationStatusBlocked
+		}
+		// this data will be rewritten if tag passes local authorization
+		userTag.Source = sourceOCPI
+		userTag.Note = result.info
+	}
+
+	// invalid state indicated that authorization service is not available or failed
+	if authStatus == types.AuthorizationStatusInvalid {
+		// check if id tag is in database
+		userTag = h.getUserTag(request.IdTag)
+		if userTag.IsEnabled {
+			authStatus = types.AuthorizationStatusAccepted
 		}
 	}
 
@@ -386,7 +425,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	}
 	go h.notifyEventListeners(internal.Authorize, eventMessage)
 
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; authorization status: %s", userTag.IdTag, authStatus))
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s %s; status: %s", userTag.Source, userTag.IdTag, authStatus))
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
@@ -1277,6 +1316,17 @@ func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
 	}
 
 	return userTag
+}
+
+// authorize checks the id tag with connected authorization service;
+// returns error if authorization service is not set
+func (h *SystemHandler) authorize(locationId, idTag string) (*authResult, error) {
+	if h.auth == nil {
+		return nil, fmt.Errorf("authorization service is not set")
+	}
+	result := &authResult{}
+	result.allowed, result.expired, result.blocked, result.info = h.auth.Authorize(locationId, idTag)
+	return result, nil
 }
 
 func (h *SystemHandler) stateFromStatus(status core.ChargePointStatus) string {
