@@ -66,7 +66,7 @@ type authResult struct {
 }
 
 type AuthService interface {
-	Authorize(locationId, idTag string) (bool, bool, bool, string)
+	Authorize(locationId, evseId, idTag string) (bool, bool, bool, string)
 }
 
 type SystemHandler struct {
@@ -389,7 +389,8 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	}
 
 	// if enabled, try to authorize with connected auth service; here goes the OCPI authorization
-	result, err := h.authorize(state.model.LocationId, request.IdTag)
+	// for EVSE id always use connector 1, because authorize request does not have connector id
+	result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), request.IdTag)
 	if err == nil {
 		if result.allowed {
 			authStatus = types.AuthorizationStatusAccepted
@@ -1320,12 +1321,12 @@ func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
 
 // authorize checks the id tag with connected authorization service;
 // returns error if authorization service is not set
-func (h *SystemHandler) authorize(locationId, idTag string) (*authResult, error) {
+func (h *SystemHandler) authorize(locationId, evseId, idTag string) (*authResult, error) {
 	if h.auth == nil {
 		return nil, fmt.Errorf("authorization service is not set")
 	}
 	result := &authResult{}
-	result.allowed, result.expired, result.blocked, result.info = h.auth.Authorize(locationId, idTag)
+	result.allowed, result.expired, result.blocked, result.info = h.auth.Authorize(locationId, evseId, idTag)
 	return result, nil
 }
 

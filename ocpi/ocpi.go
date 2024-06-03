@@ -48,8 +48,8 @@ func (o *OCPI) OnInfo(_ *internal.EventMessage) {
 
 }
 
-func (o *OCPI) Authorize(locationId, idTag string) (bool, bool, bool, string) {
-	res := o.auth.Authorize(locationId, idTag)
+func (o *OCPI) Authorize(locationId, evseId, idTag string) (bool, bool, bool, string) {
+	res := o.auth.Authorize(locationId, evseId, idTag)
 	if res == nil {
 		return false, false, false, ""
 	}

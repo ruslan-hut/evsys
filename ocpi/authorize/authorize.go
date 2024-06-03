@@ -17,9 +17,10 @@ func New(client *client.Client) *Authorize {
 	}
 }
 
-func (a *Authorize) Authorize(locationId, idTag string) *Result {
+func (a *Authorize) Authorize(locationId, evseId, idTag string) *Result {
 	req := &Request{
 		LocationId: locationId,
+		Evse:       evseId,
 		IdTag:      idTag,
 	}
 
