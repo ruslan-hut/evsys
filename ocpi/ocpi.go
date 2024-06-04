@@ -21,7 +21,10 @@ func New(url, token string) *OCPI {
 }
 
 func (o *OCPI) OnStatusNotification(event *internal.EventMessage) {
-	o.listener.StatusNotification(event)
+	// for OCPI purposes, we only care about the status with connectorId
+	if event.ConnectorId > 0 {
+		o.listener.StatusNotification(event)
+	}
 }
 
 func (o *OCPI) OnTransactionStart(event *internal.EventMessage) {
