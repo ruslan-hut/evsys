@@ -151,6 +151,7 @@ func (h *SystemHandler) SetTrigger(trigger *Trigger) {
 
 // common function for event listeners
 func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *internal.EventMessage) {
+	h.logger.FeatureEvent("Notify", eventData.ChargePointId, fmt.Sprintf("%s #%d %s %s", eventData.Type, eventData.ConnectorId, eventData.Status, eventData.Info))
 	for _, listener := range h.eventListeners {
 		switch event {
 		case internal.StatusNotification:
