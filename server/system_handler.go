@@ -151,9 +151,6 @@ func (h *SystemHandler) SetTrigger(trigger *Trigger) {
 
 // common function for event listeners
 func (h *SystemHandler) notifyEventListeners(event internal.Event, eventData *internal.EventMessage) {
-	if eventData.LocationId != "" {
-		h.logger.FeatureEvent("Notify", eventData.Evse, fmt.Sprintf("%s %s %s", eventData.LocationId, eventData.Status, eventData.Info))
-	}
 	for _, listener := range h.eventListeners {
 		switch event {
 		case internal.StatusNotification:

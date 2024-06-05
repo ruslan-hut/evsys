@@ -21,8 +21,8 @@ func New(url, token string) *OCPI {
 }
 
 func (o *OCPI) OnStatusNotification(event *internal.EventMessage) {
-	// for OCPI purposes, we only care about the status with connectorId
-	if event.ConnectorId > 0 {
+	// for OCPI purposes, we only care about the status with EVSE and LocationId
+	if event.LocationId != "" && event.Evse != "" {
 		o.listener.StatusNotification(event)
 	}
 }
