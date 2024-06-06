@@ -34,6 +34,7 @@ type EventMessage struct {
 	Username      string      `json:"username,omitempty" bson:"username"`
 	IdTag         string      `json:"id_tag,omitempty" bson:"id_tag"`
 	TransactionId int         `json:"transaction_id,omitempty" bson:"transaction_id"`
+	Consumed      int         `json:"consumed,omitempty" bson:"consumed"`
 	Status        string      `json:"status,omitempty" bson:"status"`
 	Info          string      `json:"info,omitempty" bson:"info"`
 	Payload       interface{} `json:"payload,omitempty" bson:"payload"`

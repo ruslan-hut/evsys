@@ -688,6 +688,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 			IdTag:         transaction.IdTag,
 			Status:        connector.Status,
 			TransactionId: transaction.Id,
+			Consumed:      consumedPower,
 			Info:          fmt.Sprintf("consumed %s kW; %s €", consumed, price),
 			Payload:       request,
 		}
