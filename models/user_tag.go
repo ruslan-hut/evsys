@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type UserTag struct {
 	Username       string    `json:"username" bson:"username"`
@@ -12,4 +15,22 @@ type UserTag struct {
 	Note           string    `json:"note" bson:"note"`
 	DateRegistered time.Time `json:"date_registered" bson:"date_registered"`
 	LastSeen       time.Time `json:"last_seen" bson:"last_seen"`
+}
+
+func NewUserTag(idTag string) *UserTag {
+	// charge point can add a prefix to the id tag, separated by a colon
+	source, id := SplitIdTag(idTag)
+	return &UserTag{
+		IdTag:     id,
+		Source:    source,
+		IsEnabled: false,
+	}
+}
+
+func SplitIdTag(idTag string) (string, string) {
+	if strings.Contains(idTag, ":") {
+		s := strings.Split(idTag, ":")
+		return s[0], s[1]
+	}
+	return "", idTag
 }

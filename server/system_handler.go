@@ -13,7 +13,6 @@ import (
 	"evsys/utility"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -384,32 +383,26 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 	}
 
 	authStatus := types.AuthorizationStatusInvalid
-	userTag := &models.UserTag{
-		IdTag: request.IdTag,
+	userTag := h.getUserTag(request.IdTag)
+	if userTag.IsEnabled {
+		authStatus = types.AuthorizationStatusAccepted
 	}
 
-	// if enabled, try to authorize with connected auth service; here goes the OCPI authorization
-	// for EVSE id always use connector 1, because authorize request does not have connector id
-	result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), request.IdTag)
-	if err == nil {
-		if result.allowed {
-			authStatus = types.AuthorizationStatusAccepted
-		} else if result.expired {
-			authStatus = types.AuthorizationStatusExpired
-		} else if result.blocked {
-			authStatus = types.AuthorizationStatusBlocked
-		}
-		// this data will be rewritten if tag passes local authorization
-		userTag.Source = sourceOCPI
-		userTag.Note = result.info
-	}
-
-	// invalid state indicated that authorization service is not available or failed
+	// invalid state indicated that user not listed in local database or not enabled locally
 	if authStatus == types.AuthorizationStatusInvalid {
-		// check if id tag is in database
-		userTag = h.getUserTag(request.IdTag)
-		if userTag.IsEnabled {
-			authStatus = types.AuthorizationStatusAccepted
+		// try to authorize with connected auth service; here goes the OCPI authorization
+		// for EVSE id always use connector 1, because authorize request does not have connector id
+		result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), userTag.IdTag)
+		if err == nil {
+			if result.allowed {
+				authStatus = types.AuthorizationStatusAccepted
+			} else if result.expired {
+				authStatus = types.AuthorizationStatusExpired
+			} else if result.blocked {
+				authStatus = types.AuthorizationStatusBlocked
+			}
+			userTag.Source = sourceOCPI
+			userTag.Note = result.info
 		}
 	}
 
@@ -1264,57 +1257,26 @@ func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOn
 	}
 }
 
-func splitIdTag(idTag string) (string, string) {
-	if strings.Contains(idTag, ":") {
-		s := strings.Split(idTag, ":")
-		return s[0], s[1]
-	}
-	return "", idTag
-}
-
 func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
-	// charge point can add a prefix to the id tag, separated by a colon
-	source, id := splitIdTag(idTag)
-	if id == "" {
-		h.logger.Warn("received empty id tag")
-		return &models.UserTag{
-			IdTag:     id,
-			Source:    source,
-			IsEnabled: false,
-		}
-	}
-
-	// OCPI session tag - contains session id from OCPI operator
-	if source == sourceOCPI {
-		return &models.UserTag{
-			IdTag:     id,
-			Source:    source,
-			IsEnabled: true,
-			Note:      "OCPI session tag",
-		}
-	}
+	userTag := models.NewUserTag(idTag)
 
 	if h.database == nil {
-		return &models.UserTag{
-			IdTag:     id,
-			Source:    source,
-			IsEnabled: h.acceptTags,
-		}
+		userTag.IsEnabled = h.acceptTags
+		return userTag
 	}
 
-	userTag, _ := h.database.GetUserTag(id)
-	if userTag == nil {
-		userTag = &models.UserTag{
-			IdTag:          id,
-			Source:         source,
-			IsEnabled:      h.acceptTags,
-			DateRegistered: time.Now(),
-		}
+	savedTag, _ := h.database.GetUserTag(userTag.IdTag)
+	if savedTag != nil {
+		userTag = savedTag
+	} else if h.acceptTags {
+		userTag.IsEnabled = true
+		userTag.DateRegistered = time.Now()
 		err := h.database.AddUserTag(userTag)
 		if err != nil {
 			h.logger.Error("add user tag to database", err)
 		}
 	}
+	_ = h.database.UpdateTagLastSeen(userTag)
 
 	return userTag
 }
