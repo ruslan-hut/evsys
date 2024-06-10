@@ -401,8 +401,11 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			} else if result.blocked {
 				authStatus = types.AuthorizationStatusBlocked
 			}
-			userTag.Source = sourceOCPI
-			userTag.Note = result.info
+			// if status was changed, update user tag
+			if authStatus != types.AuthorizationStatusInvalid {
+				userTag.Source = sourceOCPI
+				userTag.Note = result.info
+			}
 		}
 	}
 
