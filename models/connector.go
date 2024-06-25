@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -35,6 +36,10 @@ func (c *Connector) Init() {
 	if c.mutex == nil {
 		c.mutex = &sync.Mutex{}
 	}
+}
+
+func (c *Connector) ID() string {
+	return strconv.Itoa(c.Id)
 }
 
 func NewConnector(id int, chargePointId string) *Connector {

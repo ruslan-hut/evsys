@@ -709,7 +709,8 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 	}
 	connector := h.getConnector(chp, request.ConnectorId)
 
-	if request.TransactionId == nil {
+	transactionId := request.TransactionId
+	if transactionId == nil {
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
 		// check, if we received a triggered message, need to unregister connector
 		for _, sampledValues := range request.MeterValue {
@@ -721,103 +722,77 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 		}
 		return core.NewMeterValuesResponse(), nil
 	}
+	if h.database == nil {
+		return core.NewMeterValuesResponse(), nil
+	}
 
-	transactionId := request.TransactionId
-	if transactionId != nil && h.database != nil {
+	transaction, err := h.database.GetTransaction(*transactionId)
+	if transaction == nil {
+		h.logger.Error("get transaction failed", err)
+		return core.NewMeterValuesResponse(), nil
+	}
 
-		transaction, err := h.database.GetTransaction(*transactionId)
-		currentValue := 0
+	for _, sampledValue := range request.MeterValue {
 
-		if err != nil {
-			h.logger.Error("get transaction failed", err)
-		} else {
+		meter := models.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.Timestamp.Time)
 
-			for _, sampledValue := range request.MeterValue {
+		for _, value := range sampledValue.SampledValue {
 
-				currentTime := sampledValue.Timestamp.Time
+			if value.Context != types.ReadingContextTrigger {
+				continue
+			}
 
-				for _, value := range sampledValue.SampledValue {
+			// read value of active energy import register only for triggered messages
+			if value.Measurand == types.MeasurandEnergyActiveImportRegister {
 
-					currentValue = utility.ToInt(value.Value)
+				meter.Value = utility.ToInt(value.Value)
+				meter.Unit = string(value.Unit)
+				meter.Measurand = string(value.Measurand)
 
-					// read value of active energy import register only for triggered messages
-					if value.Context == types.ReadingContextTrigger && value.Measurand == types.MeasurandEnergyActiveImportRegister {
-
+				lastMeter, found := h.lastMeter[transaction.Id]
+				if found {
+					consumed := meter.Value - lastMeter.Value
+					seconds := meter.Time.Sub(lastMeter.Time).Seconds()
+					if consumed > 0 && seconds > 0.0 {
+						meter.ConsumedEnergy = consumed
+						meter.PowerRateWh = float64(consumed) * (3600 / 1000) / seconds
 						// calculate power rate as kW per hour
-						power := 0.0
-						seconds := 0.0
-
-						lastMeter, found := h.lastMeter[transaction.Id]
-						if found {
-							consumed := currentValue - lastMeter.Value
-							seconds = currentTime.Sub(lastMeter.Time).Seconds()
-							if consumed > 0 && seconds > 0.0 {
-								power = float64(consumed) * (3600 / 1000) / seconds
-							}
-						}
-
-						// for accurate power rate, we need at least 5 seconds between two meter values
-						if seconds > 5.0 || found == false {
-							id := fmt.Sprintf("%d", connector.Id)
-							observePowerRate(chp.model.LocationId, chargePointId, id, power)
-
-							// for meter value, power rate is in W per hour
-							powerRate := int(power * 1000)
-
-							transactionMeter := &models.TransactionMeter{
-								Id:              transaction.Id,
-								Value:           currentValue,
-								PowerRate:       powerRate,
-								Time:            currentTime,
-								Minute:          currentTime.Unix() / 60,
-								Unit:            string(value.Unit),
-								Measurand:       string(value.Measurand),
-								ConnectorId:     connector.Id,
-								ConnectorStatus: connector.Status,
-							}
-							h.lastMeter[transaction.Id] = transactionMeter
-
-							err = h.billing.OnMeterValue(transaction, transactionMeter)
-							if err != nil {
-								eventMessage := &internal.EventMessage{
-									ChargePointId: chargePointId,
-									ConnectorId:   transaction.ConnectorId,
-									Username:      transaction.Username,
-									IdTag:         transaction.IdTag,
-									Info:          fmt.Sprintf("billing failed %v", err),
-									Payload:       request,
-								}
-								h.notifyEventListeners(internal.Alert, eventMessage)
-							}
-
-							err = h.database.AddTransactionMeterValue(transactionMeter)
-							if err != nil {
-								h.logger.Error("add transaction meter value", err)
-							}
-						}
-
-					} else {
-						//h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("transaction: %d - %v", transactionId, value))
-						transactionMeter := &models.TransactionMeter{
-							Id:              transaction.Id,
-							Value:           currentValue,
-							PowerRate:       0,
-							Time:            currentTime,
-							Minute:          currentTime.Unix() / 60,
-							Unit:            string(value.Unit),
-							Measurand:       string(value.Measurand),
-							ConnectorId:     connector.Id,
-							ConnectorStatus: connector.Status,
-						}
-						_ = h.database.AddSampleMeterValue(transactionMeter)
+						meter.PowerRate = int(meter.PowerRateWh * 1000)
 					}
 				}
 			}
+
+			if value.Measurand == types.MeasurandSoC {
+				meter.BatteryLevel = utility.ToInt(value.Value)
+			}
+
 		}
 
-		//} else {
-		//	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
+		if meter.Value > 0 {
+			h.lastMeter[transaction.Id] = meter
+
+			observePowerRate(chp.model.LocationId, chargePointId, connector.ID(), meter.PowerRateWh)
+
+			err = h.database.AddTransactionMeterValue(meter)
+			if err != nil {
+				h.logger.Error("add transaction meter value", err)
+			}
+
+			err = h.billing.OnMeterValue(transaction, meter)
+			if err != nil {
+				eventMessage := &internal.EventMessage{
+					ChargePointId: chargePointId,
+					ConnectorId:   transaction.ConnectorId,
+					Username:      transaction.Username,
+					IdTag:         transaction.IdTag,
+					Info:          fmt.Sprintf("billing failed %v", err),
+					Payload:       request,
+				}
+				h.notifyEventListeners(internal.Alert, eventMessage)
+			}
+		}
 	}
+
 	return core.NewMeterValuesResponse(), nil
 }
 

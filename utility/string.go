@@ -1,7 +1,6 @@
 package utility
 
 import (
-	"fmt"
 	"github.com/google/uuid"
 	"strconv"
 )
@@ -10,7 +9,6 @@ import (
 func ToInt(s string) int {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		fmt.Println(err)
 		return 0
 	}
 	return int(f)
