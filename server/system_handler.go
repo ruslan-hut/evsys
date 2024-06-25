@@ -749,12 +749,16 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				meter.Unit = string(value.Unit)
 				meter.Measurand = string(value.Measurand)
 
+				consumedTotal := meter.Value - transaction.MeterStart
+				if consumedTotal > 0 {
+					meter.ConsumedEnergy = consumedTotal
+				}
+
 				lastMeter, found := h.lastMeter[transaction.Id]
 				if found {
 					consumed := meter.Value - lastMeter.Value
 					seconds := meter.Time.Sub(lastMeter.Time).Seconds()
 					if consumed > 0 && seconds > 0.0 {
-						meter.ConsumedEnergy = consumed
 						meter.PowerRateWh = float64(consumed) * (3600 / 1000) / seconds
 						// calculate power rate as kW per hour
 						meter.PowerRate = int(meter.PowerRateWh * 1000)
@@ -764,6 +768,10 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 			if value.Measurand == types.MeasurandSoC {
 				meter.BatteryLevel = utility.ToInt(value.Value)
+			}
+
+			if value.Measurand == types.MeasurandPowerActiveImport {
+				meter.PowerActive = utility.ToInt(value.Value)
 			}
 
 		}

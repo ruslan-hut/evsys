@@ -7,6 +7,7 @@ type TransactionMeter struct {
 	Value           int       `json:"value" bson:"value"`
 	PowerRate       int       `json:"power_rate" bson:"power_rate"`
 	PowerRateWh     float64   `json:"power_rate_wh" bson:"power_rate_wh"`
+	PowerActive     int       `json:"power_active" bson:"power_active"`
 	Price           int       `json:"price" bson:"price"`
 	BatteryLevel    int       `json:"battery_level" bson:"battery_level"`
 	ConsumedEnergy  int       `json:"consumed_energy" bson:"consumed_energy"`
