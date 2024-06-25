@@ -781,11 +781,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 			observePowerRate(chp.model.LocationId, chargePointId, connector.ID(), meter.PowerRateWh)
 
-			err = h.database.AddTransactionMeterValue(meter)
-			if err != nil {
-				h.logger.Error("add transaction meter value", err)
-			}
-
+			// billing calculates charge price and must be called before meter value save
 			err = h.billing.OnMeterValue(transaction, meter)
 			if err != nil {
 				eventMessage := &internal.EventMessage{
@@ -797,6 +793,11 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 					Payload:       request,
 				}
 				h.notifyEventListeners(internal.Alert, eventMessage)
+			}
+
+			err = h.database.AddTransactionMeterValue(meter)
+			if err != nil {
+				h.logger.Error("add transaction meter value", err)
 			}
 		}
 	}
