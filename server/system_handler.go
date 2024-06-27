@@ -759,8 +759,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 					consumed := meter.Value - lastMeter.Value
 					seconds := meter.Time.Sub(lastMeter.Time).Seconds()
 					if consumed > 0 && seconds > 0.0 {
-						meter.PowerRateWh = float64(consumed) * (3600 / 1000) / seconds
-						// calculate power rate as kW per hour
+						meter.PowerRateWh = float64(consumed) * (3600 / 1000) / seconds //used in metrics
 						meter.PowerRate = int(meter.PowerRateWh * 1000)
 					}
 				}
@@ -779,20 +778,18 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 		if meter.Value > 0 {
 			h.lastMeter[transaction.Id] = meter
 
+			// replace calculated values if received data from charger
+			if meter.PowerActive > 0 {
+				meter.PowerRate = meter.PowerActive
+				meter.PowerRateWh = float64(meter.PowerActive) / 1000
+			}
+
 			observePowerRate(chp.model.LocationId, chargePointId, connector.ID(), meter.PowerRateWh)
 
 			// billing calculates charge price and must be called before meter value save
 			err = h.billing.OnMeterValue(transaction, meter)
 			if err != nil {
-				eventMessage := &internal.EventMessage{
-					ChargePointId: chargePointId,
-					ConnectorId:   transaction.ConnectorId,
-					Username:      transaction.Username,
-					IdTag:         transaction.IdTag,
-					Info:          fmt.Sprintf("billing failed %v", err),
-					Payload:       request,
-				}
-				h.notifyEventListeners(internal.Alert, eventMessage)
+				h.logger.Error("billing on meter value", err)
 			}
 
 			err = h.database.AddTransactionMeterValue(meter)
