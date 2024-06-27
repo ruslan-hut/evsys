@@ -812,10 +812,14 @@ func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) 
 	defer m.disconnect(connection)
 
 	collection := connection.Database(m.database).Collection(collectionMeterValues)
-	_, err = collection.InsertOne(m.ctx, meterValue)
-	//filter := bson.D{{"transaction_id", meterValue.Id}}
-	//set := bson.M{"$set": meterValue}
-	//_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
+	//_, err = collection.InsertOne(m.ctx, meterValue)
+	filter := bson.D{
+		{"transaction_id", meterValue.Id},
+		{"measurand", meterValue.Measurand},
+		{"minute", meterValue.Minute},
+	}
+	set := bson.M{"$set": meterValue}
+	_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
 	return err
 }
 
