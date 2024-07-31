@@ -10,8 +10,14 @@ type PaymentService interface {
 	TransactionPayment(transaction *entity.Transaction)
 }
 
+type Database interface {
+	GetUserPaymentPlan(username string) (*entity.PaymentPlan, error)
+	GetPaymentMethod(userId string) (*entity.PaymentMethod, error)
+	GetNotBilledTransactions() ([]*entity.Transaction, error)
+}
+
 type Affleck struct {
-	database internal.Database
+	database Database
 	logger   internal.LogHandler
 	payment  PaymentService
 }
@@ -20,7 +26,7 @@ func NewAffleck() *Affleck {
 	return &Affleck{}
 }
 
-func (a *Affleck) SetDatabase(database internal.Database) {
+func (a *Affleck) SetDatabase(database Database) {
 	a.database = database
 }
 
@@ -43,6 +49,10 @@ func (a *Affleck) OnTransactionStart(transaction *entity.Transaction) error {
 			transaction.Plan = *plan
 		} else {
 			return fmt.Errorf("no payment plan for user %s", transaction.Username)
+		}
+		if transaction.UserTag != nil {
+			paymentMethod, _ := a.database.GetPaymentMethod(transaction.UserTag.UserId)
+			transaction.PaymentMethod = paymentMethod
 		}
 	}
 	return nil

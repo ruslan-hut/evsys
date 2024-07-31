@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-type Database interface {
-	GetNotBilledTransactions() ([]*entity.Transaction, error)
-}
-
 type Payment struct {
 	database Database
 	logger   internal.LogHandler
@@ -62,7 +58,7 @@ func (p *Payment) TransactionPayment(transaction *entity.Transaction) {
 		return
 	}
 	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+		err = Body.Close()
 		if err != nil {
 			p.logger.Error("payment: close response body", err)
 		}

@@ -500,6 +500,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		TimeStart:     request.Timestamp.Time,
 		ReservationId: request.ReservationId,
 		Id:            newTransactionId,
+		UserTag:       userTag,
 	}
 	newTransactionId += 1
 
@@ -569,6 +570,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	h.mux.Lock()
 	defer h.mux.Unlock()
 
+	meterValues, _ := h.database.ReadAllTransactionMeterValues(request.TransactionId)
+
 	// removing all listeners and observers
 	h.trigger.Unregister <- request.TransactionId
 	delete(h.lastMeter, request.TransactionId)
@@ -594,6 +597,10 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	transaction.Init()
 	transaction.Lock()
 	defer transaction.Unlock()
+
+	if meterValues != nil {
+		transaction.MeterValues = meterValues
+	}
 
 	connector := h.getConnector(state, transaction.ConnectorId)
 	connector.Lock()
