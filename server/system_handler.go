@@ -617,7 +617,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		h.logger.Error("update connector", err)
 	}
 
-	if transaction.IsFinished {
+	if transaction.IsFinished && transaction.MeterStop >= request.MeterStop {
 		h.logger.Warn(fmt.Sprintf("transaction #%d is already finished", request.TransactionId))
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
