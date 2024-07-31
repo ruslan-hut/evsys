@@ -1,4 +1,4 @@
-package models
+package entity
 
 type GeoLocation struct {
 	Latitude  float64 `json:"latitude" bson:"latitude"`

@@ -1,4 +1,4 @@
-package models
+package entity
 
 type MerchantParameters struct {
 	Amount          string `json:"DS_MERCHANT_AMOUNT"`

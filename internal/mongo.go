@@ -2,8 +2,8 @@ package internal
 
 import (
 	"context"
+	"evsys/entity"
 	"evsys/internal/config"
-	"evsys/models"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -119,7 +119,7 @@ func (m *MongoDB) ReadLog() (interface{}, error) {
 }
 
 // GetChargePoints returns data of all charge points with all nested connectors
-func (m *MongoDB) GetChargePoints() ([]*models.ChargePoint, error) {
+func (m *MongoDB) GetChargePoints() ([]*entity.ChargePoint, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func (m *MongoDB) GetChargePoints() ([]*models.ChargePoint, error) {
 		},
 	}
 
-	var chargePoints []*models.ChargePoint
+	var chargePoints []*entity.ChargePoint
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
@@ -152,7 +152,7 @@ func (m *MongoDB) GetChargePoints() ([]*models.ChargePoint, error) {
 }
 
 // GetLocation get location data with all nested charge points and connectors
-func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
+func (m *MongoDB) GetLocation(locationId string) (*entity.Location, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -213,7 +213,7 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 	if err != nil {
 		return nil, err
 	}
-	var locations []*models.Location
+	var locations []*entity.Location
 	if err = cursor.All(m.ctx, &locations); err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (m *MongoDB) GetLocation(locationId string) (*models.Location, error) {
 }
 
 // GetLocations get all locations with all nested charge points and connectors
-func (m *MongoDB) GetLocations() ([]*models.Location, error) {
+func (m *MongoDB) GetLocations() ([]*entity.Location, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -284,21 +284,21 @@ func (m *MongoDB) GetLocations() ([]*models.Location, error) {
 	if err != nil {
 		return nil, err
 	}
-	var locations []*models.Location
+	var locations []*entity.Location
 	if err = cursor.All(m.ctx, &locations); err != nil {
 		return nil, err
 	}
 	return locations, nil
 }
 
-func (m *MongoDB) GetConnectors() ([]*models.Connector, error) {
+func (m *MongoDB) GetConnectors() ([]*entity.Connector, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
 	}
 	defer m.disconnect(connection)
 
-	var connectors []*models.Connector
+	var connectors []*entity.Connector
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	filter := bson.D{}
 	cursor, err := collection.Find(m.ctx, filter)
@@ -311,7 +311,7 @@ func (m *MongoDB) GetConnectors() ([]*models.Connector, error) {
 	return connectors, nil
 }
 
-func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
+func (m *MongoDB) UpdateChargePoint(chargePoint *entity.ChargePoint) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -328,7 +328,7 @@ func (m *MongoDB) UpdateChargePoint(chargePoint *models.ChargePoint) error {
 	return nil
 }
 
-func (m *MongoDB) UpdateChargePointStatus(chargePoint *models.ChargePoint) error {
+func (m *MongoDB) UpdateChargePointStatus(chargePoint *entity.ChargePoint) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -380,7 +380,7 @@ func (m *MongoDB) ResetOnlineStatus() error {
 	return nil
 }
 
-func (m *MongoDB) AddChargePoint(chargePoint *models.ChargePoint) error {
+func (m *MongoDB) AddChargePoint(chargePoint *entity.ChargePoint) error {
 	existedChargePoint, _ := m.GetChargePoint(chargePoint.Id)
 	if existedChargePoint != nil {
 		return fmt.Errorf("charge point with id %s already exists", chargePoint.Id)
@@ -400,7 +400,7 @@ func (m *MongoDB) AddChargePoint(chargePoint *models.ChargePoint) error {
 	return nil
 }
 
-func (m *MongoDB) GetChargePoint(id string) (*models.ChargePoint, error) {
+func (m *MongoDB) GetChargePoint(id string) (*entity.ChargePoint, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -421,7 +421,7 @@ func (m *MongoDB) GetChargePoint(id string) (*models.ChargePoint, error) {
 		},
 	}
 	collection := connection.Database(m.database).Collection(collectionChargePoints)
-	var chargePoints []*models.ChargePoint
+	var chargePoints []*entity.ChargePoint
 	cursor, err := collection.Aggregate(m.ctx, pipeline)
 	if err != nil {
 		return nil, err
@@ -435,7 +435,7 @@ func (m *MongoDB) GetChargePoint(id string) (*models.ChargePoint, error) {
 	return chargePoints[0], nil
 }
 
-func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
+func (m *MongoDB) UpdateConnector(connector *entity.Connector) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -461,7 +461,7 @@ func (m *MongoDB) UpdateConnector(connector *models.Connector) error {
 	return nil
 }
 
-func (m *MongoDB) UpdateConnectorCurrentPower(connector *models.Connector) error {
+func (m *MongoDB) UpdateConnectorCurrentPower(connector *entity.Connector) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -478,7 +478,7 @@ func (m *MongoDB) UpdateConnectorCurrentPower(connector *models.Connector) error
 	return nil
 }
 
-func (m *MongoDB) AddConnector(connector *models.Connector) error {
+func (m *MongoDB) AddConnector(connector *entity.Connector) error {
 	existedConnector, _ := m.GetConnector(connector.Id, connector.ChargePointId)
 	if existedConnector != nil {
 		return fmt.Errorf("connector with id %v@%s already exists", existedConnector.Id, existedConnector.ChargePointId)
@@ -494,7 +494,7 @@ func (m *MongoDB) AddConnector(connector *models.Connector) error {
 	return err
 }
 
-func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector, error) {
+func (m *MongoDB) GetConnector(id int, chargePointId string) (*entity.Connector, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -503,7 +503,7 @@ func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector,
 
 	filter := bson.D{{"connector_id", id}, {"charge_point_id", chargePointId}}
 	collection := connection.Database(m.database).Collection(collectionConnectors)
-	var connector models.Connector
+	var connector entity.Connector
 	err = collection.FindOne(m.ctx, filter).Decode(&connector)
 	if err != nil {
 		return nil, err
@@ -511,7 +511,7 @@ func (m *MongoDB) GetConnector(id int, chargePointId string) (*models.Connector,
 	return &connector, nil
 }
 
-func (m *MongoDB) getUser(username string) (*models.User, error) {
+func (m *MongoDB) getUser(username string) (*entity.User, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -520,7 +520,7 @@ func (m *MongoDB) getUser(username string) (*models.User, error) {
 
 	filter := bson.D{{"username", username}}
 	collection := connection.Database(m.database).Collection(collectionUsers)
-	var user models.User
+	var user entity.User
 	err = collection.FindOne(m.ctx, filter).Decode(&user)
 	if err != nil {
 		return nil, err
@@ -529,7 +529,7 @@ func (m *MongoDB) getUser(username string) (*models.User, error) {
 }
 
 // GetUserPaymentPlan returns payment plan for user or default plan if user has no plan set
-func (m *MongoDB) GetUserPaymentPlan(username string) (*models.PaymentPlan, error) {
+func (m *MongoDB) GetUserPaymentPlan(username string) (*entity.PaymentPlan, error) {
 	user, err := m.getUser(username)
 	if user == nil {
 		return nil, err
@@ -546,7 +546,7 @@ func (m *MongoDB) GetUserPaymentPlan(username string) (*models.PaymentPlan, erro
 
 	filter := bson.D{{"plan_id", user.PaymentPlan}, {"is_active", true}}
 	collection := connection.Database(m.database).Collection(collectionPaymentPlans)
-	var plan models.PaymentPlan
+	var plan entity.PaymentPlan
 	err = collection.FindOne(m.ctx, filter).Decode(&plan)
 	if err != nil {
 		return m.getDefaultPaymentPlan()
@@ -554,7 +554,7 @@ func (m *MongoDB) GetUserPaymentPlan(username string) (*models.PaymentPlan, erro
 	return &plan, nil
 }
 
-func (m *MongoDB) getDefaultPaymentPlan() (*models.PaymentPlan, error) {
+func (m *MongoDB) getDefaultPaymentPlan() (*entity.PaymentPlan, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -563,7 +563,7 @@ func (m *MongoDB) getDefaultPaymentPlan() (*models.PaymentPlan, error) {
 
 	filter := bson.D{{"is_default", true}, {"is_active", true}}
 	collection := connection.Database(m.database).Collection(collectionPaymentPlans)
-	var plan models.PaymentPlan
+	var plan entity.PaymentPlan
 	err = collection.FindOne(m.ctx, filter).Decode(&plan)
 	if err != nil {
 		return nil, err
@@ -571,7 +571,7 @@ func (m *MongoDB) getDefaultPaymentPlan() (*models.PaymentPlan, error) {
 	return &plan, nil
 }
 
-func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
+func (m *MongoDB) GetUserTag(id string) (*entity.UserTag, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -580,7 +580,7 @@ func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
 
 	filter := bson.D{{"id_tag", id}}
 	collection := connection.Database(m.database).Collection(collectionUserTags)
-	var userTag models.UserTag
+	var userTag entity.UserTag
 	err = collection.FindOne(m.ctx, filter).Decode(&userTag)
 	if err != nil {
 		return nil, err
@@ -588,7 +588,7 @@ func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
 	return &userTag, nil
 }
 
-func (m *MongoDB) AddUserTag(userTag *models.UserTag) error {
+func (m *MongoDB) AddUserTag(userTag *entity.UserTag) error {
 	existedTag, _ := m.GetUserTag(userTag.IdTag)
 	if existedTag != nil {
 		return fmt.Errorf("ID tag %s is already registered", existedTag.IdTag)
@@ -604,7 +604,7 @@ func (m *MongoDB) AddUserTag(userTag *models.UserTag) error {
 	return err
 }
 
-func (m *MongoDB) UpdateTagLastSeen(userTag *models.UserTag) error {
+func (m *MongoDB) UpdateTagLastSeen(userTag *entity.UserTag) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -620,7 +620,7 @@ func (m *MongoDB) UpdateTagLastSeen(userTag *models.UserTag) error {
 	return err
 }
 
-func (m *MongoDB) GetActiveUserTags(chargePointId string, listVersion int) ([]models.UserTag, error) {
+func (m *MongoDB) GetActiveUserTags(chargePointId string, listVersion int) ([]entity.UserTag, error) {
 	chargePoint, err := m.GetChargePoint(chargePointId)
 	if err != nil {
 		return nil, fmt.Errorf("charge point with id %s not found: %v", chargePointId, err)
@@ -642,7 +642,7 @@ func (m *MongoDB) GetActiveUserTags(chargePointId string, listVersion int) ([]mo
 	if err != nil {
 		return nil, err
 	}
-	var userTags []models.UserTag
+	var userTags []entity.UserTag
 	if err = cursor.All(m.ctx, &userTags); err != nil {
 		return nil, err
 	}
@@ -655,7 +655,7 @@ func (m *MongoDB) GetActiveUserTags(chargePointId string, listVersion int) ([]mo
 	return userTags, nil
 }
 
-func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
+func (m *MongoDB) GetLastTransaction() (*entity.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -665,7 +665,7 @@ func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
 	filter := bson.D{}
 	collection := connection.Database(m.database).Collection(collectionTransactions)
 	opts := options.FindOne().SetSort(bson.D{{"transaction_id", -1}})
-	var transaction models.Transaction
+	var transaction entity.Transaction
 	err = collection.FindOne(m.ctx, filter, opts).Decode(&transaction)
 	if err != nil {
 		return nil, err
@@ -673,8 +673,8 @@ func (m *MongoDB) GetLastTransaction() (*models.Transaction, error) {
 	return &transaction, nil
 }
 
-func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
-	var transaction models.Transaction
+func (m *MongoDB) GetTransaction(id int) (*entity.Transaction, error) {
+	var transaction entity.Transaction
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -690,7 +690,7 @@ func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
 	return &transaction, nil
 }
 
-func (m *MongoDB) GetUnfinishedTransactions() ([]*models.Transaction, error) {
+func (m *MongoDB) GetUnfinishedTransactions() ([]*entity.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -742,7 +742,7 @@ func (m *MongoDB) GetUnfinishedTransactions() ([]*models.Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	var transactions []*models.Transaction
+	var transactions []*entity.Transaction
 	if err = cursor.All(m.ctx, &transactions); err != nil {
 		return nil, err
 	}
@@ -751,7 +751,7 @@ func (m *MongoDB) GetUnfinishedTransactions() ([]*models.Transaction, error) {
 
 // GetNotBilledTransactions get list of not billed transactions
 // where payment_billed is less than payment_amount
-func (m *MongoDB) GetNotBilledTransactions() ([]*models.Transaction, error) {
+func (m *MongoDB) GetNotBilledTransactions() ([]*entity.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -768,14 +768,14 @@ func (m *MongoDB) GetNotBilledTransactions() ([]*models.Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	var transactions []*models.Transaction
+	var transactions []*entity.Transaction
 	if err = cursor.All(m.ctx, &transactions); err != nil {
 		return nil, err
 	}
 	return transactions, nil
 }
 
-func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {
+func (m *MongoDB) AddTransaction(transaction *entity.Transaction) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -787,7 +787,7 @@ func (m *MongoDB) AddTransaction(transaction *models.Transaction) error {
 	return err
 }
 
-func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
+func (m *MongoDB) UpdateTransaction(transaction *entity.Transaction) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -804,7 +804,7 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 	return nil
 }
 
-func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) error {
+func (m *MongoDB) AddTransactionMeterValue(meterValue *entity.TransactionMeter) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -823,7 +823,7 @@ func (m *MongoDB) AddTransactionMeterValue(meterValue *models.TransactionMeter) 
 	return err
 }
 
-func (m *MongoDB) AddSampleMeterValue(meterValue *models.TransactionMeter) error {
+func (m *MongoDB) AddSampleMeterValue(meterValue *entity.TransactionMeter) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -841,7 +841,7 @@ func (m *MongoDB) AddSampleMeterValue(meterValue *models.TransactionMeter) error
 }
 
 // ReadTransactionMeterValue read last transaction meter value sorted by timestamp
-func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.TransactionMeter, error) {
+func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*entity.TransactionMeter, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -851,7 +851,7 @@ func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.Transact
 	filter := bson.D{{"transaction_id", transactionId}}
 	collection := connection.Database(m.database).Collection(collectionMeterValues)
 	opts := options.FindOne().SetSort(bson.D{{"timestamp", -1}})
-	var meterValue models.TransactionMeter
+	var meterValue entity.TransactionMeter
 	err = collection.FindOne(m.ctx, filter, opts).Decode(&meterValue)
 	if err != nil {
 		return nil, err
@@ -859,7 +859,7 @@ func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*models.Transact
 	return &meterValue, nil
 }
 
-func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.TransactionMeter, error) {
+func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]entity.TransactionMeter, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -873,7 +873,7 @@ func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.Tra
 	if err != nil {
 		return nil, err
 	}
-	var meterValues []models.TransactionMeter
+	var meterValues []entity.TransactionMeter
 	if err = cursor.All(m.ctx, &meterValues); err != nil {
 		return nil, err
 	}
@@ -881,7 +881,7 @@ func (m *MongoDB) ReadAllTransactionMeterValues(transactionId int) ([]models.Tra
 }
 
 // ReadLastMeterValues returns last meter values for all transactions
-func (m *MongoDB) ReadLastMeterValues() ([]*models.TransactionMeter, error) {
+func (m *MongoDB) ReadLastMeterValues() ([]*entity.TransactionMeter, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -890,7 +890,7 @@ func (m *MongoDB) ReadLastMeterValues() ([]*models.TransactionMeter, error) {
 
 	type result struct {
 		TransactionId int `bson:"_id"`
-		Latest        *models.TransactionMeter
+		Latest        *entity.TransactionMeter
 	}
 
 	pipeline := bson.A{
@@ -913,7 +913,7 @@ func (m *MongoDB) ReadLastMeterValues() ([]*models.TransactionMeter, error) {
 	if err = cursor.All(m.ctx, &results); err != nil {
 		return nil, err
 	}
-	var meterValues []*models.TransactionMeter
+	var meterValues []*entity.TransactionMeter
 	for _, res := range results {
 		meterValues = append(meterValues, res.Latest)
 	}
@@ -937,7 +937,7 @@ func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
 }
 
 // GetSubscriptions returns all subscriptions
-func (m *MongoDB) GetSubscriptions() ([]models.UserSubscription, error) {
+func (m *MongoDB) GetSubscriptions() ([]entity.UserSubscription, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -950,7 +950,7 @@ func (m *MongoDB) GetSubscriptions() ([]models.UserSubscription, error) {
 	if err != nil {
 		return nil, err
 	}
-	var subscriptions []models.UserSubscription
+	var subscriptions []entity.UserSubscription
 	if err = cursor.All(m.ctx, &subscriptions); err != nil {
 		return nil, err
 	}
@@ -958,7 +958,7 @@ func (m *MongoDB) GetSubscriptions() ([]models.UserSubscription, error) {
 }
 
 // GetSubscription returns a subscription by user id
-func (m *MongoDB) GetSubscription(id int) (*models.UserSubscription, error) {
+func (m *MongoDB) GetSubscription(id int) (*entity.UserSubscription, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -967,7 +967,7 @@ func (m *MongoDB) GetSubscription(id int) (*models.UserSubscription, error) {
 
 	filter := bson.D{{"user_id", id}}
 	collection := connection.Database(m.database).Collection(collectionSubscriptions)
-	var subscription models.UserSubscription
+	var subscription entity.UserSubscription
 	err = collection.FindOne(m.ctx, filter).Decode(&subscription)
 	if err != nil {
 		return nil, err
@@ -976,7 +976,7 @@ func (m *MongoDB) GetSubscription(id int) (*models.UserSubscription, error) {
 }
 
 // AddSubscription adds a new subscription
-func (m *MongoDB) AddSubscription(subscription *models.UserSubscription) error {
+func (m *MongoDB) AddSubscription(subscription *entity.UserSubscription) error {
 	existedSubscription, _ := m.GetSubscription(subscription.UserID)
 	if existedSubscription != nil {
 		return fmt.Errorf("user is already subscribed")
@@ -997,7 +997,7 @@ func (m *MongoDB) AddSubscription(subscription *models.UserSubscription) error {
 }
 
 // DeleteSubscription deletes a subscription
-func (m *MongoDB) DeleteSubscription(subscription *models.UserSubscription) error {
+func (m *MongoDB) DeleteSubscription(subscription *entity.UserSubscription) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -1011,7 +1011,7 @@ func (m *MongoDB) DeleteSubscription(subscription *models.UserSubscription) erro
 }
 
 // UpdateSubscription updates a subscription
-func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) error {
+func (m *MongoDB) UpdateSubscription(subscription *entity.UserSubscription) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -1029,14 +1029,14 @@ func (m *MongoDB) UpdateSubscription(subscription *models.UserSubscription) erro
 }
 
 // GetLastStatus returns the last status for all points and connectors
-func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
+func (m *MongoDB) GetLastStatus() ([]entity.ChargePointStatus, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
 	}
 	defer m.disconnect(connection)
 
-	var status []models.ChargePointStatus
+	var status []entity.ChargePointStatus
 	pipeline := mongo.Pipeline{
 		bson.D{{"$lookup", bson.D{
 			{"from", "connectors"},
@@ -1056,7 +1056,7 @@ func (m *MongoDB) GetLastStatus() ([]models.ChargePointStatus, error) {
 	return status, nil
 }
 
-func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error) {
+func (m *MongoDB) GetPaymentMethod(userId string) (*entity.PaymentMethod, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -1065,7 +1065,7 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error)
 
 	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
 	filter := bson.D{{"user_id", userId}, {"is_default", true}}
-	var paymentMethod *models.PaymentMethod
+	var paymentMethod *entity.PaymentMethod
 	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
 	if paymentMethod == nil {
 		filter = bson.D{{"user_id", userId}}
@@ -1077,7 +1077,7 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error)
 	return paymentMethod, nil
 }
 
-func (m *MongoDB) GetLastOrder() (*models.PaymentOrder, error) {
+func (m *MongoDB) GetLastOrder() (*entity.PaymentOrder, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -1086,14 +1086,14 @@ func (m *MongoDB) GetLastOrder() (*models.PaymentOrder, error) {
 
 	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
 	filter := bson.D{}
-	var order models.PaymentOrder
+	var order entity.PaymentOrder
 	if err = collection.FindOne(m.ctx, filter, options.FindOne().SetSort(bson.D{{"time_opened", -1}})).Decode(&order); err != nil {
 		return nil, err
 	}
 	return &order, nil
 }
 
-func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error) {
+func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*entity.PaymentOrder, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -1102,14 +1102,14 @@ func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*models.Payme
 
 	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
 	filter := bson.D{{"transaction_id", transactionId}, {"is_completed", false}}
-	var order models.PaymentOrder
+	var order entity.PaymentOrder
 	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
 		return nil, err
 	}
 	return &order, nil
 }
 
-func (m *MongoDB) SavePaymentOrder(order *models.PaymentOrder) error {
+func (m *MongoDB) SavePaymentOrder(order *entity.PaymentOrder) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err

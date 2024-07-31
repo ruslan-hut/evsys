@@ -1,4 +1,4 @@
-package models
+package entity
 
 type PaymentMethod struct {
 	Description string `json:"description" bson:"description"`

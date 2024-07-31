@@ -1,8 +1,8 @@
 package power
 
 import (
+	"evsys/entity"
 	"evsys/internal"
-	"evsys/models"
 	"evsys/ocpp"
 	"evsys/ocpp/smartcharging"
 	"fmt"
@@ -145,7 +145,7 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	}
 }
 
-func (lb *LoadBalancer) getLocation(chargePointId string) (*models.Location, *models.ChargePoint) {
+func (lb *LoadBalancer) getLocation(chargePointId string) (*entity.Location, *entity.ChargePoint) {
 	chp, err := lb.database.GetChargePoint(chargePointId)
 	if err != nil {
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error getting charge point: %s", err))
@@ -165,7 +165,7 @@ func (lb *LoadBalancer) getLocation(chargePointId string) (*models.Location, *mo
 	return location, chp
 }
 
-func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *models.Connector) error {
+func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.Connector) error {
 	if connector.CurrentTransactionId < 0 && connector.CurrentPowerLimit == 0 {
 		// no need to update - connector is not active and has no limit set
 		return nil

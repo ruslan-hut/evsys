@@ -1,4 +1,4 @@
-package models
+package entity
 
 type PaymentRequest struct {
 	Parameters       string `json:"DS_MERCHANT_PARAMETERS"`

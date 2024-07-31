@@ -1,4 +1,4 @@
-package models
+package entity
 
 type Location struct {
 	Id                string         `json:"id" bson:"id" validate:"required,max=39"`

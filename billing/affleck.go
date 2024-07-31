@@ -1,15 +1,19 @@
 package billing
 
 import (
+	"evsys/entity"
 	"evsys/internal"
-	"evsys/models"
 	"fmt"
 )
+
+type PaymentService interface {
+	TransactionPayment(transaction *entity.Transaction)
+}
 
 type Affleck struct {
 	database internal.Database
 	logger   internal.LogHandler
-	payment  internal.PaymentService
+	payment  PaymentService
 }
 
 func NewAffleck() *Affleck {
@@ -24,12 +28,12 @@ func (a *Affleck) SetLogger(logger internal.LogHandler) {
 	a.logger = logger
 }
 
-func (a *Affleck) SetPayment(payment internal.PaymentService) {
+func (a *Affleck) SetPayment(payment PaymentService) {
 	a.payment = payment
 }
 
 // OnTransactionStart set payment plan for transaction
-func (a *Affleck) OnTransactionStart(transaction *models.Transaction) error {
+func (a *Affleck) OnTransactionStart(transaction *entity.Transaction) error {
 	if a.database != nil {
 		if transaction.Username == "" {
 			return nil
@@ -44,7 +48,7 @@ func (a *Affleck) OnTransactionStart(transaction *models.Transaction) error {
 	return nil
 }
 
-func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
+func (a *Affleck) OnTransactionFinished(transaction *entity.Transaction) error {
 
 	// price in cents per hour
 	pricePerHour := transaction.Plan.PricePerHour
@@ -69,7 +73,7 @@ func (a *Affleck) OnTransactionFinished(transaction *models.Transaction) error {
 	return nil
 }
 
-func (a *Affleck) OnMeterValue(transaction *models.Transaction, meterValue *models.TransactionMeter) error {
+func (a *Affleck) OnMeterValue(transaction *entity.Transaction, meterValue *entity.TransactionMeter) error {
 
 	// price in cents per hour
 	pricePerHour := transaction.Plan.PricePerHour

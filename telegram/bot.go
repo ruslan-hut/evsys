@@ -1,8 +1,8 @@
 package telegram
 
 import (
+	"evsys/entity"
 	"evsys/internal"
-	"evsys/models"
 	"evsys/utility"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -14,7 +14,7 @@ import (
 type TgBot struct {
 	api           *tgbotapi.BotAPI
 	database      internal.Database
-	subscriptions map[int]models.UserSubscription
+	subscriptions map[int]entity.UserSubscription
 	event         chan MessageContent
 	send          chan MessageContent
 }
@@ -26,7 +26,7 @@ type MessageContent struct {
 
 func NewBot(apiKey string) (*TgBot, error) {
 	tgBot := &TgBot{
-		subscriptions: make(map[int]models.UserSubscription),
+		subscriptions: make(map[int]entity.UserSubscription),
 		event:         make(chan MessageContent, 100),
 		send:          make(chan MessageContent, 100),
 	}
@@ -44,7 +44,7 @@ func (b *TgBot) SetDatabase(database internal.Database) {
 }
 
 func (b *TgBot) Start() {
-	b.subscriptions = make(map[int]models.UserSubscription)
+	b.subscriptions = make(map[int]entity.UserSubscription)
 	if b.database != nil {
 		subscriptions, err := b.database.GetSubscriptions()
 		if err != nil {
@@ -78,7 +78,7 @@ func (b *TgBot) updatesPump() {
 		}
 		switch update.Message.Command() {
 		case "start":
-			subscription := models.UserSubscription{
+			subscription := entity.UserSubscription{
 				UserID:           update.Message.From.ID,
 				User:             update.Message.From.UserName,
 				SubscriptionType: "status",
@@ -96,7 +96,7 @@ func (b *TgBot) updatesPump() {
 		case "stop":
 			delete(b.subscriptions, update.Message.From.ID)
 			if b.database != nil {
-				err := b.database.DeleteSubscription(&models.UserSubscription{UserID: update.Message.From.ID})
+				err := b.database.DeleteSubscription(&entity.UserSubscription{UserID: update.Message.From.ID})
 				if err != nil {
 					log.Printf("bot: error deleting subscription: %v", err)
 				}

@@ -1,4 +1,4 @@
-package models
+package entity
 
 type UserSubscription struct {
 	UserID           int    `json:"user_id" bson:"user_id"`

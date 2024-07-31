@@ -1,8 +1,8 @@
 package server
 
 import (
+	"evsys/entity"
 	"evsys/internal"
-	"evsys/models"
 	"evsys/ocpp/remotetrigger"
 	"fmt"
 	"time"
@@ -11,8 +11,8 @@ import (
 const featureNameTrigger = "Trigger"
 
 type Trigger struct {
-	connectors map[int]*models.Connector
-	Register   chan *models.Connector
+	connectors map[int]*entity.Connector
+	Register   chan *entity.Connector
 	Unregister chan int
 	server     *Server
 	logger     internal.LogHandler
@@ -20,8 +20,8 @@ type Trigger struct {
 
 func NewTrigger(server *Server, logger internal.LogHandler) *Trigger {
 	return &Trigger{
-		connectors: make(map[int]*models.Connector),
-		Register:   make(chan *models.Connector),
+		connectors: make(map[int]*entity.Connector),
+		Register:   make(chan *entity.Connector),
 		Unregister: make(chan int),
 		server:     server,
 		logger:     logger,
@@ -70,7 +70,7 @@ func (t *Trigger) listen() {
 	}
 }
 
-func (t *Trigger) UnregisterConnector(connector *models.Connector) {
+func (t *Trigger) UnregisterConnector(connector *entity.Connector) {
 	for id, c := range t.connectors {
 		if c == connector {
 			t.Unregister <- id

@@ -1,10 +1,10 @@
 package power
 
-import "evsys/models"
+import "evsys/entity"
 
 type Repository interface {
-	GetChargePoint(id string) (*models.ChargePoint, error)
-	GetLocation(locationId string) (*models.Location, error)
-	GetLocations() ([]*models.Location, error)
-	UpdateConnectorCurrentPower(connector *models.Connector) error
+	GetChargePoint(id string) (*entity.ChargePoint, error)
+	GetLocation(locationId string) (*entity.Location, error)
+	GetLocations() ([]*entity.Location, error)
+	UpdateConnectorCurrentPower(connector *entity.Connector) error
 }

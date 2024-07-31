@@ -1,4 +1,4 @@
-package models
+package entity
 
 type PaymentPlan struct {
 	PlanId       string `json:"plan_id" bson:"plan_id"`

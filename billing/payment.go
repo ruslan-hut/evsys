@@ -1,9 +1,9 @@
 package billing
 
 import (
+	"evsys/entity"
 	"evsys/internal"
 	"evsys/internal/config"
-	"evsys/models"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,8 +11,12 @@ import (
 	"time"
 )
 
+type Database interface {
+	GetNotBilledTransactions() ([]*entity.Transaction, error)
+}
+
 type Payment struct {
-	database internal.Database
+	database Database
 	logger   internal.LogHandler
 	apiUrl   string
 	apiKey   string
@@ -29,7 +33,7 @@ func NewPaymentService(conf *config.Config) *Payment {
 	return payment
 }
 
-func (p *Payment) SetDatabase(database internal.Database) {
+func (p *Payment) SetDatabase(database Database) {
 	p.database = database
 }
 
@@ -37,7 +41,7 @@ func (p *Payment) SetLogger(logger internal.LogHandler) {
 	p.logger = logger
 }
 
-func (p *Payment) TransactionPayment(transaction *models.Transaction) {
+func (p *Payment) TransactionPayment(transaction *entity.Transaction) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 

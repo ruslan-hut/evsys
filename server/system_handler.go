@@ -2,8 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"evsys/entity"
 	"evsys/internal"
-	"evsys/models"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/localauth"
@@ -24,19 +24,29 @@ const (
 	sourceOCPI               = "OCPI"
 )
 
+type BillingService interface {
+	OnTransactionStart(transaction *entity.Transaction) error
+	OnTransactionFinished(transaction *entity.Transaction) error
+	OnMeterValue(transaction *entity.Transaction, transactionMeter *entity.TransactionMeter) error
+}
+
+type PaymentService interface {
+	TransactionPayment(transaction *entity.Transaction)
+}
+
 type ChargePointState struct {
 	status            core.ChargePointStatus
 	diagnosticsStatus firmware.DiagnosticsStatus
 	firmwareStatus    firmware.Status
-	connectors        map[int]*models.Connector // No assumptions about the # of connectors
+	connectors        map[int]*entity.Connector // No assumptions about the # of connectors
 	transactions      map[int]*int
 	errorCode         core.ChargePointErrorCode
-	model             *models.ChargePoint
+	model             *entity.ChargePoint
 }
 
-func newChargePointState(chp *models.ChargePoint) *ChargePointState {
+func newChargePointState(chp *entity.ChargePoint) *ChargePointState {
 	return &ChargePointState{
-		connectors:   make(map[int]*models.Connector),
+		connectors:   make(map[int]*entity.Connector),
 		transactions: make(map[int]*int),
 		model:        chp,
 	}
@@ -70,10 +80,10 @@ type AuthService interface {
 
 type SystemHandler struct {
 	chargePoints   map[string]*ChargePointState
-	lastMeter      map[int]*models.TransactionMeter
+	lastMeter      map[int]*entity.TransactionMeter
 	database       internal.Database
-	billing        internal.BillingService
-	payment        internal.PaymentService
+	billing        BillingService
+	payment        PaymentService
 	auth           AuthService
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
@@ -88,7 +98,7 @@ type SystemHandler struct {
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
 		chargePoints:   make(map[string]*ChargePointState),
-		lastMeter:      make(map[int]*models.TransactionMeter),
+		lastMeter:      make(map[int]*entity.TransactionMeter),
 		eventListeners: make([]internal.EventHandler, 0),
 		location:       location,
 		mux:            &sync.Mutex{},
@@ -118,11 +128,11 @@ func (h *SystemHandler) SetDatabase(database internal.Database) {
 	h.database = database
 }
 
-func (h *SystemHandler) SetBillingService(billing internal.BillingService) {
+func (h *SystemHandler) SetBillingService(billing BillingService) {
 	h.billing = billing
 }
 
-func (h *SystemHandler) SetPaymentService(payment internal.PaymentService) {
+func (h *SystemHandler) SetPaymentService(payment PaymentService) {
 	h.payment = payment
 }
 
@@ -243,7 +253,7 @@ func (h *SystemHandler) OnStart() error {
 	return nil
 }
 
-func (h *SystemHandler) initializeChargePointState(chp *models.ChargePoint) *ChargePointState {
+func (h *SystemHandler) initializeChargePointState(chp *entity.ChargePoint) *ChargePointState {
 	state := newChargePointState(chp)
 	state.status = core.GetStatus(chp.Status)
 	state.errorCode = core.GetErrorCode(chp.ErrorCode)
@@ -271,7 +281,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string) *ChargePointState {
 		h.logger.Warn("invalid charge point id")
 		return nil
 	}
-	cp := &models.ChargePoint{
+	cp := &entity.ChargePoint{
 		Id:          chargePointId,
 		Title:       fmt.Sprintf("(new) %s", chargePointId),
 		IsEnabled:   true,
@@ -289,7 +299,7 @@ func (h *SystemHandler) addChargePoint(chargePointId string) *ChargePointState {
 	return h.initializeChargePointState(cp)
 }
 
-func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Connector {
+func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *entity.Connector {
 	connector, ok := cps.connectors[id]
 	if ok {
 		return connector
@@ -304,7 +314,7 @@ func (h *SystemHandler) getConnector(cps *ChargePointState, id int) *models.Conn
 		}
 	}
 	// create new connector
-	connector = models.NewConnector(id, cps.model.Id)
+	connector = entity.NewConnector(id, cps.model.Id)
 	cps.connectors[id] = connector
 	if h.database != nil {
 		err := h.database.AddConnector(connector)
@@ -479,7 +489,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	userTag := h.getUserTag(request.IdTag)
 
-	transaction := &models.Transaction{
+	transaction := &entity.Transaction{
 		IdTag:         userTag.IdTag,
 		IdTagNote:     userTag.Note,
 		Username:      userTag.Username,
@@ -734,7 +744,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 	for _, sampledValue := range request.MeterValue {
 
-		meter := models.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.Timestamp.Time)
+		meter := entity.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.Timestamp.Time)
 
 		for _, value := range sampledValue.SampledValue {
 
@@ -1227,7 +1237,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 	h.updateActiveTransactionsCounter()
 }
 
-func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOnline bool) {
+func (h *SystemHandler) checkListenTransaction(connector *entity.Connector, isOnline bool) {
 	if connector.CurrentTransactionId >= 0 {
 		h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 		if !isOnline {
@@ -1242,8 +1252,8 @@ func (h *SystemHandler) checkListenTransaction(connector *models.Connector, isOn
 	}
 }
 
-func (h *SystemHandler) getUserTag(idTag string) *models.UserTag {
-	userTag := models.NewUserTag(idTag)
+func (h *SystemHandler) getUserTag(idTag string) *entity.UserTag {
+	userTag := entity.NewUserTag(idTag)
 
 	if h.database == nil {
 		userTag.IsEnabled = h.acceptTags
