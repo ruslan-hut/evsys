@@ -850,10 +850,11 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		connector.VendorId = request.VendorId
 		connector.ErrorCode = string(request.ErrorCode)
 
-		if request.Status == core.ChargePointStatusAvailable {
-			connector.CurrentTransactionId = -1
-			connector.CurrentPowerLimit = 0
-		}
+		// URBAN sends Available status while transaction is ongoing
+		//if request.Status == core.ChargePointStatusAvailable {
+		//	connector.CurrentTransactionId = -1
+		//	connector.CurrentPowerLimit = 0
+		//}
 
 		if h.database != nil {
 			err := h.database.UpdateConnector(connector)
@@ -1178,7 +1179,6 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 	if h.database == nil {
 		return
 	}
-	//TODO add meter values for unfinished transactions
 
 	transactions, err := h.database.GetUnfinishedTransactions()
 	if err != nil {
@@ -1195,7 +1195,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		transaction.TimeStop = h.getTime()
 		transaction.Reason = "stopped by system"
 
-		meterValue, err := h.database.ReadTransactionMeterValue(transaction.Id)
+		meterValue, _ := h.database.ReadTransactionMeterValue(transaction.Id)
 		if meterValue != nil {
 			transaction.MeterStop = meterValue.Value
 			transaction.TimeStop = meterValue.Time
