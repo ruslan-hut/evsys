@@ -1,6 +1,9 @@
 package internal
 
-import "evsys/entity"
+import (
+	"evsys/entity"
+	"evsys/ocpp/core"
+)
 
 type Database interface {
 	Write(table string, data Data) error
@@ -39,6 +42,7 @@ type Database interface {
 	AddTransaction(transaction *entity.Transaction) error
 	UpdateTransaction(transaction *entity.Transaction) error
 	GetUnfinishedTransactions() ([]*entity.Transaction, error)
+	SaveStopTransactionRequest(stopTransaction *core.StopTransactionRequest) error
 
 	AddTransactionMeterValue(meterValue *entity.TransactionMeter) error
 	AddSampleMeterValue(meterValue *entity.TransactionMeter) error

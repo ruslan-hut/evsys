@@ -4,6 +4,7 @@ import (
 	"context"
 	"evsys/entity"
 	"evsys/internal/config"
+	"evsys/ocpp/core"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -13,18 +14,19 @@ import (
 )
 
 const (
-	collectionLog            = "sys_log"
-	collectionUserTags       = "user_tags"
-	collectionUsers          = "users"
-	collectionLocations      = "locations"
-	collectionChargePoints   = "charge_points"
-	collectionConnectors     = "connectors"
-	collectionTransactions   = "transactions"
-	collectionSubscriptions  = "subscriptions"
-	collectionMeterValues    = "meter_values"
-	collectionPaymentMethods = "payment_methods"
-	collectionPaymentOrders  = "payment_orders"
-	collectionPaymentPlans   = "payment_plans"
+	collectionLog             = "sys_log"
+	collectionUserTags        = "user_tags"
+	collectionUsers           = "users"
+	collectionLocations       = "locations"
+	collectionChargePoints    = "charge_points"
+	collectionConnectors      = "connectors"
+	collectionTransactions    = "transactions"
+	collectionSubscriptions   = "subscriptions"
+	collectionMeterValues     = "meter_values"
+	collectionPaymentMethods  = "payment_methods"
+	collectionPaymentOrders   = "payment_orders"
+	collectionPaymentPlans    = "payment_plans"
+	collectionStopTransaction = "ocpp_stop_transaction"
 )
 
 type MongoDB struct {
@@ -934,6 +936,19 @@ func (m *MongoDB) DeleteTransactionMeterValues(transactionId int) error {
 		return err
 	}
 	return nil
+}
+
+// SaveStopTransactionRequest save stop transaction request data as received from charge point
+func (m *MongoDB) SaveStopTransactionRequest(stopTransaction *core.StopTransactionRequest) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionStopTransaction)
+	_, err = collection.InsertOne(m.ctx, stopTransaction)
+	return err
 }
 
 // GetSubscriptions returns all subscriptions
