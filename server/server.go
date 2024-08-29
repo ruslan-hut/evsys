@@ -55,7 +55,7 @@ type WebSocket struct {
 	logger         internal.LogHandler
 	isClosed       bool
 	watchdog       internal.StatusHandler
-	mutex          *sync.Mutex
+	mutex          sync.Mutex
 }
 
 type Pool struct {
@@ -64,7 +64,7 @@ type Pool struct {
 	clients    map[string]*WebSocket
 	send       chan *envelope
 	logger     internal.LogHandler
-	mutex      *sync.Mutex
+	mutex      sync.Mutex
 }
 
 func NewPool(logger internal.LogHandler) *Pool {
@@ -74,7 +74,7 @@ func NewPool(logger internal.LogHandler) *Pool {
 		clients:    make(map[string]*WebSocket),
 		send:       make(chan *envelope, 256),
 		logger:     logger,
-		mutex:      &sync.Mutex{},
+		mutex:      sync.Mutex{},
 	}
 }
 
@@ -241,7 +241,7 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		messageHandler: s.messageHandler,
 		isClosed:       false,
 		watchdog:       s.watchdog,
-		mutex:          &sync.Mutex{},
+		mutex:          sync.Mutex{},
 	}
 	s.pool.register <- &ws
 

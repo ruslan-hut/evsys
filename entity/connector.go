@@ -21,7 +21,7 @@ type Connector struct {
 	Power                int       `json:"power" bson:"power"`
 	CurrentPowerLimit    int       `json:"current_power_limit" bson:"current_power_limit"`
 	CurrentTransactionId int       `json:"current_transaction_id" bson:"current_transaction_id"`
-	mutex                *sync.Mutex
+	mutex                sync.Mutex
 }
 
 func (c *Connector) Lock() {
@@ -33,9 +33,7 @@ func (c *Connector) Unlock() {
 }
 
 func (c *Connector) Init() {
-	if c.mutex == nil {
-		c.mutex = &sync.Mutex{}
-	}
+	c.mutex = sync.Mutex{}
 }
 
 func (c *Connector) ID() string {
@@ -48,6 +46,6 @@ func NewConnector(id int, chargePointId string) *Connector {
 		ChargePointId:        chargePointId,
 		IsEnabled:            true,
 		CurrentTransactionId: -1,
-		mutex:                &sync.Mutex{},
+		mutex:                sync.Mutex{},
 	}
 }

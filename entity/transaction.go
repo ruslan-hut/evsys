@@ -28,7 +28,7 @@ type Transaction struct {
 	PaymentMethod *PaymentMethod     `json:"payment_method,omitempty" bson:"payment_method"`
 	PaymentOrders []PaymentOrder     `json:"payment_orders" bson:"payment_orders"`
 	UserTag       *UserTag           `json:"user_tag,omitempty" bson:"user_tag"`
-	mutex         *sync.Mutex
+	mutex         sync.Mutex
 }
 
 func (t *Transaction) Lock() {
@@ -40,7 +40,5 @@ func (t *Transaction) Unlock() {
 }
 
 func (t *Transaction) Init() {
-	if t.mutex == nil {
-		t.mutex = &sync.Mutex{}
-	}
+	t.mutex = sync.Mutex{}
 }

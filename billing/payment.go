@@ -16,14 +16,14 @@ type Payment struct {
 	logger   internal.LogHandler
 	apiUrl   string
 	apiKey   string
-	mutex    *sync.Mutex
+	mutex    sync.Mutex
 }
 
 func NewPaymentService(conf *config.Config) *Payment {
 	payment := &Payment{
 		apiUrl: conf.Payment.ApiUrl,
 		apiKey: conf.Payment.ApiKey,
-		mutex:  &sync.Mutex{},
+		mutex:  sync.Mutex{},
 	}
 	payment.Start()
 	return payment

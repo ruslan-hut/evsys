@@ -92,7 +92,7 @@ type SystemHandler struct {
 	acceptTags     bool
 	acceptPoints   bool
 	location       *time.Location
-	mux            *sync.Mutex
+	mux            sync.Mutex
 }
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
@@ -101,7 +101,7 @@ func NewSystemHandler(location *time.Location) *SystemHandler {
 		lastMeter:      make(map[int]*entity.TransactionMeter),
 		eventListeners: make([]internal.EventHandler, 0),
 		location:       location,
-		mux:            &sync.Mutex{},
+		mux:            sync.Mutex{},
 	}
 	return handler
 }
