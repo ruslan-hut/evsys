@@ -573,7 +573,9 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	meterValues, _ := h.database.ReadAllTransactionMeterValues(request.TransactionId)
 
 	// save request data as is for debugging
-	_ = h.database.SaveStopTransactionRequest(request)
+	if request.TransactionData != nil && len(request.TransactionData) > 0 {
+		_ = h.database.SaveStopTransactionRequest(request)
+	}
 
 	// removing all listeners and observers
 	h.trigger.Unregister <- request.TransactionId

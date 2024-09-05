@@ -21,12 +21,12 @@ const (
 )
 
 type StopTransactionRequest struct {
-	IdTag           string             `json:"idTag,omitempty" validate:"max=20"`
-	MeterStop       int                `json:"meterStop"`
-	Timestamp       *types.DateTime    `json:"timestamp" validate:"required"`
-	TransactionId   int                `json:"transactionId"`
-	Reason          Reason             `json:"reason,omitempty" validate:"omitempty,reason"`
-	TransactionData []types.MeterValue `json:"transactionData,omitempty" validate:"omitempty,dive"`
+	IdTag           string             `json:"idTag,omitempty" bson:"id_tag" validate:"max=20"`
+	MeterStop       int                `json:"meterStop" bson:"meter_stop"`
+	Timestamp       *types.DateTime    `json:"timestamp" bson:"timestamp" validate:"required"`
+	TransactionId   int                `json:"transactionId" bson:"transaction_id"`
+	Reason          Reason             `json:"reason,omitempty" bson:"reason" validate:"omitempty,reason"`
+	TransactionData []types.MeterValue `json:"transactionData,omitempty" bson:"transaction_data" validate:"omitempty,dive"`
 }
 
 type StopTransactionResponse struct {
