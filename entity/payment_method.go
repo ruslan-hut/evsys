@@ -11,4 +11,6 @@ type PaymentMethod struct {
 	IsDefault   bool   `json:"is_default" bson:"is_default"`
 	UserId      string `json:"user_id" bson:"user_id"`
 	UserName    string `json:"user_name" bson:"user_name"`
+	FailCount   int    `json:"fail_count" bson:"fail_count"`
+	CofTid      string `json:"merchant_cof_txnid" bson:"merchant_cof_txnid"`
 }
