@@ -1084,7 +1084,8 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*entity.PaymentMethod, error)
 	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
 	if paymentMethod == nil {
 		filter = bson.D{{"user_id", userId}}
-		err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
+		opt := options.FindOne().SetSort(bson.D{{"fail_count", 1}})
+		err = collection.FindOne(m.ctx, filter, opt).Decode(&paymentMethod)
 	}
 	if err != nil {
 		return nil, err

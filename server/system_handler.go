@@ -1275,8 +1275,8 @@ func (h *SystemHandler) getUserTag(idTag string) *entity.UserTag {
 	savedTag, _ := h.database.GetUserTag(userTag.IdTag)
 	if savedTag != nil {
 		userTag = savedTag
-	} else if h.acceptTags {
-		userTag.IsEnabled = true
+	} else {
+		userTag.IsEnabled = h.acceptTags
 		userTag.DateRegistered = time.Now()
 		err := h.database.AddUserTag(userTag)
 		if err != nil {
