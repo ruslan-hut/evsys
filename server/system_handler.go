@@ -415,6 +415,7 @@ func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.Authoriz
 			if authStatus != types.AuthorizationStatusInvalid {
 				userTag.Source = sourceOCPI
 				userTag.Note = result.info
+				_ = h.database.UpdateTag(userTag)
 			}
 		}
 	}

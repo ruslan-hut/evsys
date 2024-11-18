@@ -606,6 +606,7 @@ func (m *MongoDB) AddUserTag(userTag *entity.UserTag) error {
 	return err
 }
 
+// UpdateTagLastSeen updates last seen time for user tag
 func (m *MongoDB) UpdateTagLastSeen(userTag *entity.UserTag) error {
 	connection, err := m.connect()
 	if err != nil {
@@ -617,6 +618,29 @@ func (m *MongoDB) UpdateTagLastSeen(userTag *entity.UserTag) error {
 	filter := bson.D{{"id_tag", userTag.IdTag}}
 	update := bson.M{"$set": bson.D{
 		{"last_seen", time.Now()},
+	}}
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
+// UpdateTag updates an existing user tag in the MongoDB collection based on the provided ID.
+// It returns an error if the operation fails.
+func (m *MongoDB) UpdateTag(userTag *entity.UserTag) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUserTags)
+	filter := bson.D{{"id_tag", userTag.IdTag}}
+	update := bson.M{"$set": bson.D{
+		{"note", userTag.Note},
+		{"source", userTag.Source},
+		{"username", userTag.Username},
+		{"user_id", userTag.UserId},
+		{"is_enabled", userTag.IsEnabled},
+		{"local", userTag.Local},
 	}}
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	return err

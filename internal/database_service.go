@@ -27,6 +27,7 @@ type Database interface {
 
 	GetUserTag(idTag string) (*entity.UserTag, error)
 	AddUserTag(userTag *entity.UserTag) error
+	UpdateTag(userTag *entity.UserTag) error
 	UpdateTagLastSeen(userTag *entity.UserTag) error
 	GetActiveUserTags(chargePointId string, listVersion int) ([]entity.UserTag, error)
 
