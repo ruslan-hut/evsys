@@ -716,6 +716,12 @@ func (m *MongoDB) GetTransaction(id int) (*entity.Transaction, error) {
 	return &transaction, nil
 }
 
+/*
+GetUnfinishedTransactions retrieves a list of transactions that have not been marked as finished.
+Aggregation pipeline is used to find unfinished transactions that are not currently associated with any connector
+
+Returns a slice of pointers to unfinished Transaction entities, or an error if the operation fails.
+*/
 func (m *MongoDB) GetUnfinishedTransactions() ([]*entity.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
