@@ -42,7 +42,7 @@ func (a *Authorize) Authorize(locationId, evseId, idTag string) *Result {
 			response := ParseResponse(res.body)
 			return NewFromResponse(response)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		return nil
 	}
 	return nil
