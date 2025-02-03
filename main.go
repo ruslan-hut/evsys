@@ -2,7 +2,7 @@ package main
 
 import (
 	"evsys/internal/config"
-	"evsys/metrics"
+	"evsys/metrics/listen"
 	"evsys/server"
 	"flag"
 	"fmt"
@@ -27,7 +27,7 @@ func main() {
 
 	if conf.Metrics.Enabled {
 		go func() {
-			err = metrics.Listen(conf)
+			err = listen.Listen(conf)
 			if err != nil {
 				log.Println("metrics server failed", err)
 			}
