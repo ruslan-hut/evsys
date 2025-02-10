@@ -4,6 +4,7 @@ import (
 	"evsys/billing"
 	"evsys/internal"
 	"evsys/internal/config"
+	"evsys/internal/errorlistener"
 	"evsys/ocpi"
 	"evsys/ocpp"
 	"evsys/ocpp/core"
@@ -285,9 +286,9 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	}
 
 	if conf.Telegram.Enabled {
-		telegramBot, err := telegram.NewBot(conf.Telegram.ApiKey)
-		if err != nil {
-			return cs, fmt.Errorf("telegram bot setup failed: %s", err)
+		telegramBot, e := telegram.NewBot(conf.Telegram.ApiKey)
+		if e != nil {
+			return cs, fmt.Errorf("telegram bot setup failed: %s", e)
 		} else {
 			if database != nil {
 				telegramBot.SetDatabase(database)
@@ -303,6 +304,12 @@ func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 		systemHandler.AddEventListener(ocpiClient)
 		systemHandler.SetAuthService(ocpiClient)
 		log.Println("ocpi client is configured and enabled")
+	}
+
+	// error listener for system handler
+	if database != nil {
+		errorListener := errorlistener.NewErrorListener(database, logService)
+		systemHandler.SetErrorListener(errorListener)
 	}
 
 	// websocket listener

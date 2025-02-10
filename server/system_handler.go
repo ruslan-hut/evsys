@@ -35,6 +35,11 @@ type PaymentService interface {
 	TransactionPayment(transaction *entity.Transaction)
 }
 
+type ErrorListener interface {
+	OnError(data *entity.ErrorData)
+	UpdateCounter()
+}
+
 type ChargePointState struct {
 	status            core.ChargePointStatus
 	diagnosticsStatus firmware.DiagnosticsStatus
@@ -86,6 +91,7 @@ type SystemHandler struct {
 	billing        BillingService
 	payment        PaymentService
 	auth           AuthService
+	errorListener  ErrorListener
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
 	trigger        *Trigger
@@ -157,6 +163,10 @@ func (h *SystemHandler) AddEventListener(eventListener internal.EventHandler) {
 
 func (h *SystemHandler) SetTrigger(trigger *Trigger) {
 	h.trigger = trigger
+}
+
+func (h *SystemHandler) SetErrorListener(listener ErrorListener) {
+	h.errorListener = listener
 }
 
 // common function for event listeners
@@ -250,6 +260,10 @@ func (h *SystemHandler) OnStart() error {
 	go h.notifyEventListeners(internal.Information, &internal.EventMessage{
 		Info: fmt.Sprintf("Started with %d charge points, %d connectors", totalPoints, totalConnectors),
 	})
+
+	if h.errorListener != nil {
+		h.errorListener.UpdateCounter()
+	}
 
 	return nil
 }
@@ -889,10 +903,26 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	if request.ConnectorId > 0 {
 		connectorName = fmt.Sprintf("connector #%v", request.ConnectorId)
 	}
+
 	errorCode := ""
 	if request.ErrorCode != core.NoError {
 		errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
 		counters.ObserveError(state.model.LocationId, chargePointId, request.VendorErrorCode)
+
+		data := &entity.ErrorData{
+			Location:        state.model.LocationId,
+			ChargePointID:   chargePointId,
+			ConnectorID:     request.ConnectorId,
+			ErrorCode:       string(request.ErrorCode),
+			Info:            request.Info,
+			Status:          string(request.Status),
+			Timestamp:       request.GetTimestamp(),
+			VendorId:        request.VendorId,
+			VendorErrorCode: request.VendorErrorCode,
+		}
+		if h.errorListener != nil {
+			h.errorListener.OnError(data)
+		}
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%s: %v%s", connectorName, request.Status, errorCode))
 
