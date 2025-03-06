@@ -41,7 +41,8 @@ func (e ErrorListener) observeErrors() {
 		return
 	}
 	for _, c := range counter {
-		e.log.FeatureEvent("ErrorListener", c.ChargePointID, fmt.Sprintf("updating counter: %v -- %d", c.ErrorCode, c.Count))
-		counters.ErrorsToday(c.Location, c.ChargePointID, c.ErrorCode, c.Count)
+		id := c.ID
+		e.log.FeatureEvent("ErrorListener", id.ChargePointID, fmt.Sprintf("updating counter: %v -- %d", id.ErrorCode, c.Count))
+		counters.ErrorsToday(id.Location, id.ChargePointID, id.ErrorCode, c.Count)
 	}
 }
