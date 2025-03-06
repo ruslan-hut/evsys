@@ -37,7 +37,6 @@ type PaymentService interface {
 
 type ErrorListener interface {
 	OnError(data *entity.ErrorData)
-	UpdateCounter()
 }
 
 type ChargePointState struct {
@@ -260,10 +259,6 @@ func (h *SystemHandler) OnStart() error {
 	go h.notifyEventListeners(internal.Information, &internal.EventMessage{
 		Info: fmt.Sprintf("Started with %d charge points, %d connectors", totalPoints, totalConnectors),
 	})
-
-	if h.errorListener != nil {
-		h.errorListener.UpdateCounter()
-	}
 
 	return nil
 }

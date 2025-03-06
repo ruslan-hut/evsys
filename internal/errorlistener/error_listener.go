@@ -4,7 +4,7 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 	"evsys/metrics/counters"
-	"fmt"
+	"time"
 )
 
 type Database interface {
@@ -19,7 +19,9 @@ type ErrorListener struct {
 
 func NewErrorListener(db Database, log internal.LogHandler) *ErrorListener {
 	log.FeatureEvent("ErrorListener", "", "created")
-	return &ErrorListener{db: db, log: log}
+	listener := &ErrorListener{db: db, log: log}
+	go listener.startPeriodicUpdate()
+	return listener
 }
 
 func (e ErrorListener) OnError(data *entity.ErrorData) {
@@ -30,7 +32,7 @@ func (e ErrorListener) OnError(data *entity.ErrorData) {
 	go e.observeErrors()
 }
 
-func (e ErrorListener) UpdateCounter() {
+func (e ErrorListener) updateCounter() {
 	go e.observeErrors()
 }
 
@@ -42,7 +44,18 @@ func (e ErrorListener) observeErrors() {
 	}
 	for _, c := range counter {
 		id := c.ID
-		e.log.FeatureEvent("ErrorListener", id.ChargePointID, fmt.Sprintf("updating counter: %s %s -- %d", id.Location, id.ErrorCode, c.Count))
 		counters.ErrorsToday(id.Location, id.ChargePointID, id.ErrorCode, c.Count)
+	}
+}
+
+func (e ErrorListener) startPeriodicUpdate() {
+	e.updateCounter()
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			e.updateCounter()
+		}
 	}
 }
