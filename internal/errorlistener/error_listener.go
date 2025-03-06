@@ -4,6 +4,7 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 	"evsys/metrics/counters"
+	"fmt"
 )
 
 type Database interface {
@@ -17,6 +18,7 @@ type ErrorListener struct {
 }
 
 func NewErrorListener(db Database, log internal.LogHandler) *ErrorListener {
+	log.FeatureEvent("ErrorListener", "", "created")
 	return &ErrorListener{db: db, log: log}
 }
 
@@ -39,6 +41,7 @@ func (e ErrorListener) observeErrors() {
 		return
 	}
 	for _, c := range counter {
+		e.log.FeatureEvent("ErrorListener", c.ChargePointID, fmt.Sprintf("updating counter: %v -- %d", c.ErrorCode, c.Count))
 		counters.ErrorsToday(c.Location, c.ChargePointID, c.ErrorCode, c.Count)
 	}
 }
