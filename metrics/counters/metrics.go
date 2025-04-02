@@ -1,4 +1,4 @@
-package server
+package counters
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,25 +23,55 @@ var errorCounts = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help:      "Total number of errors by vendor code.",
 }, []string{"location", "code", "charge_point_id"})
 
-func observeConnections(location string, count int) {
+var errorGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: "ocpp",
+	Name:      "errors_today",
+	Help:      "Total number of errors by vendor code.",
+}, []string{"location", "code", "charge_point_id"})
+
+func ObserveConnections(location string, count int) {
 	if len(location) == 0 {
 		return
 	}
 	connectionsGauge.With(prometheus.Labels{"location": location}).Set(float64(count))
 }
 
-func observeTransactions(location string, count int) {
+func ObserveTransactions(location string, count int) {
 	if len(location) == 0 {
 		return
 	}
 	activeTransactionsGauge.With(prometheus.Labels{"location": location}).Set(float64(count))
 }
 
-func observeError(location, chargePointId, code string) {
+func ObserveError(location, chargePointId, code string) {
 	if len(location) == 0 || len(code) == 0 || len(chargePointId) == 0 {
 		return
 	}
 	errorCounts.With(prometheus.Labels{"location": location, "code": code, "charge_point_id": chargePointId}).Inc()
+}
+
+func ErrorsToday(location, chargePointId, code string, count int) {
+	if len(location) == 0 || len(code) == 0 || len(chargePointId) == 0 {
+		return
+	}
+	errorGauge.With(prometheus.Labels{"location": location, "code": code, "charge_point_id": chargePointId}).Set(float64(count))
+}
+
+var transactionGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: "ocpp",
+	Name:      "transactions_today",
+	Help:      "Total number of transactions.",
+}, []string{"location", "charge_point_id"})
+
+func TransactionsToday(location, chargePointId string, count int) {
+	if len(location) == 0 || len(chargePointId) == 0 {
+		return
+	}
+	transactionGauge.With(
+		prometheus.Labels{
+			"location":        location,
+			"charge_point_id": chargePointId,
+		}).Set(float64(count))
 }
 
 var transactionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -50,7 +80,7 @@ var transactionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help:      "Total number of transactions.",
 }, []string{"location", "charge_point_id"})
 
-func countTransaction(location, chargePointId string) {
+func CountTransaction(location, chargePointId string) {
 	if len(location) == 0 || len(chargePointId) == 0 {
 		return
 	}
@@ -61,13 +91,30 @@ func countTransaction(location, chargePointId string) {
 		}).Inc()
 }
 
-var powerCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+var powerGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: "ocpp",
 	Name:      "consumed_power",
 	Help:      "Consumed power.",
 }, []string{"location", "charge_point_id"})
 
-func countConsumedPower(location, chargePointId string, power float64) {
+var powerCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+	Namespace: "ocpp",
+	Name:      "consumed_today",
+	Help:      "Consumed power.",
+}, []string{"location", "charge_point_id"})
+
+func ConsumedToday(location, chargePointId string, power float64) {
+	if len(location) == 0 || len(chargePointId) == 0 {
+		return
+	}
+	powerGauge.With(
+		prometheus.Labels{
+			"location":        location,
+			"charge_point_id": chargePointId,
+		}).Set(power)
+}
+
+func CountConsumedPower(location, chargePointId string, power float64) {
 	if len(location) == 0 || len(chargePointId) == 0 {
 		return
 	}
@@ -84,7 +131,7 @@ var powerRateGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Help:      "Power rate on current transactions.",
 }, []string{"location", "charge_point_id", "connector_id"})
 
-func observePowerRate(location, chargePointId, connectorId string, power float64) {
+func ObservePowerRate(location, chargePointId, connectorId string, power float64) {
 	if len(location) == 0 {
 		return
 	}

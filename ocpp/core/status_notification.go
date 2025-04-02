@@ -1,6 +1,9 @@
 package core
 
-import "evsys/types"
+import (
+	"evsys/types"
+	"time"
+)
 
 const StatusNotificationFeatureName = "StatusNotification"
 
@@ -123,4 +126,12 @@ func GetErrorCode(errorCode string) ChargePointErrorCode {
 	default:
 		return NoError
 	}
+}
+
+// GetTimestamp get time.Time from DateTime
+func (r StatusNotificationRequest) GetTimestamp() time.Time {
+	if r.Timestamp == nil {
+		return time.Now()
+	}
+	return r.Timestamp.Time
 }

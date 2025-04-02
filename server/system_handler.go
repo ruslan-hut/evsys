@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"evsys/entity"
 	"evsys/internal"
+	"evsys/metrics/counters"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/localauth"
@@ -32,6 +33,10 @@ type BillingService interface {
 
 type PaymentService interface {
 	TransactionPayment(transaction *entity.Transaction)
+}
+
+type ErrorListener interface {
+	OnError(data *entity.ErrorData)
 }
 
 type ChargePointState struct {
@@ -85,6 +90,7 @@ type SystemHandler struct {
 	billing        BillingService
 	payment        PaymentService
 	auth           AuthService
+	errorListener  ErrorListener
 	logger         internal.LogHandler
 	eventListeners []internal.EventHandler
 	trigger        *Trigger
@@ -115,7 +121,7 @@ func (h *SystemHandler) updateActiveTransactionsCounter() {
 		}
 	}
 	for location, count := range locations {
-		observeTransactions(location, count)
+		counters.ObserveTransactions(location, count)
 	}
 }
 
@@ -156,6 +162,10 @@ func (h *SystemHandler) AddEventListener(eventListener internal.EventHandler) {
 
 func (h *SystemHandler) SetTrigger(trigger *Trigger) {
 	h.trigger = trigger
+}
+
+func (h *SystemHandler) SetErrorListener(listener ErrorListener) {
+	h.errorListener = listener
 }
 
 // common function for event listeners
@@ -614,7 +624,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		connector.Unlock()
 	}()
 	id := fmt.Sprintf("%d", transaction.ConnectorId)
-	observePowerRate(state.model.LocationId, chargePointId, id, 0)
+	counters.ObservePowerRate(state.model.LocationId, chargePointId, id, 0)
 
 	connector.CurrentTransactionId = -1
 	connector.CurrentPowerLimit = 0
@@ -699,8 +709,8 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		if consumedPower < 0 {
 			consumedPower = 0
 		}
-		countTransaction(state.model.LocationId, chargePointId)
-		countConsumedPower(state.model.LocationId, chargePointId, float64(consumedPower))
+		counters.CountTransaction(state.model.LocationId, chargePointId)
+		counters.CountConsumedPower(state.model.LocationId, chargePointId, float64(consumedPower))
 
 		consumed := utility.IntToString(consumedPower)
 		price := utility.IntAsPrice(transaction.PaymentAmount)
@@ -807,7 +817,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				meter.PowerRateWh = float64(meter.PowerActive) / 1000
 			}
 
-			observePowerRate(chp.model.LocationId, chargePointId, connector.ID(), meter.PowerRateWh)
+			counters.ObservePowerRate(chp.model.LocationId, chargePointId, connector.ID(), meter.PowerRateWh)
 
 			// billing calculates charge price and must be called before meter value save
 			err = h.billing.OnMeterValue(transaction, meter)
@@ -868,7 +878,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		currentTransactionId = connector.CurrentTransactionId
 
 		if request.Status != core.ChargePointStatusCharging {
-			observePowerRate(state.model.LocationId, chargePointId, strconv.Itoa(connector.Id), 0)
+			counters.ObservePowerRate(state.model.LocationId, chargePointId, strconv.Itoa(connector.Id), 0)
 		}
 
 	} else {
@@ -888,10 +898,26 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	if request.ConnectorId > 0 {
 		connectorName = fmt.Sprintf("connector #%v", request.ConnectorId)
 	}
+
 	errorCode := ""
 	if request.ErrorCode != core.NoError {
 		errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
-		observeError(state.model.LocationId, chargePointId, request.VendorErrorCode)
+		counters.ObserveError(state.model.LocationId, chargePointId, request.VendorErrorCode)
+
+		data := &entity.ErrorData{
+			Location:        state.model.LocationId,
+			ChargePointID:   chargePointId,
+			ConnectorID:     request.ConnectorId,
+			ErrorCode:       string(request.ErrorCode),
+			Info:            request.Info,
+			Status:          string(request.Status),
+			Timestamp:       request.GetTimestamp(),
+			VendorId:        request.VendorId,
+			VendorErrorCode: request.VendorErrorCode,
+		}
+		if h.errorListener != nil {
+			h.errorListener.OnError(data)
+		}
 	}
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%s: %v%s", connectorName, request.Status, errorCode))
 
@@ -1173,7 +1199,7 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	}
 	if onlineCounter != nil {
 		for location, count := range onlineCounter {
-			observeConnections(location, count)
+			counters.ObserveConnections(location, count)
 		}
 	}
 }

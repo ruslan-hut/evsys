@@ -27,6 +27,7 @@ const (
 	collectionPaymentOrders   = "payment_orders"
 	collectionPaymentPlans    = "payment_plans"
 	collectionStopTransaction = "ocpp_stop_transaction"
+	collectionErrors          = "errors_log"
 )
 
 type MongoDB struct {
@@ -1210,4 +1211,55 @@ func (m *MongoDB) OnlineCounter() (map[string]int, error) {
 		online[r.LocationId] = r.Online
 	}
 	return online, nil
+}
+
+func (m *MongoDB) WriteError(data *entity.ErrorData) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionErrors)
+	_, err = collection.InsertOne(m.ctx, data)
+	return err
+}
+
+func (m *MongoDB) GetTodayErrorCount() ([]*entity.ErrorCounter, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	endOfDay := startOfDay.Add(24 * time.Hour)
+
+	collection := connection.Database(m.database).Collection(collectionErrors)
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{
+			{"timestamp", bson.D{
+				{"$gte", startOfDay},
+				{"$lt", endOfDay},
+			}},
+		}}},
+		{{"$group", bson.D{
+			{"_id", bson.D{
+				{"location", "$location"},
+				{"charge_point_id", "$charge_point_id"},
+				{"error_code", "$vendor_error_code"},
+			}},
+			{"count", bson.D{{"$sum", 1}}},
+		}}},
+	}
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var result []*entity.ErrorCounter
+	if err = cursor.All(m.ctx, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
