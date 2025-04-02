@@ -9,7 +9,12 @@ import (
 	"sync"
 )
 
-const featureName = "LoadBalancer"
+const (
+	featureName = "LoadBalancer"
+	baseLimit   = 50
+	highLimit   = 167
+	midLimit    = 100
+)
 
 type LoadBalancer struct {
 	database Repository
@@ -87,8 +92,8 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	if location.PowerLimit == 0 {
 		return
 	}
-	active150 := false
-	active100 := false
+	activeHigh := false
+	activeMid := false
 	// all active connectors on smart charging points
 	activeConnectors := 0
 	for _, chp := range location.Evses {
@@ -96,11 +101,11 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 			for _, connector := range chp.Connectors {
 				if connector.CurrentTransactionId >= 0 {
 					activeConnectors++
-					if connector.CurrentPowerLimit == 150 {
-						active150 = true
+					if connector.CurrentPowerLimit == highLimit {
+						activeHigh = true
 					}
-					if connector.CurrentPowerLimit == 100 {
-						active100 = true
+					if connector.CurrentPowerLimit == midLimit {
+						activeMid = true
 					}
 				} else if connector.CurrentPowerLimit > 0 {
 					// clear power limit for connector with no active transaction
@@ -115,18 +120,13 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	if activeConnectors == 0 {
 		return
 	}
-	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("active connectors: %d; 150=%v; 100=%v", activeConnectors, active150, active100))
+	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("active connectors: %d; high=%v; mid=%v", activeConnectors, activeHigh, activeMid))
 
-	powerLimit := 50
-	//if activeConnectors == 1 {
-	//	powerLimit = 150
-	//} else if activeConnectors == 2 {
-	//	powerLimit = 100
-	//}
-	if !active150 {
-		powerLimit = 150
-	} else if !active100 {
-		powerLimit = 100
+	powerLimit := baseLimit
+	if !activeHigh {
+		powerLimit = highLimit
+	} else if !activeMid {
+		powerLimit = midLimit
 	}
 
 	// send set charging profile request to each active connector
