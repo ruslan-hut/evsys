@@ -46,7 +46,7 @@ func (a *Affleck) OnTransactionStart(transaction *entity.Transaction) error {
 		}
 		plan, _ := a.database.GetUserPaymentPlan(transaction.Username)
 		if plan != nil {
-			transaction.Plan = *plan
+			transaction.Plan = plan
 		} else {
 			return fmt.Errorf("no payment plan for user %s", transaction.Username)
 		}
@@ -84,6 +84,9 @@ func (a *Affleck) OnTransactionFinished(transaction *entity.Transaction) error {
 }
 
 func (a *Affleck) OnMeterValue(transaction *entity.Transaction, meterValue *entity.TransactionMeter) error {
+	if transaction.Plan == nil {
+		return nil
+	}
 
 	// price in cents per hour
 	pricePerHour := transaction.Plan.PricePerHour

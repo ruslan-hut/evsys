@@ -1,4 +1,4 @@
-package entity
+package common
 
 type GeoLocation struct {
 	Latitude  float64 `json:"latitude" bson:"latitude"`

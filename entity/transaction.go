@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"evsys/entity/tariff"
 	"sync"
 	"time"
 )
@@ -23,7 +24,8 @@ type Transaction struct {
 	PaymentAmount int                `json:"payment_amount" bson:"payment_amount"`
 	PaymentBilled int                `json:"payment_billed" bson:"payment_billed"`
 	PaymentOrder  int                `json:"payment_order" bson:"payment_order"`
-	Plan          PaymentPlan        `json:"payment_plan" bson:"payment_plan"`
+	Plan          *PaymentPlan       `json:"payment_plan,omitempty" bson:"payment_plan,omitempty"`
+	Tariff        *tariff.Tariff     `json:"tariff,omitempty" bson:"tariff,omitempty"`
 	MeterValues   []TransactionMeter `json:"meter_values" bson:"meter_values"`
 	PaymentMethod *PaymentMethod     `json:"payment_method,omitempty" bson:"payment_method"`
 	PaymentOrders []PaymentOrder     `json:"payment_orders" bson:"payment_orders"`
