@@ -59,6 +59,9 @@ func (a *Affleck) OnTransactionStart(transaction *entity.Transaction) error {
 }
 
 func (a *Affleck) OnTransactionFinished(transaction *entity.Transaction) error {
+	if transaction.Plan == nil {
+		return nil
+	}
 
 	// price in cents per hour
 	pricePerHour := transaction.Plan.PricePerHour
