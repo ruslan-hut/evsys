@@ -12,8 +12,8 @@ import (
 const (
 	featureName = "LoadBalancer"
 	baseLimit   = 50
-	highLimit   = 167
-	midLimit    = 100
+	highLimit   = 150
+	midLimit    = 90
 )
 
 type LoadBalancer struct {
