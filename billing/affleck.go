@@ -11,15 +11,17 @@ type PaymentService interface {
 }
 
 type Database interface {
+	GetDefaultPaymentPlan() (*entity.PaymentPlan, error)
 	GetUserPaymentPlan(username string) (*entity.PaymentPlan, error)
 	GetPaymentMethod(userId string) (*entity.PaymentMethod, error)
 	GetNotBilledTransactions() ([]*entity.Transaction, error)
 }
 
 type Affleck struct {
-	database Database
-	logger   internal.LogHandler
-	payment  PaymentService
+	database    Database
+	logger      internal.LogHandler
+	payment     PaymentService
+	defaultPlan *entity.PaymentPlan
 }
 
 func NewAffleck() *Affleck {
@@ -40,22 +42,7 @@ func (a *Affleck) SetPayment(payment PaymentService) {
 
 // OnTransactionStart set payment plan for transaction
 func (a *Affleck) OnTransactionStart(transaction *entity.Transaction) error {
-	if a.database != nil {
-		if transaction.Username == "" {
-			return nil
-		}
-		plan, _ := a.database.GetUserPaymentPlan(transaction.Username)
-		if plan != nil {
-			transaction.Plan = plan
-		} else {
-			return fmt.Errorf("no payment plan for user %s", transaction.Username)
-		}
-		if transaction.UserTag != nil {
-			paymentMethod, _ := a.database.GetPaymentMethod(transaction.UserTag.UserId)
-			transaction.PaymentMethod = paymentMethod
-		}
-	}
-	return nil
+	return a.choosePaymentPlan(transaction)
 }
 
 func (a *Affleck) OnTransactionFinished(transaction *entity.Transaction) error {
@@ -110,5 +97,30 @@ func (a *Affleck) OnMeterValue(transaction *entity.Transaction, meterValue *enti
 	}
 
 	meterValue.Price = price
+	return nil
+}
+
+func (a *Affleck) choosePaymentPlan(transaction *entity.Transaction) error {
+	if a.database == nil {
+		return nil
+	}
+	if transaction == nil {
+		return nil
+	}
+	if transaction.Username == "" {
+		return nil
+	}
+	plan, _ := a.database.GetUserPaymentPlan(transaction.Username)
+	if plan != nil && plan.IsCurrentTimeRange() {
+		transaction.Plan = plan
+		return nil
+	}
+	if a.defaultPlan == nil {
+		a.defaultPlan, _ = a.database.GetDefaultPaymentPlan()
+	}
+	transaction.Plan = a.defaultPlan
+	if transaction.Plan == nil {
+		return fmt.Errorf("no payment plan for %s", transaction.Username)
+	}
 	return nil
 }

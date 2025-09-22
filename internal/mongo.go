@@ -6,11 +6,12 @@ import (
 	"evsys/internal/config"
 	"evsys/ocpp/core"
 	"fmt"
+	"log"
+	"time"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log"
-	"time"
 )
 
 const (
@@ -538,7 +539,7 @@ func (m *MongoDB) GetUserPaymentPlan(username string) (*entity.PaymentPlan, erro
 		return nil, err
 	}
 	if user.PaymentPlan == "" {
-		return m.getDefaultPaymentPlan()
+		return m.GetDefaultPaymentPlan()
 	}
 
 	connection, err := m.connect()
@@ -552,12 +553,12 @@ func (m *MongoDB) GetUserPaymentPlan(username string) (*entity.PaymentPlan, erro
 	var plan entity.PaymentPlan
 	err = collection.FindOne(m.ctx, filter).Decode(&plan)
 	if err != nil {
-		return m.getDefaultPaymentPlan()
+		return m.GetDefaultPaymentPlan()
 	}
 	return &plan, nil
 }
 
-func (m *MongoDB) getDefaultPaymentPlan() (*entity.PaymentPlan, error) {
+func (m *MongoDB) GetDefaultPaymentPlan() (*entity.PaymentPlan, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
