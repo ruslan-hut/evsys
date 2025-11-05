@@ -4,7 +4,7 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 	"evsys/ocpp"
-	"evsys/ocpp/smartcharging"
+	"evsys/ocpp/v16/smartcharging"
 	"fmt"
 	"sync"
 )

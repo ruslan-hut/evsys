@@ -3,8 +3,8 @@ package server
 import (
 	"encoding/json"
 	"evsys/ocpp"
-	"evsys/ocpp/core"
-	"evsys/ocpp/firmware"
+	"evsys/ocpp/v16/core"
+	"evsys/ocpp/v16/firmware"
 	"evsys/utility"
 	"fmt"
 	"log"

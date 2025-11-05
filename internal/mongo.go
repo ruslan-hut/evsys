@@ -4,7 +4,7 @@ import (
 	"context"
 	"evsys/entity"
 	"evsys/internal/config"
-	"evsys/ocpp/core"
+	"evsys/ocpp/v16/core"
 	"fmt"
 	"log"
 	"time"

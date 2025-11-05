@@ -3,7 +3,7 @@ package server
 import (
 	"evsys/entity"
 	"evsys/internal"
-	"evsys/ocpp/remotetrigger"
+	"evsys/ocpp/v16/remotetrigger"
 	"fmt"
 	"time"
 )

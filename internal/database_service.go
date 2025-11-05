@@ -2,7 +2,7 @@ package internal
 
 import (
 	"evsys/entity"
-	"evsys/ocpp/core"
+	"evsys/ocpp/v16/core"
 )
 
 type Database interface {
