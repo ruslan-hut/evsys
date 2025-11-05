@@ -349,8 +349,8 @@ func (cs *CentralSystem) Start() {
 	select {}
 }
 
-func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
-	cs := CentralSystem{}
+func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
+	cs := &CentralSystem{}
 	cs.pendingRequests = make(map[string]chan string)
 	cs.featureRegistry = common.GetGlobalRegistry()
 	cs.routingEnabled = false // Default: use legacy routing for backward compatibility
