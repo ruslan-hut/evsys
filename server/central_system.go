@@ -7,6 +7,7 @@ import (
 	"evsys/internal/errorlistener"
 	"evsys/ocpi"
 	"evsys/ocpp"
+	"evsys/ocpp/common"
 	"evsys/ocpp/core"
 	"evsys/ocpp/firmware"
 	"evsys/ocpp/localauth"
@@ -19,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -34,6 +36,7 @@ type CentralSystem struct {
 	location          *time.Location
 	supportedProtocol []string
 	pendingRequests   map[string]chan string
+	connections       sync.Map // chargePointId → common.ProtocolVersion
 }
 
 type CentralSystemCommand struct {
@@ -59,8 +62,29 @@ func (cs *CentralSystem) SetLocalAuthHandler(handler localauth.SystemHandler) {
 	cs.localAuth = handler
 }
 
+// GetProtocolVersion returns the protocol version for a connected charge point
+// Returns UnknownVersion if the charge point is not connected or version is not tracked
+func (cs *CentralSystem) GetProtocolVersion(chargePointId string) common.ProtocolVersion {
+	if value, ok := cs.connections.Load(chargePointId); ok {
+		if protocol, ok := value.(common.ProtocolVersion); ok {
+			return protocol
+		}
+	}
+	return common.UnknownVersion
+}
+
+// RemoveConnection removes the protocol version tracking for a disconnected charge point
+func (cs *CentralSystem) RemoveConnection(chargePointId string) {
+	cs.connections.Delete(chargePointId)
+}
+
 func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) error {
 	chargePointId := ws.ID()
+
+	// Track protocol version for this connection
+	protocol := ws.GetProtocol()
+	cs.connections.Store(chargePointId, protocol)
+
 	message, err := utility.ParseJson(data)
 	if err != nil {
 		return err

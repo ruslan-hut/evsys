@@ -5,13 +5,15 @@ import (
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/ocpp"
+	"evsys/ocpp/common"
 	"evsys/utility"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/julienschmidt/httprouter"
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/gorilla/websocket"
+	"github.com/julienschmidt/httprouter"
 )
 
 const (
@@ -51,6 +53,7 @@ type WebSocket struct {
 	pool           *Pool
 	id             string
 	uniqueId       string
+	protocol       common.ProtocolVersion
 	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
 	isClosed       bool
@@ -149,6 +152,14 @@ func (ws *WebSocket) IsClosed() bool {
 	return ws.isClosed
 }
 
+func (ws *WebSocket) GetProtocol() common.ProtocolVersion {
+	return ws.protocol
+}
+
+func (ws *WebSocket) SetProtocol(protocol common.ProtocolVersion) {
+	ws.protocol = protocol
+}
+
 func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
 	// initialize and start the pool for sending and receiving messages
 	pool := NewPool(logger)
@@ -231,10 +242,19 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 
+	// Parse the negotiated protocol version
+	protocol := common.ParseProtocolVersion(requestedProto)
+	if protocol == common.UnknownVersion {
+		// Default to OCPP 1.6 for backward compatibility
+		protocol = common.DefaultVersion()
+		s.logger.Debug(fmt.Sprintf("unknown protocol '%s' for %s, defaulting to %s", requestedProto, id, protocol))
+	}
+
 	//s.logger.Debug(fmt.Sprintf("upgraded socket for %s and ready to receive data", id))
 	ws := WebSocket{
 		conn:           conn,
 		id:             id,
+		protocol:       protocol,
 		pool:           s.pool,
 		send:           make(chan []byte, 256),
 		logger:         s.logger,
