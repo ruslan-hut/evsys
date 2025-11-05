@@ -8,6 +8,7 @@ import (
 	"evsys/ocpi"
 	"evsys/ocpp"
 	"evsys/ocpp/common"
+	"evsys/ocpp/v16"
 	"evsys/ocpp/v16/core"
 	"evsys/ocpp/v16/firmware"
 	"evsys/ocpp/v16/localauth"
@@ -36,7 +37,9 @@ type CentralSystem struct {
 	location          *time.Location
 	supportedProtocol []string
 	pendingRequests   map[string]chan string
-	connections       sync.Map // chargePointId → common.ProtocolVersion
+	connections       sync.Map               // chargePointId → common.ProtocolVersion
+	featureRegistry   common.FeatureRegistry // Registry for all OCPP features
+	routingEnabled    bool                   // Flag to enable new routing (default: false for backward compatibility)
 }
 
 type CentralSystemCommand struct {
@@ -108,6 +111,13 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 		}
 		return nil
 	}
+
+	// Version-aware message parsing
+	if cs.routingEnabled && cs.featureRegistry != nil {
+		return cs.handleIncomingMessageVersionAware(ws, message, protocol, chargePointId)
+	}
+
+	// Legacy routing (backward compatibility)
 	callRequest, err := ParseRequest(message)
 	if err != nil {
 		return err
@@ -162,6 +172,87 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 	}
 
 	return err
+}
+
+// handleIncomingMessageVersionAware handles incoming messages using the version-aware registry-based routing
+func (cs *CentralSystem) handleIncomingMessageVersionAware(ws ocpp.WebSocket, message []interface{}, protocol common.ProtocolVersion, chargePointId string) error {
+	// Parse the call request structure
+	callRequest, err := ParseRequestVersionAware(message, protocol, cs.featureRegistry)
+	if err != nil {
+		return fmt.Errorf("failed to parse request: %w", err)
+	}
+	ws.SetUniqueId(callRequest.UniqueId)
+
+	request := callRequest.Payload
+	action := request.GetFeatureName()
+
+	cs.logger.Debug(fmt.Sprintf("handling %s from %s (protocol: %s)", action, chargePointId, protocol))
+
+	// Route to appropriate handler based on protocol version
+	var confirmation ocpp.Response
+	switch protocol {
+	case common.OCPP16:
+		confirmation, err = cs.routeOCPP16Request(chargePointId, action, request)
+	case common.OCPP201:
+		// TODO: Implement OCPP 2.0.1 routing in Phase 2
+		return fmt.Errorf("OCPP 2.0.1 not yet implemented")
+	case common.OCPP21:
+		// TODO: Implement OCPP 2.1 routing in Phase 4
+		return fmt.Errorf("OCPP 2.1 not yet implemented")
+	default:
+		return fmt.Errorf("unsupported protocol version: %s", protocol)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if ws.IsClosed() {
+		cs.logger.FeatureEvent(action, chargePointId, "websocket closed, response not sent")
+		return nil
+	}
+
+	err = cs.server.SendResponse(ws, confirmation)
+
+	// Call the power manager to check the power limit (version-agnostic)
+	switch action {
+	case core.StartTransactionFeatureName:
+		go cs.powerManager.CheckPowerLimit(chargePointId)
+	case core.StopTransactionFeatureName:
+		go cs.powerManager.CheckPowerLimit(chargePointId)
+	case core.BootNotificationFeatureName:
+		cs.powerManager.OnChargePointBoot(chargePointId)
+	}
+
+	return err
+}
+
+// routeOCPP16Request routes OCPP 1.6J requests to the appropriate handler
+func (cs *CentralSystem) routeOCPP16Request(chargePointId string, action string, request ocpp.Request) (ocpp.Response, error) {
+	switch action {
+	case core.BootNotificationFeatureName:
+		return cs.coreHandler.OnBootNotification(chargePointId, request.(*core.BootNotificationRequest))
+	case core.AuthorizeFeatureName:
+		return cs.coreHandler.OnAuthorize(chargePointId, request.(*core.AuthorizeRequest))
+	case core.HeartbeatFeatureName:
+		return cs.coreHandler.OnHeartbeat(chargePointId, request.(*core.HeartbeatRequest))
+	case core.StartTransactionFeatureName:
+		return cs.coreHandler.OnStartTransaction(chargePointId, request.(*core.StartTransactionRequest))
+	case core.StopTransactionFeatureName:
+		return cs.coreHandler.OnStopTransaction(chargePointId, request.(*core.StopTransactionRequest))
+	case core.MeterValuesFeatureName:
+		return cs.coreHandler.OnMeterValues(chargePointId, request.(*core.MeterValuesRequest))
+	case core.StatusNotificationFeatureName:
+		return cs.coreHandler.OnStatusNotification(chargePointId, request.(*core.StatusNotificationRequest))
+	case core.DataTransferFeatureName:
+		return cs.coreHandler.OnDataTransfer(chargePointId, request.(*core.DataTransferRequest))
+	case firmware.DiagnosticsStatusNotificationFeatureName:
+		return cs.firmwareHandler.OnDiagnosticsStatusNotification(chargePointId, request.(*firmware.DiagnosticsStatusNotificationRequest))
+	case firmware.StatusNotificationFeatureName:
+		return cs.firmwareHandler.OnFirmwareStatusNotification(chargePointId, request.(*firmware.StatusNotificationRequest))
+	default:
+		return nil, fmt.Errorf("feature not supported for OCPP 1.6: %s", action)
+	}
 }
 
 func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command CentralSystemCommand) error {
@@ -230,6 +321,15 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 	return nil
 }
 
+// EnableVersionAwareRouting enables the new registry-based routing system
+// This should be called after initialization but before Start() to use the new routing
+func (cs *CentralSystem) EnableVersionAwareRouting() {
+	cs.routingEnabled = true
+	// Initialize OCPP 1.6 handler to register all features
+	_ = v16.NewHandler16()
+	log.Println("version-aware routing enabled - using feature registry")
+}
+
 func (cs *CentralSystem) Start() {
 
 	go func() {
@@ -252,6 +352,8 @@ func (cs *CentralSystem) Start() {
 func NewCentralSystem(conf *config.Config) (CentralSystem, error) {
 	cs := CentralSystem{}
 	cs.pendingRequests = make(map[string]chan string)
+	cs.featureRegistry = common.GetGlobalRegistry()
+	cs.routingEnabled = false // Default: use legacy routing for backward compatibility
 
 	log.Println("set time zone to " + conf.TimeZone)
 	location, err := time.LoadLocation("Europe/Madrid")
