@@ -56,6 +56,11 @@ type Database interface {
 	AddSubscription(subscription *entity.UserSubscription) error
 	UpdateSubscription(subscription *entity.UserSubscription) error
 	DeleteSubscription(subscription *entity.UserSubscription) error
+
+	// Migration methods for OCPP multi-version support
+	RunMigrations() error
+	GetSchemaVersion() (int, error)
+	UpdateSchemaVersion(version int) error
 }
 
 type Data interface {

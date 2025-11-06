@@ -1264,3 +1264,101 @@ func (m *MongoDB) GetTodayErrorCount() ([]*entity.ErrorCounter, error) {
 	}
 	return result, nil
 }
+
+// ============================================================================
+// DATABASE MIGRATIONS
+// ============================================================================
+
+// RunMigrations executes all pending database migrations
+func (m *MongoDB) RunMigrations() error {
+	connection, err := m.connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer m.disconnect(connection)
+
+	db := connection.Database(m.database)
+	currentVersion, err := m.getSchemaVersionInternal(db)
+	if err != nil {
+		return fmt.Errorf("failed to get current schema version: %w", err)
+	}
+
+	migrations := GetMigrations()
+	log.Printf("Current schema version: %d, Available migrations: %d", currentVersion, len(migrations))
+
+	// Run all pending migrations
+	for _, migration := range migrations {
+		if migration.Version > currentVersion {
+			log.Printf("Running migration %d: %s", migration.Version, migration.Description)
+			if err := migration.Up(m.ctx, db); err != nil {
+				return fmt.Errorf("migration %d failed: %w", migration.Version, err)
+			}
+			if err := m.updateSchemaVersionInternal(db, migration.Version); err != nil {
+				return fmt.Errorf("failed to update schema version: %w", err)
+			}
+			log.Printf("Migration %d completed successfully", migration.Version)
+		}
+	}
+
+	log.Println("All migrations completed")
+	return nil
+}
+
+// GetSchemaVersion returns the current schema version
+func (m *MongoDB) GetSchemaVersion() (int, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return 0, err
+	}
+	defer m.disconnect(connection)
+
+	db := connection.Database(m.database)
+	return m.getSchemaVersionInternal(db)
+}
+
+// UpdateSchemaVersion updates the schema version (used by migrations)
+func (m *MongoDB) UpdateSchemaVersion(version int) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	db := connection.Database(m.database)
+	return m.updateSchemaVersionInternal(db, version)
+}
+
+// getSchemaVersionInternal gets schema version using existing connection
+func (m *MongoDB) getSchemaVersionInternal(db *mongo.Database) (int, error) {
+	collection := db.Collection(collectionSchema)
+
+	var schemaVersion SchemaVersion
+	err := collection.FindOne(m.ctx, bson.M{}).Decode(&schemaVersion)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			// No schema version document exists, this is a fresh database
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	return schemaVersion.Version, nil
+}
+
+// updateSchemaVersionInternal updates schema version using existing connection
+func (m *MongoDB) updateSchemaVersionInternal(db *mongo.Database, version int) error {
+	collection := db.Collection(collectionSchema)
+
+	schemaVersion := SchemaVersion{
+		Version:   version,
+		UpdatedAt: time.Now(),
+	}
+
+	_, err := collection.ReplaceOne(
+		m.ctx,
+		bson.M{},
+		schemaVersion,
+		options.Replace().SetUpsert(true),
+	)
+	return err
+}
