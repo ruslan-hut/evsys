@@ -640,6 +640,50 @@ type Cost struct {
 }
 
 // ============================================================================
+// ISO 15118 TYPES
+// ============================================================================
+
+// HashAlgorithmType defines the hash algorithm used
+type HashAlgorithmType string
+
+const (
+	HashAlgorithmSHA256 HashAlgorithmType = "SHA256" // SHA-256
+	HashAlgorithmSHA384 HashAlgorithmType = "SHA384" // SHA-384
+	HashAlgorithmSHA512 HashAlgorithmType = "SHA512" // SHA-512
+)
+
+// AuthorizeCertificateStatusType defines the certificate authorization status
+type AuthorizeCertificateStatusType string
+
+const (
+	AuthorizeCertificateStatusAccepted               AuthorizeCertificateStatusType = "Accepted"               // Certificate accepted
+	AuthorizeCertificateStatusSignatureError         AuthorizeCertificateStatusType = "SignatureError"         // Signature error
+	AuthorizeCertificateStatusCertificateExpired     AuthorizeCertificateStatusType = "CertificateExpired"     // Certificate expired
+	AuthorizeCertificateStatusCertificateRevoked     AuthorizeCertificateStatusType = "CertificateRevoked"     // Certificate revoked
+	AuthorizeCertificateStatusNoCertificateAvailable AuthorizeCertificateStatusType = "NoCertificateAvailable" // No certificate available
+	AuthorizeCertificateStatusCertChainError         AuthorizeCertificateStatusType = "CertChainError"         // Certificate chain error
+	AuthorizeCertificateStatusContractCancelled      AuthorizeCertificateStatusType = "ContractCancelled"      // Contract cancelled
+)
+
+// OCSPRequestDataType contains data for OCSP request
+type OCSPRequestDataType struct {
+	// HashAlgorithm is the algorithm used for hashing
+	HashAlgorithm HashAlgorithmType `json:"hashAlgorithm" validate:"required"`
+
+	// IssuerNameHash is the hash of the issuer's distinguished name
+	IssuerNameHash string `json:"issuerNameHash" validate:"required,max=128"`
+
+	// IssuerKeyHash is the hash of the issuer's public key
+	IssuerKeyHash string `json:"issuerKeyHash" validate:"required,max=128"`
+
+	// SerialNumber is the serial number of the certificate
+	SerialNumber string `json:"serialNumber" validate:"required,max=40"`
+
+	// ResponderURL is the OCSP responder URL
+	ResponderURL string `json:"responderURL" validate:"required,max=512"`
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
