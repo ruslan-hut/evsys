@@ -41,10 +41,13 @@ func (a *Affleck) SetPayment(payment PaymentService) {
 }
 
 // OnTransactionStart set payment plan for transaction
+// Works with both OCPP 1.6J and 2.0.1 transactions
 func (a *Affleck) OnTransactionStart(transaction *entity.Transaction) error {
 	return a.choosePaymentPlan(transaction)
 }
 
+// OnTransactionFinished calculates final payment amount for transaction
+// Handles both OCPP 1.6J and 2.0.1 protocol versions
 func (a *Affleck) OnTransactionFinished(transaction *entity.Transaction) error {
 	if transaction.Plan == nil {
 		return nil
@@ -73,6 +76,8 @@ func (a *Affleck) OnTransactionFinished(transaction *entity.Transaction) error {
 	return nil
 }
 
+// OnMeterValue calculates running price for a meter value sample
+// Handles both OCPP 1.6J and 2.0.1 meter value formats
 func (a *Affleck) OnMeterValue(transaction *entity.Transaction, meterValue *entity.TransactionMeter) error {
 	if transaction.Plan == nil {
 		return nil
@@ -85,7 +90,7 @@ func (a *Affleck) OnMeterValue(transaction *entity.Transaction, meterValue *enti
 
 	// consumed minutes, minus 1 hour for the first hour
 	duration := meterValue.Time.Sub(transaction.TimeStart).Minutes() - 60
-	// consumed Watts
+	// consumed Watts (meter value format is consistent across versions after adapter conversion)
 	consumed := meterValue.Value - transaction.MeterStart
 
 	price := 0

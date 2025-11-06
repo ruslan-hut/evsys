@@ -84,30 +84,32 @@ type AuthService interface {
 }
 
 type SystemHandler struct {
-	chargePoints   map[string]*ChargePointState
-	lastMeter      map[int]*entity.TransactionMeter
-	database       internal.Database
-	billing        BillingService
-	payment        PaymentService
-	auth           AuthService
-	errorListener  ErrorListener
-	logger         internal.LogHandler
-	eventListeners []internal.EventHandler
-	trigger        *Trigger
-	debug          bool
-	acceptTags     bool
-	acceptPoints   bool
-	location       *time.Location
-	mux            sync.Mutex
+	chargePoints    map[string]*ChargePointState
+	lastMeter       map[int]*entity.TransactionMeter
+	database        internal.Database
+	billing         BillingService
+	payment         PaymentService
+	auth            AuthService
+	errorListener   ErrorListener
+	logger          internal.LogHandler
+	eventListeners  []internal.EventHandler
+	trigger         *Trigger
+	protocolAdapter *ProtocolAdapter // Adapter for converting between OCPP versions
+	debug           bool
+	acceptTags      bool
+	acceptPoints    bool
+	location        *time.Location
+	mux             sync.Mutex
 }
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
-		chargePoints:   make(map[string]*ChargePointState),
-		lastMeter:      make(map[int]*entity.TransactionMeter),
-		eventListeners: make([]internal.EventHandler, 0),
-		location:       location,
-		mux:            sync.Mutex{},
+		chargePoints:    make(map[string]*ChargePointState),
+		lastMeter:       make(map[int]*entity.TransactionMeter),
+		eventListeners:  make([]internal.EventHandler, 0),
+		protocolAdapter: NewProtocolAdapter(),
+		location:        location,
+		mux:             sync.Mutex{},
 	}
 	return handler
 }
@@ -1346,4 +1348,56 @@ func (h *SystemHandler) stateFromStatus(status core.ChargePointStatus) string {
 		return "unavailable"
 	}
 	return string(status)
+}
+
+// ============================================================================
+// PROTOCOL ADAPTER HELPERS
+// ============================================================================
+// These methods provide version-agnostic interfaces for common operations
+// They use the ProtocolAdapter to convert between OCPP versions
+
+// GetProtocolAdapter returns the protocol adapter instance
+func (h *SystemHandler) GetProtocolAdapter() *ProtocolAdapter {
+	return h.protocolAdapter
+}
+
+// setTransactionProtocolVersion sets the protocol version for a transaction
+// based on the charge point's protocol version
+func (h *SystemHandler) setTransactionProtocolVersion(transaction *entity.Transaction, chargePointId string) {
+	state, ok := h.getChargePoint(chargePointId)
+	if ok && state.model != nil && state.model.ProtocolVersion != "" {
+		transaction.ProtocolVersion = state.model.ProtocolVersion
+	} else {
+		// Default to OCPP 1.6J if not set
+		transaction.ProtocolVersion = "ocpp1.6"
+	}
+}
+
+// getConnectorByEvseAndConnectorId retrieves a connector using OCPP 2.0.1 EVSE structure
+// Falls back to connector ID only for OCPP 1.6J compatibility
+func (h *SystemHandler) getConnectorByEvseAndConnectorId(cps *ChargePointState, evseId *int, connectorId int) *entity.Connector {
+	// For OCPP 2.0.1, we might need to look up by EVSE ID
+	if evseId != nil {
+		for _, connector := range cps.connectors {
+			if connector.EvseId != nil && *connector.EvseId == *evseId && connector.Id == connectorId {
+				return connector
+			}
+		}
+	}
+
+	// Fall back to connector ID lookup (OCPP 1.6J style)
+	return h.getConnector(cps, connectorId)
+}
+
+// updateConnectorEvseId updates the EVSE ID for a connector (OCPP 2.0.1)
+// This is called when we receive EVSE information from a 2.0.1 charge point
+func (h *SystemHandler) updateConnectorEvseId(connector *entity.Connector, evseId *int) error {
+	if connector.EvseId == nil && evseId != nil {
+		connector.EvseId = evseId
+		if h.database != nil {
+			// Update database with EVSE ID
+			return h.database.UpdateConnector(connector)
+		}
+	}
+	return nil
 }

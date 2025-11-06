@@ -165,6 +165,8 @@ func (lb *LoadBalancer) getLocation(chargePointId string) (*entity.Location, *en
 	return location, chp
 }
 
+// updateConnectorPower sets or clears the power limit for a connector
+// Handles both OCPP 1.6J connectors and OCPP 2.0.1 EVSEs
 func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.Connector) error {
 	if connector.CurrentTransactionId < 0 && connector.CurrentPowerLimit == 0 {
 		// no need to update - connector is not active and has no limit set
@@ -172,7 +174,13 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.C
 	}
 	chargePointId := connector.ChargePointId
 	if connector.CurrentTransactionId >= 0 {
-		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting power limit to %dA for connector %d", powerLimit, connector.Id))
+		// Log with EVSE information if available (OCPP 2.0.1)
+		connectorInfo := fmt.Sprintf("connector %d", connector.Id)
+		if connector.EvseId != nil {
+			connectorInfo = fmt.Sprintf("EVSE %d / connector %d", *connector.EvseId, connector.Id)
+		}
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting power limit to %dA for %s", powerLimit, connectorInfo))
+
 		request := smartcharging.NewSetChargingProfileRequest(
 			connector.Id, smartcharging.NewTransactionChargingProfile(
 				connector.CurrentTransactionId,
@@ -183,7 +191,11 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.C
 		}
 		connector.CurrentPowerLimit = powerLimit
 	} else {
-		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("cleared power limit for connector %d", connector.Id))
+		connectorInfo := fmt.Sprintf("connector %d", connector.Id)
+		if connector.EvseId != nil {
+			connectorInfo = fmt.Sprintf("EVSE %d / connector %d", *connector.EvseId, connector.Id)
+		}
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("cleared power limit for %s", connectorInfo))
 		connector.CurrentPowerLimit = 0
 	}
 	err := lb.database.UpdateConnectorCurrentPower(connector)

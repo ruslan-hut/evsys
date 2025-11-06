@@ -21,6 +21,7 @@ type Connector struct {
 	Power                int       `json:"power" bson:"power"`
 	CurrentPowerLimit    int       `json:"current_power_limit" bson:"current_power_limit"`
 	CurrentTransactionId int       `json:"current_transaction_id" bson:"current_transaction_id"`
+	EvseId               *int      `json:"evse_id,omitempty" bson:"evse_id,omitempty"` // OCPP 2.0.1+ EVSE identifier (nullable for 1.6 compatibility)
 	mutex                sync.Mutex
 }
 
