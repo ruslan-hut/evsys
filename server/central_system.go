@@ -14,6 +14,10 @@ import (
 	"evsys/ocpp/v16/localauth"
 	"evsys/ocpp/v16/remotetrigger"
 	"evsys/ocpp/v16/smartcharging"
+	"evsys/ocpp/v201/authorization"
+	"evsys/ocpp/v201/availability"
+	"evsys/ocpp/v201/provisioning"
+	"evsys/ocpp/v201/transactions"
 	"evsys/power"
 	"evsys/telegram"
 	"evsys/types"
@@ -33,6 +37,7 @@ type CentralSystem struct {
 	firmwareHandler   firmware.SystemHandler
 	remoteTrigger     remotetrigger.SystemHandler
 	localAuth         localauth.SystemHandler
+	v201Handlers      *V201Handlers // OCPP 2.0.1 business logic handlers
 	powerManager      PowerManager
 	location          *time.Location
 	supportedProtocol []string
@@ -51,6 +56,10 @@ type CentralSystemCommand struct {
 
 func (cs *CentralSystem) SetCoreHandler(handler *SystemHandler) {
 	cs.coreHandler = handler
+}
+
+func (cs *CentralSystem) SetV201Handlers(handlers *V201Handlers) {
+	cs.v201Handlers = handlers
 }
 
 func (cs *CentralSystem) SetFirmwareHandler(handler firmware.SystemHandler) {
@@ -194,8 +203,7 @@ func (cs *CentralSystem) handleIncomingMessageVersionAware(ws ocpp.WebSocket, me
 	case common.OCPP16:
 		confirmation, err = cs.routeOCPP16Request(chargePointId, action, request)
 	case common.OCPP201:
-		// TODO: Implement OCPP 2.0.1 routing in Phase 2
-		return fmt.Errorf("OCPP 2.0.1 not yet implemented")
+		confirmation, err = cs.routeOCPP201Request(chargePointId, action, request)
 	case common.OCPP21:
 		// TODO: Implement OCPP 2.1 routing in Phase 4
 		return fmt.Errorf("OCPP 2.1 not yet implemented")
@@ -252,6 +260,33 @@ func (cs *CentralSystem) routeOCPP16Request(chargePointId string, action string,
 		return cs.firmwareHandler.OnFirmwareStatusNotification(chargePointId, request.(*firmware.StatusNotificationRequest))
 	default:
 		return nil, fmt.Errorf("feature not supported for OCPP 1.6: %s", action)
+	}
+}
+
+// routeOCPP201Request routes OCPP 2.0.1 requests to the appropriate handler
+func (cs *CentralSystem) routeOCPP201Request(chargePointId string, action string, request ocpp.Request) (ocpp.Response, error) {
+	if cs.v201Handlers == nil {
+		return nil, fmt.Errorf("OCPP 2.0.1 handlers not initialized")
+	}
+
+	// Import required packages at the top
+	switch action {
+	case "BootNotification":
+		return cs.v201Handlers.OnBootNotification(chargePointId, request.(*provisioning.BootNotificationRequest))
+	case "Heartbeat":
+		return cs.v201Handlers.OnHeartbeat(chargePointId, request.(*provisioning.HeartbeatRequest))
+	case "NotifyReport":
+		return cs.v201Handlers.OnNotifyReport(chargePointId, request.(*provisioning.NotifyReportRequest))
+	case "Authorize":
+		return cs.v201Handlers.OnAuthorize(chargePointId, request.(*authorization.AuthorizeRequest))
+	case "ClearedChargingLimit":
+		return cs.v201Handlers.OnClearedChargingLimit(chargePointId, request.(*authorization.ClearedChargingLimitRequest))
+	case "TransactionEvent":
+		return cs.v201Handlers.OnTransactionEvent(chargePointId, request.(*transactions.TransactionEventRequest))
+	case "StatusNotification":
+		return cs.v201Handlers.OnStatusNotification(chargePointId, request.(*availability.StatusNotificationRequest))
+	default:
+		return nil, fmt.Errorf("feature not supported for OCPP 2.0.1: %s", action)
 	}
 }
 
@@ -452,6 +487,7 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	// websocket listener
 	wsServer := NewServer(conf, logService)
 	wsServer.AddSupportedSupProtocol(types.SubProtocol16)
+	wsServer.AddSupportedSupProtocol("ocpp2.0.1") // Add OCPP 2.0.1 support
 	wsServer.SetMessageHandler(cs.handleIncomingMessage)
 	wsServer.SetWatchdog(systemHandler)
 
@@ -472,6 +508,18 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	cs.SetFirmwareHandler(systemHandler)
 	cs.SetRemoteTriggerHandler(systemHandler)
 	cs.SetLocalAuthHandler(systemHandler)
+
+	// ========================================================================
+	// OCPP 2.0.1 Handler Setup
+	// ========================================================================
+	log.Println("setting up OCPP 2.0.1 handlers...")
+
+	// Create v201 business logic handlers
+	v201Handlers := NewV201Handlers(systemHandler, logService)
+
+	// Register v201 handlers in the central system
+	cs.SetV201Handlers(v201Handlers)
+	log.Println("OCPP 2.0.1 handlers registered successfully")
 
 	// api server
 	apiServer := NewServerApi(conf, logService)
