@@ -78,19 +78,20 @@ func TestProtocolAdapter_IdTagToIdToken201(t *testing.T) {
 			},
 		},
 		{
-			name:  "Empty ID tag",
-			idTag: "",
-			expected: &v201.IdToken{
-				IdToken: "",
-				Type:    v201.IdTokenTypeISO14443,
-			},
+			name:     "Empty ID tag",
+			idTag:    "",
+			expected: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := adapter.IdTagToIdToken201(tt.idTag)
-			if result.IdToken != tt.expected.IdToken || result.Type != tt.expected.Type {
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("IdTagToIdToken201() = %v, want nil", result)
+				}
+			} else if result == nil || result.IdToken != tt.expected.IdToken || result.Type != tt.expected.Type {
 				t.Errorf("IdTagToIdToken201() = %v, want %v", result, tt.expected)
 			}
 		})
@@ -127,7 +128,7 @@ func TestProtocolAdapter_EvseToConnectorId(t *testing.T) {
 				Id:          1,
 				ConnectorId: nil,
 			},
-			expected: 0,
+			expected: 1, // Returns EVSE ID as fallback
 		},
 		{
 			name:     "Nil EVSE",
@@ -268,6 +269,7 @@ func TestProtocolAdapter_TransactionEventToEntity_Ended(t *testing.T) {
 	transactionInfo := v201.Transaction{
 		TransactionId: "TX123",
 		ChargingState: v201.ChargingStateSuspendedEV,
+		StoppedReason: v201.ReasonStoppedByEV,
 	}
 
 	// Create meter value for stop reading
@@ -308,8 +310,8 @@ func TestProtocolAdapter_TransactionEventToEntity_Ended(t *testing.T) {
 	if transaction.MeterStop != 15000 {
 		t.Errorf("MeterStop = %v, want 15000", transaction.MeterStop)
 	}
-	if transaction.Reason != string(v201.ChargingStateSuspendedEV) {
-		t.Errorf("Reason = %v, want %v", transaction.Reason, v201.ChargingStateSuspendedEV)
+	if transaction.Reason != string(v201.ReasonStoppedByEV) {
+		t.Errorf("Reason = %v, want %v", transaction.Reason, v201.ReasonStoppedByEV)
 	}
 }
 

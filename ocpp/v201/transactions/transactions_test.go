@@ -19,7 +19,7 @@ func TestTransactionEventRequest_Serialization_Started(t *testing.T) {
 	req := TransactionEventRequest{
 		EventType:     v201.TransactionEventStarted,
 		Timestamp:     now,
-		TriggerReason: TriggerReasonCablePluggedIn,
+		TriggerReason: v201.TriggerReasonCablePluggedIn,
 		SeqNo:         0,
 		TransactionInfo: v201.Transaction{
 			TransactionId: "TX12345",
@@ -65,7 +65,7 @@ func TestTransactionEventRequest_Serialization_Updated(t *testing.T) {
 	req := TransactionEventRequest{
 		EventType:     v201.TransactionEventUpdated,
 		Timestamp:     now,
-		TriggerReason: TriggerReasonMeterValuePeriodic,
+		TriggerReason: v201.TriggerReasonMeterValuePeriodic,
 		SeqNo:         5,
 		TransactionInfo: v201.Transaction{
 			TransactionId: "TX12345",
@@ -115,12 +115,12 @@ func TestTransactionEventRequest_Serialization_Ended(t *testing.T) {
 	req := TransactionEventRequest{
 		EventType:     v201.TransactionEventEnded,
 		Timestamp:     now,
-		TriggerReason: TriggerReasonEVCommunicationLost,
+		TriggerReason: v201.TriggerReasonEVCommunicationLost,
 		SeqNo:         10,
 		TransactionInfo: v201.Transaction{
 			TransactionId: "TX12345",
 			ChargingState: v201.ChargingStateSuspendedEV,
-			StoppedReason: StoppedReasonLocal,
+			StoppedReason: v201.ReasonLocal,
 		},
 		MeterValue: []v201.MeterValue{
 			{
@@ -198,28 +198,28 @@ func TestTransactionEventResponse_GetFeatureName(t *testing.T) {
 }
 
 func TestTriggerReasonType_AllValues(t *testing.T) {
-	reasons := []TriggerReasonType{
-		TriggerReasonAuthorized,
-		TriggerReasonCablePluggedIn,
-		TriggerReasonChargingRateChanged,
-		TriggerReasonChargingStateChanged,
-		TriggerReasonDeauthorized,
-		TriggerReasonEnergyLimitReached,
-		TriggerReasonEVCommunicationLost,
-		TriggerReasonEVConnectTimeout,
-		TriggerReasonMeterValueClock,
-		TriggerReasonMeterValuePeriodic,
-		TriggerReasonTimeLimitReached,
-		TriggerReasonTrigger,
-		TriggerReasonUnlockCommand,
-		TriggerReasonStopAuthorized,
-		TriggerReasonEVDeparted,
-		TriggerReasonEVDetected,
-		TriggerReasonRemoteStop,
-		TriggerReasonRemoteStart,
-		TriggerReasonAbnormalCondition,
-		TriggerReasonSignedDataReceived,
-		TriggerReasonResetCommand,
+	reasons := []v201.TriggerReasonType{
+		v201.TriggerReasonAuthorized,
+		v201.TriggerReasonCablePluggedIn,
+		v201.TriggerReasonChargingRateChanged,
+		v201.TriggerReasonChargingStateChanged,
+		v201.TriggerReasonDeauthorized,
+		v201.TriggerReasonEnergyLimitReached,
+		v201.TriggerReasonEVCommunicationLost,
+		v201.TriggerReasonEVConnectTimeout,
+		v201.TriggerReasonMeterValueClock,
+		v201.TriggerReasonMeterValuePeriodic,
+		v201.TriggerReasonTimeLimitReached,
+		v201.TriggerReasonTrigger,
+		v201.TriggerReasonUnlockCommand,
+		v201.TriggerReasonStopAuthorized,
+		v201.TriggerReasonEVDeparted,
+		v201.TriggerReasonEVDetected,
+		v201.TriggerReasonRemoteStop,
+		v201.TriggerReasonRemoteStart,
+		v201.TriggerReasonAbnormalCondition,
+		v201.TriggerReasonSignedDataReceived,
+		v201.TriggerReasonResetCommand,
 	}
 
 	for _, reason := range reasons {
@@ -229,7 +229,7 @@ func TestTriggerReasonType_AllValues(t *testing.T) {
 			continue
 		}
 
-		var decoded TriggerReasonType
+		var decoded v201.TriggerReasonType
 		err = json.Unmarshal(data, &decoded)
 		if err != nil {
 			t.Errorf("json.Unmarshal() error for %v = %v", reason, err)
@@ -243,25 +243,25 @@ func TestTriggerReasonType_AllValues(t *testing.T) {
 }
 
 func TestStoppedReasonType_AllValues(t *testing.T) {
-	reasons := []StoppedReasonType{
-		StoppedReasonDeAuthorized,
-		StoppedReasonEmergencyStop,
-		StoppedReasonEVDisconnected,
-		StoppedReasonGroundFault,
-		StoppedReasonImmediateReset,
-		StoppedReasonLocal,
-		StoppedReasonLocalOutOfCredit,
-		StoppedReasonMasterPass,
-		StoppedReasonOther,
-		StoppedReasonOvercurrentFault,
-		StoppedReasonPowerLoss,
-		StoppedReasonPowerQuality,
-		StoppedReasonReboot,
-		StoppedReasonRemote,
-		StoppedReasonSOCLimitReached,
-		StoppedReasonStoppedByEV,
-		StoppedReasonTimeLimitReached,
-		StoppedReasonTimeout,
+	reasons := []v201.ReasonType{
+		v201.ReasonDeAuthorized,
+		v201.ReasonEmergencyStop,
+		v201.ReasonEVDisconnected,
+		v201.ReasonGroundFault,
+		v201.ReasonImmediateReset,
+		v201.ReasonLocal,
+		v201.ReasonLocalOutOfCredit,
+		v201.ReasonMasterPass,
+		v201.ReasonOther,
+		v201.ReasonOvercurrentFault,
+		v201.ReasonPowerLoss,
+		v201.ReasonPowerQuality,
+		v201.ReasonReboot,
+		v201.ReasonRemote,
+		v201.ReasonSOCLimitReached,
+		v201.ReasonStoppedByEV,
+		v201.ReasonTimeLimitReached,
+		v201.ReasonTimeout,
 	}
 
 	for _, reason := range reasons {
@@ -271,7 +271,7 @@ func TestStoppedReasonType_AllValues(t *testing.T) {
 			continue
 		}
 
-		var decoded StoppedReasonType
+		var decoded v201.ReasonType
 		err = json.Unmarshal(data, &decoded)
 		if err != nil {
 			t.Errorf("json.Unmarshal() error for %v = %v", reason, err)
