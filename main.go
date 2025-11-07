@@ -41,6 +41,7 @@ func main() {
 		log.Println("central system initialization failed", err)
 		return
 	}
+	centralSystem.EnableVersionAwareRouting()
 	centralSystem.Start()
 
 }
