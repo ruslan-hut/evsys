@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var newTransactionId = 0
+var newTransactionId = 1
 
 const (
 	defaultHeartbeatInterval = 600
@@ -225,7 +225,7 @@ func (h *SystemHandler) OnStart() error {
 		// load transactions from database
 		transaction, err := h.database.GetLastTransaction()
 		if err != nil {
-			h.logger.Error("failed to load last transaction from database", err)
+			h.logger.Warn(fmt.Sprintf("no transactions in the database; id will start with %d; %v", newTransactionId, err))
 		}
 		if transaction != nil {
 			newTransactionId = transaction.Id + 1
