@@ -450,10 +450,11 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	}
 
-	auth := h.authorizeIdTag(chargePointId, request.IdTag)
-	if auth != types.AuthorizationStatusAccepted {
-		return core.NewStartTransactionResponse(types.NewIdTagInfo(auth), 0), nil
-	}
+	// TODO: check flow if the transaction is authorized on a charger itself (by credit card for example)
+	//auth := h.authorizeIdTag(chargePointId, request.IdTag)
+	//if auth != types.AuthorizationStatusAccepted {
+	//	return core.NewStartTransactionResponse(types.NewIdTagInfo(auth), 0), nil
+	//}
 
 	userTag := h.getUserTag(request.IdTag)
 
