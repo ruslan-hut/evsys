@@ -47,13 +47,15 @@ type ChargePointState struct {
 	transactions      map[int]*int
 	errorCode         core.ChargePointErrorCode
 	model             *entity.ChargePoint
+	triggerMessage    bool
 }
 
 func newChargePointState(chp *entity.ChargePoint) *ChargePointState {
 	return &ChargePointState{
-		connectors:   make(map[int]*entity.Connector),
-		transactions: make(map[int]*int),
-		model:        chp,
+		connectors:     make(map[int]*entity.Connector),
+		transactions:   make(map[int]*int),
+		model:          chp,
+		triggerMessage: chp.TriggerMessage,
 	}
 }
 
@@ -773,7 +775,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 		for _, value := range sampledValue.SampledValue {
 
-			if value.Context != types.ReadingContextTrigger {
+			if chp.triggerMessage && value.Context != types.ReadingContextTrigger {
 				continue
 			}
 
@@ -1279,6 +1281,12 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 }
 
 func (h *SystemHandler) checkListenTransaction(connector *entity.Connector, isOnline bool) {
+	if chp, ok := h.getChargePoint(connector.ChargePointId); ok {
+		if !chp.triggerMessage {
+			h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, "trigger messages are disabled")
+			return
+		}
+	}
 	if connector.CurrentTransactionId >= 0 {
 		h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 		if !isOnline {

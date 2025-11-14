@@ -18,6 +18,7 @@ type ChargePoint struct {
 	FirmwareVersion  string                 `json:"firmware_version" bson:"firmware_version"`
 	LocalAuthVersion int                    `json:"local_auth_version" bson:"local_auth_version"`
 	SmartCharging    bool                   `json:"smart_charging" bson:"smart_charging"`
+	TriggerMessage   bool                   `json:"trigger_message" bson:"trigger_message"`
 	Status           string                 `json:"status" bson:"status"`
 	StatusTime       time.Time              `json:"status_time" bson:"status_time"`
 	Info             string                 `json:"info" bson:"info"`
