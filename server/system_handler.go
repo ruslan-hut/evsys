@@ -394,60 +394,8 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
-	state, ok := h.getChargePoint(chargePointId)
-	if !ok {
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("unknown chargepoint; authorization blocked; id:%s", request.IdTag))
-		return core.NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked)), nil
-	}
-	if !state.model.IsEnabled {
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("chargepoint disabled; authorization blocked; id:%s", request.IdTag))
-		return core.NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked)), nil
-	}
-
-	authStatus := types.AuthorizationStatusInvalid
-	userTag := h.getUserTag(request.IdTag)
-	if userTag.IsEnabled {
-		authStatus = types.AuthorizationStatusAccepted
-	}
-
-	// invalid state indicated that user not listed in local database or not enabled locally
-	if authStatus == types.AuthorizationStatusInvalid {
-		// try to authorize with connected auth service; here goes the OCPI authorization
-		// for EVSE id always use connector 1, because authorize request does not have connector id
-		result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), userTag.IdTag)
-		if err == nil {
-			if result.allowed {
-				authStatus = types.AuthorizationStatusAccepted
-			} else if result.expired {
-				authStatus = types.AuthorizationStatusExpired
-			} else if result.blocked {
-				authStatus = types.AuthorizationStatusBlocked
-			}
-			// if status was changed, update user tag
-			if authStatus != types.AuthorizationStatusInvalid {
-				userTag.Source = sourceOCPI
-				userTag.Note = result.info
-				_ = h.database.UpdateTag(userTag)
-			}
-		}
-	}
-
-	eventMessage := &internal.EventMessage{
-		ChargePointId: chargePointId,
-		ConnectorId:   0,
-		Time:          h.getTime(),
-		Username:      userTag.Username,
-		IdTag:         fmt.Sprintf("%s %s", userTag.Source, userTag.IdTag),
-		Status:        string(authStatus),
-		Info:          userTag.Note,
-		TransactionId: 0,
-		Payload:       request,
-	}
-	go h.notifyEventListeners(internal.Authorize, eventMessage)
-
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s %s; status: %s", userTag.Source, userTag.IdTag, authStatus))
+	authStatus := h.authorizeIdTag(chargePointId, request.IdTag)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; status: %s", request.IdTag, authStatus))
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
@@ -500,6 +448,11 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 			return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 		}
 
+	}
+
+	auth := h.authorizeIdTag(chargePointId, request.IdTag)
+	if auth != types.AuthorizationStatusAccepted {
+		return core.NewStartTransactionResponse(types.NewIdTagInfo(auth), 0), nil
 	}
 
 	userTag := h.getUserTag(request.IdTag)
@@ -1408,4 +1361,58 @@ func (h *SystemHandler) updateConnectorEvseId(connector *entity.Connector, evseI
 		}
 	}
 	return nil
+}
+
+func (h *SystemHandler) authorizeIdTag(chargePointId, idTag string) types.AuthorizationStatus {
+	h.mux.Lock()
+	defer h.mux.Unlock()
+	state, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return types.AuthorizationStatusBlocked
+	}
+	if !state.model.IsEnabled {
+		return types.AuthorizationStatusBlocked
+	}
+
+	authStatus := types.AuthorizationStatusInvalid
+	userTag := h.getUserTag(idTag)
+	if userTag.IsEnabled {
+		authStatus = types.AuthorizationStatusAccepted
+	}
+
+	// invalid state indicated that user not listed in local database or not enabled locally
+	if authStatus == types.AuthorizationStatusInvalid {
+		// try to authorize with connected auth service; here goes the OCPI authorization
+		// for EVSE id always use connector 1, because authorize request does not have connector id
+		result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), userTag.IdTag)
+		if err == nil {
+			if result.allowed {
+				authStatus = types.AuthorizationStatusAccepted
+			} else if result.expired {
+				authStatus = types.AuthorizationStatusExpired
+			} else if result.blocked {
+				authStatus = types.AuthorizationStatusBlocked
+			}
+			// if status was changed, update user tag
+			if authStatus != types.AuthorizationStatusInvalid {
+				userTag.Source = sourceOCPI
+				userTag.Note = result.info
+				_ = h.database.UpdateTag(userTag)
+			}
+		}
+	}
+
+	eventMessage := &internal.EventMessage{
+		ChargePointId: chargePointId,
+		ConnectorId:   0,
+		Time:          h.getTime(),
+		Username:      userTag.Username,
+		IdTag:         fmt.Sprintf("%s %s", userTag.Source, userTag.IdTag),
+		Status:        string(authStatus),
+		Info:          userTag.Note,
+		TransactionId: 0,
+	}
+	go h.notifyEventListeners(internal.Authorize, eventMessage)
+
+	return authStatus
 }
