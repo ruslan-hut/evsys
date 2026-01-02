@@ -54,6 +54,9 @@ func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) {
 }
 
 func (lb *LoadBalancer) OnSystemStart() {
+	if lb.database == nil {
+		return
+	}
 	locations, err := lb.database.GetLocations()
 	if err != nil {
 		lb.log.FeatureEvent(featureName, "", fmt.Sprintf("error getting locations: %s", err))
@@ -146,6 +149,9 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 }
 
 func (lb *LoadBalancer) getLocation(chargePointId string) (*entity.Location, *entity.ChargePoint) {
+	if lb.database == nil {
+		return nil, nil
+	}
 	chp, err := lb.database.GetChargePoint(chargePointId)
 	if err != nil {
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error getting charge point: %s", err))
@@ -198,9 +204,11 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.C
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("cleared power limit for %s", connectorInfo))
 		connector.CurrentPowerLimit = 0
 	}
-	err := lb.database.UpdateConnectorCurrentPower(connector)
-	if err != nil {
-		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("database error: %s", err))
+	if lb.database != nil {
+		err := lb.database.UpdateConnectorCurrentPower(connector)
+		if err != nil {
+			lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("database error: %s", err))
+		}
 	}
 	return nil
 }

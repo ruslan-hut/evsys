@@ -17,6 +17,7 @@ type TgBot struct {
 	subscriptions map[int]entity.UserSubscription
 	event         chan MessageContent
 	send          chan MessageContent
+	stop          chan struct{}
 }
 
 type MessageContent struct {
@@ -29,6 +30,7 @@ func NewBot(apiKey string) (*TgBot, error) {
 		subscriptions: make(map[int]entity.UserSubscription),
 		event:         make(chan MessageContent, 100),
 		send:          make(chan MessageContent, 100),
+		stop:          make(chan struct{}),
 	}
 	api, err := tgbotapi.NewBotAPI(apiKey)
 	if err != nil {
@@ -115,7 +117,13 @@ func (b *TgBot) updatesPump() {
 // eventPump sending events to all subscribers
 func (b *TgBot) eventPump() {
 	for {
-		if event, ok := <-b.event; ok {
+		select {
+		case <-b.stop:
+			return
+		case event, ok := <-b.event:
+			if !ok {
+				return
+			}
 			for _, subscription := range b.subscriptions {
 				b.sendMessage(int64(subscription.UserID), event.Text)
 			}
@@ -126,7 +134,13 @@ func (b *TgBot) eventPump() {
 // sendPump sending messages to users
 func (b *TgBot) sendPump() {
 	for {
-		if event, ok := <-b.send; ok {
+		select {
+		case <-b.stop:
+			return
+		case event, ok := <-b.send:
+			if !ok {
+				return
+			}
 			go b.sendMessage(event.ChatID, event.Text)
 		}
 	}
@@ -306,4 +320,10 @@ func sanitize(input string) string {
 	}
 
 	return sanitized
+}
+
+func (b *TgBot) Stop() {
+	log.Println("stopping telegram bot...")
+	close(b.stop)
+	b.api.StopReceivingUpdates()
 }

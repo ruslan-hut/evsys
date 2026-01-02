@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"evsys/internal"
 	"evsys/internal/config"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
@@ -68,6 +70,7 @@ type Pool struct {
 	send       chan *envelope
 	logger     internal.LogHandler
 	mutex      sync.Mutex
+	stop       chan struct{}
 }
 
 func NewPool(logger internal.LogHandler) *Pool {
@@ -78,12 +81,16 @@ func NewPool(logger internal.LogHandler) *Pool {
 		send:       make(chan *envelope, 256),
 		logger:     logger,
 		mutex:      sync.Mutex{},
+		stop:       make(chan struct{}),
 	}
 }
 
 func (pool *Pool) Start() {
 	for {
 		select {
+		case <-pool.stop:
+			pool.closeAllClients()
+			return
 		case client := <-pool.register:
 			pool.checkAddClient(client)
 		case client := <-pool.unregister:
@@ -105,6 +112,20 @@ func (pool *Pool) Start() {
 			}
 		}
 	}
+}
+
+func (pool *Pool) Stop() {
+	close(pool.stop)
+}
+
+func (pool *Pool) closeAllClients() {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	for _, client := range pool.clients {
+		close(client.send)
+	}
+	pool.clients = make(map[string]*WebSocket)
+	pool.logger.Debug("all websocket connections closed")
 }
 
 func (pool *Pool) checkAddClient(client *WebSocket) {
@@ -413,4 +434,12 @@ func (s *Server) GetStatus() []byte {
 		return []byte{}
 	}
 	return data
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	s.logger.Debug("stopping websocket server...")
+	s.pool.Stop()
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.httpServer.Shutdown(shutdownCtx)
 }

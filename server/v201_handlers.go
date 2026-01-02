@@ -1,13 +1,16 @@
 package server
 
 import (
+	"encoding/json"
 	"evsys/entity"
 	"evsys/internal"
+	"evsys/ocpp"
 	"evsys/ocpp/common"
 	"evsys/ocpp/v201"
 	"evsys/ocpp/v201/authorization"
 	"evsys/ocpp/v201/availability"
 	"evsys/ocpp/v201/provisioning"
+	"evsys/ocpp/v201/remotecontrol"
 	"evsys/ocpp/v201/transactions"
 	"fmt"
 	"log"
@@ -431,4 +434,151 @@ func (h *V201Handlers) OnStatusNotification(chargePointId string, request *avail
 
 	response := &availability.StatusNotificationResponse{}
 	return response, nil
+}
+
+// ============================================================================
+// API COMMAND HANDLERS (CSMS → Charging Station)
+// ============================================================================
+// These handlers create outgoing requests to charge points via the API.
+// ============================================================================
+
+// OnRequestStartTransaction creates a RequestStartTransaction request for OCPP 2.0.1
+func (h *V201Handlers) OnRequestStartTransaction(chargePointId string, connectorId int, payload string) (ocpp.Request, error) {
+	h.logger.FeatureEvent("RequestStartTransaction", chargePointId, fmt.Sprintf("v2.0.1: connector=%d", connectorId))
+
+	// Parse IdToken from payload (expected format: "userId" or JSON object)
+	idToken := v201.IdToken{
+		IdToken: payload,
+		Type:    v201.IdTokenTypeLocal, // Default to Local type
+	}
+
+	// Try to parse as JSON if it looks like JSON
+	if len(payload) > 0 && payload[0] == '{' {
+		var tokenData struct {
+			IdToken string `json:"idToken"`
+			Type    string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(payload), &tokenData); err == nil {
+			idToken.IdToken = tokenData.IdToken
+			if tokenData.Type != "" {
+				idToken.Type = v201.IdTokenType(tokenData.Type)
+			}
+		}
+	}
+
+	request := &remotecontrol.RequestStartTransactionRequest{
+		IdToken:       idToken,
+		RemoteStartId: int(time.Now().Unix() % 1000000), // Generate unique ID
+	}
+
+	// Set EVSE ID if connector is specified
+	if connectorId > 0 {
+		request.EvseId = &connectorId
+	}
+
+	return request, nil
+}
+
+// OnRequestStopTransaction creates a RequestStopTransaction request for OCPP 2.0.1
+func (h *V201Handlers) OnRequestStopTransaction(chargePointId string, payload string) (ocpp.Request, error) {
+	h.logger.FeatureEvent("RequestStopTransaction", chargePointId, fmt.Sprintf("v2.0.1: transactionId=%s", payload))
+
+	// In OCPP 2.0.1, we need the transaction ID (string, not integer)
+	transactionId := payload
+
+	// If payload is empty, try to find active transaction
+	if transactionId == "" {
+		h.systemHandler.mux.Lock()
+		state, ok := h.systemHandler.getChargePoint(chargePointId)
+		if ok && len(state.transactions) > 0 {
+			// Get first active transaction ID
+			for txId := range state.transactions {
+				transactionId = fmt.Sprintf("%d", txId)
+				break
+			}
+		}
+		h.systemHandler.mux.Unlock()
+	}
+
+	if transactionId == "" {
+		return nil, fmt.Errorf("no transaction ID provided and no active transaction found")
+	}
+
+	request := &remotecontrol.RequestStopTransactionRequest{
+		TransactionId: transactionId,
+	}
+
+	return request, nil
+}
+
+// OnReset creates a Reset request for OCPP 2.0.1
+func (h *V201Handlers) OnReset(chargePointId string, payload string) (ocpp.Request, error) {
+	h.logger.FeatureEvent("Reset", chargePointId, fmt.Sprintf("v2.0.1: type=%s", payload))
+
+	resetType := provisioning.ResetTypeImmediate
+	if payload == "Soft" || payload == "OnIdle" {
+		resetType = provisioning.ResetTypeOnIdle
+	}
+
+	request := &provisioning.ResetRequest{
+		Type: resetType,
+	}
+
+	return request, nil
+}
+
+// OnGetVariables creates a GetVariables request for OCPP 2.0.1
+func (h *V201Handlers) OnGetVariables(chargePointId string, payload string) (ocpp.Request, error) {
+	h.logger.FeatureEvent("GetVariables", chargePointId, fmt.Sprintf("v2.0.1: payload=%s", payload))
+
+	// Parse payload as component.variable format or JSON
+	var getVariableData []provisioning.GetVariableDataType
+
+	// Try to parse as JSON array first
+	if len(payload) > 0 && payload[0] == '[' {
+		if err := json.Unmarshal([]byte(payload), &getVariableData); err != nil {
+			return nil, fmt.Errorf("failed to parse GetVariables payload: %w", err)
+		}
+	} else {
+		// Parse as simple "Component.Variable" format
+		getVariableData = []provisioning.GetVariableDataType{
+			{
+				Component: v201.Component{Name: "OCPPCommCtrlr"},
+				Variable:  v201.Variable{Name: payload},
+			},
+		}
+	}
+
+	request := &provisioning.GetVariablesRequest{
+		GetVariableData: getVariableData,
+	}
+
+	return request, nil
+}
+
+// OnSetVariables creates a SetVariables request for OCPP 2.0.1
+func (h *V201Handlers) OnSetVariables(chargePointId string, payload string) (ocpp.Request, error) {
+	h.logger.FeatureEvent("SetVariables", chargePointId, fmt.Sprintf("v2.0.1: payload=%s", payload))
+
+	// Parse payload as JSON array
+	var setVariableData []provisioning.SetVariableDataType
+
+	if err := json.Unmarshal([]byte(payload), &setVariableData); err != nil {
+		return nil, fmt.Errorf("failed to parse SetVariables payload: %w", err)
+	}
+
+	request := &provisioning.SetVariablesRequest{
+		SetVariableData: setVariableData,
+	}
+
+	return request, nil
+}
+
+// OnTriggerMessage creates a TriggerMessage request for OCPP 2.0.1
+func (h *V201Handlers) OnTriggerMessage(chargePointId string, payload string) (ocpp.Request, error) {
+	h.logger.FeatureEvent("TriggerMessage", chargePointId, fmt.Sprintf("v2.0.1: message=%s", payload))
+
+	// TriggerMessage for OCPP 2.0.1 requires a different structure
+	// For now, return an error as TriggerMessage is not yet fully implemented
+	return nil, fmt.Errorf("TriggerMessage not yet implemented for OCPP 2.0.1")
 }

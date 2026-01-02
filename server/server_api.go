@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"evsys/internal"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const (
@@ -108,4 +110,11 @@ func (s *Api) handleRoot(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}
+}
+
+func (s *Api) Stop(ctx context.Context) error {
+	s.logger.Debug("stopping api server...")
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.httpServer.Shutdown(shutdownCtx)
 }
