@@ -39,11 +39,6 @@ type Config struct {
 		Password string `yaml:"password" env-default:"pass"`
 		Database string `yaml:"database" env-default:"evsys"`
 	}
-	Payment struct {
-		Enabled bool   `yaml:"enabled" env-default:"false"`
-		ApiUrl  string `yaml:"api_url" env-default:""`
-		ApiKey  string `yaml:"api_key" env-default:""`
-	}
 	Ocpi struct {
 		Enabled bool   `yaml:"enabled" env-default:"false"`
 		Url     string `yaml:"url" env-default:""`
