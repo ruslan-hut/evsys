@@ -10,11 +10,7 @@ This document provides a comprehensive checklist for testing OCPP 1.6J and OCPP 
 
 ### Server Configuration
 
-- [ ] **Enable version-aware routing** (optional, for testing new routing):
-  ```go
-  // In main.go or before cs.Start()
-  cs.EnableVersionAwareRouting()
-  ```
+- [x] **Version-aware routing is always on** — enabled unconditionally at `main.go:44` (`centralSystem.EnableVersionAwareRouting()`). No manual step required.
 
 - [ ] **Verify supported subprotocols** are configured:
   - `ocpp1.6` (default)
@@ -63,7 +59,7 @@ POST /api
 |------|-----------------|--------|
 | [ ] StartTransaction with valid IdTag | `transactionId` assigned, `status: Accepted` | |
 | [ ] MeterValues during transaction | Values stored, price calculated | |
-| [ ] StopTransaction | Transaction marked finished, billing triggered | |
+| [ ] StopTransaction | Transaction marked finished, price computed (`payment_amount > 0`) | |
 | [ ] Remote start via API | Transaction started on specified connector | |
 | [ ] Remote stop via API | Transaction stopped | |
 
@@ -167,7 +163,7 @@ POST /api
 |------|-----------------|--------|
 | [ ] TransactionEvent (Started) with IdToken | Transaction created, ID assigned | |
 | [ ] TransactionEvent (Updated) with MeterValue | Meter values stored, price updated | |
-| [ ] TransactionEvent (Ended) | Transaction finished, billing triggered | |
+| [ ] TransactionEvent (Ended) | Transaction finished, price computed (`payment_amount > 0`) | |
 | [ ] RequestStartTransaction via API | Transaction started on specified EVSE | |
 | [ ] RequestStopTransaction via API | Transaction stopped | |
 
@@ -253,6 +249,40 @@ POST /api
 |------|-----------------|--------|
 | [ ] Charge point disconnects as 1.6, reconnects as 2.0.1 | New version tracked correctly | |
 | [ ] Historical data preserved after version change | Old transactions accessible | |
+
+---
+
+## Payment Settlement (Cross-Service: evsys → evsys-back)
+
+Payment is no longer handled inside evsys. evsys only computes the price and writes
+`payment_amount` on the finished transaction; **evsys-back** settles it via Redsys.
+Both services share the same MongoDB. This leg has never been exercised end-to-end and
+is the main production risk — test it for **both** 1.6 and 2.0.1 transactions.
+
+**Contract (evsys side):** a finished transaction must have
+`is_finished: true`, `payment_amount > 0`, `payment_billed < payment_amount`.
+
+```javascript
+// On the shared DB, after a charging session ends:
+db.transactions.findOne({transaction_id: <id>})
+// Verify: is_finished == true, payment_amount > 0, payment_billed < payment_amount
+```
+
+| Test | Expected Result | Status |
+|------|-----------------|--------|
+| [ ] 1.6 session ends → `payment_amount` written | `payment_amount > 0`, `payment_billed == 0` | |
+| [ ] 2.0.1 session ends → `payment_amount` written | `payment_amount > 0`, `payment_billed == 0` | |
+| [ ] evsys-back processor picks up unbilled tx | Within 5 min, payment order created | |
+| [ ] Redsys **sandbox** settles (saved card / MIT) | `payment_billed == payment_amount`, order `Result` = success | |
+| [ ] Settled tx not re-charged on next tick | No duplicate payment order | |
+| [ ] Payment failure path | Retry record created, warning email sent | |
+| [ ] User with no payment method | tx marked billed, no charge attempted | |
+
+**Notes:**
+- evsys-back must run with `redsys.enabled: true` pointing at the **sandbox**
+  (`sis-t.redsys.es`), not the live endpoint.
+- Settlement is a 5-minute polling worker in evsys-back (`StartPaymentProcessor`), not
+  event-driven — allow up to one tick before checking results.
 
 ---
 
