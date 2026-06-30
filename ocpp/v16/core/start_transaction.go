@@ -1,6 +1,9 @@
 package core
 
-import "evsys/types"
+import (
+	"evsys/types"
+	"time"
+)
 
 const StartTransactionFeatureName = "StartTransaction"
 
@@ -19,6 +22,14 @@ type StartTransactionResponse struct {
 
 func (req StartTransactionRequest) GetFeatureName() string {
 	return StartTransactionFeatureName
+}
+
+// GetTimestamp returns the request timestamp, or time.Now() when omitted.
+func (req StartTransactionRequest) GetTimestamp() time.Time {
+	if req.Timestamp == nil {
+		return time.Now()
+	}
+	return req.Timestamp.Time
 }
 
 func (res StartTransactionResponse) GetFeatureName() string {

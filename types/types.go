@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 const SubProtocol16 = "ocpp1.6"
 
 type AuthorizationStatus string
@@ -108,6 +110,14 @@ type SampledValue struct {
 type MeterValue struct {
 	Timestamp    *DateTime      `json:"timestamp" validate:"required"`
 	SampledValue []SampledValue `json:"sampledValue" validate:"required,min=1,dive"`
+}
+
+// GetTimestamp returns the meter value timestamp, or time.Now() when omitted.
+func (m MeterValue) GetTimestamp() time.Time {
+	if m.Timestamp == nil {
+		return time.Now()
+	}
+	return m.Timestamp.Time
 }
 
 type RemoteStartStopStatus string

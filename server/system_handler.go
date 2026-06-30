@@ -457,7 +457,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		ConnectorId:   request.ConnectorId,
 		ChargePointId: chargePointId,
 		MeterStart:    request.MeterStart,
-		TimeStart:     request.Timestamp.Time,
+		TimeStart:     request.GetTimestamp(),
 		ReservationId: request.ReservationId,
 		Id:            newTransactionId,
 		UserTag:       userTag,
@@ -600,7 +600,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	}
 
 	transaction.IsFinished = true
-	transaction.TimeStop = request.Timestamp.Time
+	transaction.TimeStop = request.GetTimestamp()
 	transaction.MeterStop = request.MeterStop
 	transaction.Reason = string(request.Reason)
 
@@ -611,11 +611,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 				for _, value := range data.SampledValue {
 					if value.Context == types.ReadingContextTransactionBegin {
 						transaction.MeterStart = utility.ToInt(value.Value)
-						transaction.TimeStart = data.Timestamp.Time
+						transaction.TimeStart = data.GetTimestamp()
 					}
 					if value.Context == types.ReadingContextTransactionEnd {
 						transaction.MeterStop = utility.ToInt(value.Value)
-						transaction.TimeStop = data.Timestamp.Time
+						transaction.TimeStop = data.GetTimestamp()
 					}
 				}
 			}
@@ -712,7 +712,7 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 	for _, sampledValue := range request.MeterValue {
 
-		meter := entity.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.Timestamp.Time)
+		meter := entity.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.GetTimestamp())
 
 		for _, value := range sampledValue.SampledValue {
 
@@ -802,7 +802,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		}()
 
 		connector.Status = string(request.Status)
-		connector.StatusTime = request.Timestamp.Time
+		connector.StatusTime = request.GetTimestamp()
 		connector.State = h.stateFromStatus(request.Status)
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
@@ -829,7 +829,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	} else {
 		state.status = request.Status
 		state.model.Status = string(request.Status)
-		state.model.StatusTime = request.Timestamp.Time
+		state.model.StatusTime = request.GetTimestamp()
 		state.model.Info = request.Info
 		if h.database != nil {
 			err := h.database.UpdateChargePointStatus(state.model)

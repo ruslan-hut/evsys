@@ -1,6 +1,9 @@
 package core
 
-import "evsys/types"
+import (
+	"evsys/types"
+	"time"
+)
 
 const StopTransactionFeatureName = "StopTransaction"
 
@@ -35,6 +38,14 @@ type StopTransactionResponse struct {
 
 func (r StopTransactionRequest) GetFeatureName() string {
 	return StopTransactionFeatureName
+}
+
+// GetTimestamp returns the request timestamp, or time.Now() when omitted.
+func (r StopTransactionRequest) GetTimestamp() time.Time {
+	if r.Timestamp == nil {
+		return time.Now()
+	}
+	return r.Timestamp.Time
 }
 
 func (c StopTransactionResponse) GetFeatureName() string {
