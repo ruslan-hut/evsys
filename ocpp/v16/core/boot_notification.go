@@ -2,6 +2,7 @@ package core
 
 import (
 	"evsys/types"
+	"fmt"
 	"reflect"
 )
 
@@ -41,6 +42,23 @@ func NewBootNotificationResponse(currentTime *types.DateTime, interval int, stat
 
 func (r *BootNotificationRequest) GetFeatureName() string {
 	return BootNotificationFeatureName
+}
+
+// Validate checks the fields mandated by the OCPP 1.6 spec.
+func (r *BootNotificationRequest) Validate() error {
+	if r.ChargePointVendor == "" {
+		return fmt.Errorf("chargePointVendor is required")
+	}
+	if len(r.ChargePointVendor) > 20 {
+		return fmt.Errorf("chargePointVendor exceeds 20 characters")
+	}
+	if r.ChargePointModel == "" {
+		return fmt.Errorf("chargePointModel is required")
+	}
+	if len(r.ChargePointModel) > 20 {
+		return fmt.Errorf("chargePointModel exceeds 20 characters")
+	}
+	return nil
 }
 
 func (r *BootNotificationResponse) GetFeatureName() string {

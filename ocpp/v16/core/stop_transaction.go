@@ -2,6 +2,7 @@ package core
 
 import (
 	"evsys/types"
+	"fmt"
 	"time"
 )
 
@@ -46,6 +47,35 @@ func (r StopTransactionRequest) GetTimestamp() time.Time {
 		return time.Now()
 	}
 	return r.Timestamp.Time
+}
+
+// IsValid reports whether the reason is a known OCPP 1.6 stop reason.
+func (r Reason) IsValid() bool {
+	switch r {
+	case ReasonDeAuthorized, ReasonEmergencyStop, ReasonEVDisconnected, ReasonHardReset,
+		ReasonLocal, ReasonOther, ReasonPowerLoss, ReasonReboot, ReasonRemote,
+		ReasonSoftReset, ReasonUnlockCommand:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks optional-field constraints. Timestamp is handled defensively
+// via GetTimestamp and is therefore not required here.
+func (r StopTransactionRequest) Validate() error {
+	if len(r.IdTag) > 20 {
+		return fmt.Errorf("idTag exceeds 20 characters")
+	}
+	if r.Reason != "" && !r.Reason.IsValid() {
+		return fmt.Errorf("invalid reason: %q", r.Reason)
+	}
+	for i := range r.TransactionData {
+		if err := r.TransactionData[i].Validate(); err != nil {
+			return fmt.Errorf("transactionData[%d]: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func (c StopTransactionResponse) GetFeatureName() string {

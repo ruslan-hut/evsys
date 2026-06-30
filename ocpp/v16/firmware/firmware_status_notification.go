@@ -1,5 +1,7 @@
 package firmware
 
+import "fmt"
+
 const StatusNotificationFeatureName = "FirmwareStatusNotification"
 
 type Status string
@@ -23,6 +25,25 @@ type StatusNotificationResponse struct {
 
 func (r StatusNotificationRequest) GetFeatureName() string {
 	return StatusNotificationFeatureName
+}
+
+// IsValid reports whether the status is a known OCPP 1.6 firmware status.
+func (s Status) IsValid() bool {
+	switch s {
+	case StatusDownloaded, StatusDownloadFailed, StatusDownloading, StatusIdle,
+		StatusInstallationFailed, StatusInstalling, StatusInstalled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks that the status is a known value.
+func (r StatusNotificationRequest) Validate() error {
+	if r.Status == "" || !r.Status.IsValid() {
+		return fmt.Errorf("invalid status: %q", r.Status)
+	}
+	return nil
 }
 
 func (c StatusNotificationResponse) GetFeatureName() string {

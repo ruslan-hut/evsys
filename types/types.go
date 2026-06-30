@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const SubProtocol16 = "ocpp1.6"
 
@@ -118,6 +121,15 @@ func (m MeterValue) GetTimestamp() time.Time {
 		return time.Now()
 	}
 	return m.Timestamp.Time
+}
+
+// Validate checks that the meter value carries at least one sampled value.
+// Timestamp is handled defensively via GetTimestamp and is not required here.
+func (m MeterValue) Validate() error {
+	if len(m.SampledValue) == 0 {
+		return fmt.Errorf("meterValue requires at least one sampledValue")
+	}
+	return nil
 }
 
 type RemoteStartStopStatus string

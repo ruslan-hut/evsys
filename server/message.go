@@ -202,6 +202,14 @@ func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (ocpp.Reques
 		return nil, err
 	}
 	result := request.(ocpp.Request)
+
+	// Schema validation: reject malformed payloads before they reach the handlers
+	if v, ok := result.(interface{ Validate() error }); ok {
+		if err = v.Validate(); err != nil {
+			return nil, fmt.Errorf("validation failed: %w", err)
+		}
+	}
+
 	return result, nil
 }
 
