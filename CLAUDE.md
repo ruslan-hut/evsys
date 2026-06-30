@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Workflow Settings
 
-- **Never run builds or tests** - the user will build and test manually and report any errors
-- Do not run `go build`, `go test`, `go run`, or similar commands to verify changes
+- **Always run a build check after changing code** - run `go build ./...` once a logical set of edits is complete, and fix any compile errors before reporting done
+- Run `go test ./...` when changes touch tested packages
 
 ## Project Overview
 
