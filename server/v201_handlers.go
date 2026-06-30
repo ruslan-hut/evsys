@@ -370,11 +370,6 @@ func (h *V201Handlers) OnTransactionEvent(chargePointId string, request *transac
 					Time:          existingTx.TimeStop,
 				})
 
-				// Trigger payment
-				if h.systemHandler.payment != nil {
-					go h.systemHandler.payment.TransactionPayment(existingTx)
-				}
-
 				log.Printf("Transaction %d stopped on %s connector %d (OCPP 2.0.1)", existingTx.Id, chargePointId, connector.Id)
 			}
 		}

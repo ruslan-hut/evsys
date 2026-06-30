@@ -6,21 +6,15 @@ import (
 	"fmt"
 )
 
-type PaymentService interface {
-	TransactionPayment(transaction *entity.Transaction)
-}
-
 type Database interface {
 	GetDefaultPaymentPlan() (*entity.PaymentPlan, error)
 	GetUserPaymentPlan(username string) (*entity.PaymentPlan, error)
 	GetPaymentMethod(userId string) (*entity.PaymentMethod, error)
-	GetNotBilledTransactions() ([]*entity.Transaction, error)
 }
 
 type Affleck struct {
 	database    Database
 	logger      internal.LogHandler
-	payment     PaymentService
 	defaultPlan *entity.PaymentPlan
 }
 
@@ -34,10 +28,6 @@ func (a *Affleck) SetDatabase(database Database) {
 
 func (a *Affleck) SetLogger(logger internal.LogHandler) {
 	a.logger = logger
-}
-
-func (a *Affleck) SetPayment(payment PaymentService) {
-	a.payment = payment
 }
 
 // OnTransactionStart set payment plan for transaction

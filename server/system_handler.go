@@ -31,10 +31,6 @@ type BillingService interface {
 	OnMeterValue(transaction *entity.Transaction, transactionMeter *entity.TransactionMeter) error
 }
 
-type PaymentService interface {
-	TransactionPayment(transaction *entity.Transaction)
-}
-
 type ErrorListener interface {
 	OnError(data *entity.ErrorData)
 }
@@ -90,7 +86,6 @@ type SystemHandler struct {
 	lastMeter       map[int]*entity.TransactionMeter
 	database        internal.Database
 	billing         BillingService
-	payment         PaymentService
 	auth            AuthService
 	errorListener   ErrorListener
 	logger          internal.LogHandler
@@ -140,10 +135,6 @@ func (h *SystemHandler) SetDatabase(database internal.Database) {
 
 func (h *SystemHandler) SetBillingService(billing BillingService) {
 	h.billing = billing
-}
-
-func (h *SystemHandler) SetPaymentService(payment PaymentService) {
-	h.payment = payment
 }
 
 func (h *SystemHandler) SetAuthService(auth AuthService) {
@@ -656,10 +647,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 				h.logger.Error("delete transaction meter values", err)
 			}
 		}
-	}
-
-	if h.payment != nil {
-		go h.payment.TransactionPayment(transaction)
 	}
 
 	go func() {
@@ -1215,10 +1202,6 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		err = h.database.DeleteTransactionMeterValues(transaction.Id)
 		if err != nil {
 			h.logger.Error("delete transaction meter values", err)
-		}
-
-		if h.payment != nil {
-			go h.payment.TransactionPayment(transaction)
 		}
 
 		eventMessage := &internal.EventMessage{

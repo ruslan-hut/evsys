@@ -553,16 +553,6 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	systemHandler.SetLogger(logService)
 	systemHandler.SetParameters(conf.IsDebug, conf.AcceptUnknownTag, conf.AcceptUnknownChp)
 
-	// payment service
-	if conf.Payment.Enabled {
-		payment := billing.NewPaymentService(conf)
-		payment.SetLogger(logService)
-		if database != nil {
-			payment.SetDatabase(database)
-		}
-		systemHandler.SetPaymentService(payment)
-	}
-
 	if conf.Telegram.Enabled {
 		telegramBot, e := telegram.NewBot(conf.Telegram.ApiKey)
 		if e != nil {
