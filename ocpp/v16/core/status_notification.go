@@ -2,6 +2,7 @@ package core
 
 import (
 	"evsys/types"
+	"fmt"
 	"time"
 )
 
@@ -54,6 +55,51 @@ type StatusNotificationResponse struct {
 
 func (r StatusNotificationRequest) GetFeatureName() string {
 	return StatusNotificationFeatureName
+}
+
+// IsValid reports whether the status is a known OCPP 1.6 charge point status.
+func (s ChargePointStatus) IsValid() bool {
+	switch s {
+	case ChargePointStatusAvailable, ChargePointStatusPreparing, ChargePointStatusCharging,
+		ChargePointStatusSuspendedEVSE, ChargePointStatusSuspendedEV, ChargePointStatusFinishing,
+		ChargePointStatusReserved, ChargePointStatusUnavailable, ChargePointStatusFaulted:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsValid reports whether the error code is a known OCPP 1.6 error code.
+func (e ChargePointErrorCode) IsValid() bool {
+	switch e {
+	case ConnectorLockFailure, EVCommunicationError, GroundFailure, HighTemperature, InternalError,
+		LocalListConflict, NoError, OtherError, OverCurrentFailure, OverVoltage, PowerMeterFailure,
+		PowerSwitchFailure, ReaderFailure, ResetFailure, UnderVoltage, WeakSignal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks required fields and enum validity. Timestamp is optional per
+// the OCPP 1.6 spec and is therefore not required here.
+func (r StatusNotificationRequest) Validate() error {
+	if r.ConnectorId < 0 {
+		return fmt.Errorf("connectorId must be >= 0")
+	}
+	if r.Status == "" || !r.Status.IsValid() {
+		return fmt.Errorf("invalid status: %q", r.Status)
+	}
+	if r.ErrorCode == "" || !r.ErrorCode.IsValid() {
+		return fmt.Errorf("invalid errorCode: %q", r.ErrorCode)
+	}
+	if len(r.Info) > 50 {
+		return fmt.Errorf("info exceeds 50 characters")
+	}
+	if len(r.VendorId) > 255 {
+		return fmt.Errorf("vendorId exceeds 255 characters")
+	}
+	return nil
 }
 
 func (c StatusNotificationResponse) GetFeatureName() string {

@@ -1,5 +1,10 @@
 package types
 
+import (
+	"fmt"
+	"time"
+)
+
 const SubProtocol16 = "ocpp1.6"
 
 type AuthorizationStatus string
@@ -108,6 +113,23 @@ type SampledValue struct {
 type MeterValue struct {
 	Timestamp    *DateTime      `json:"timestamp" validate:"required"`
 	SampledValue []SampledValue `json:"sampledValue" validate:"required,min=1,dive"`
+}
+
+// GetTimestamp returns the meter value timestamp, or time.Now() when omitted.
+func (m MeterValue) GetTimestamp() time.Time {
+	if m.Timestamp == nil {
+		return time.Now()
+	}
+	return m.Timestamp.Time
+}
+
+// Validate checks that the meter value carries at least one sampled value.
+// Timestamp is handled defensively via GetTimestamp and is not required here.
+func (m MeterValue) Validate() error {
+	if len(m.SampledValue) == 0 {
+		return fmt.Errorf("meterValue requires at least one sampledValue")
+	}
+	return nil
 }
 
 type RemoteStartStopStatus string

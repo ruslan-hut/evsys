@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow Settings
+
+- **Always run a build check after changing code** - run `go build ./...` once a logical set of edits is complete, and fix any compile errors before reporting done
+- Run `go test ./...` when changes touch tested packages
+
 ## Project Overview
 
 EVSYS is an electric vehicle charging central system implementing OCPP 1.6J protocol. It manages charging points, users, and charging sessions as part of the Wattbrews platform.

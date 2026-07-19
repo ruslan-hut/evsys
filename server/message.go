@@ -3,8 +3,9 @@ package server
 import (
 	"encoding/json"
 	"evsys/ocpp"
-	"evsys/ocpp/core"
-	"evsys/ocpp/firmware"
+	"evsys/ocpp/common"
+	"evsys/ocpp/v16/core"
+	"evsys/ocpp/v16/firmware"
 	"evsys/utility"
 	"fmt"
 	"log"
@@ -201,5 +202,56 @@ func ParseRawJsonRequest(raw interface{}, requestType reflect.Type) (ocpp.Reques
 		return nil, err
 	}
 	result := request.(ocpp.Request)
+
+	// Schema validation: reject malformed payloads before they reach the handlers
+	if v, ok := result.(interface{ Validate() error }); ok {
+		if err = v.Validate(); err != nil {
+			return nil, fmt.Errorf("validation failed: %w", err)
+		}
+	}
+
 	return result, nil
+}
+
+// ParseRequestVersionAware parses an OCPP request using the version-aware feature registry
+// This function replaces the hardcoded getMessageType() with dynamic type lookup
+func ParseRequestVersionAware(data []interface{}, protocol common.ProtocolVersion, registry common.FeatureRegistry) (*CallRequest, error) {
+	typeId, err := MessageType(data)
+	if err != nil {
+		return nil, err
+	}
+	if typeId != CallTypeRequest {
+		return nil, fmt.Errorf("invalid request type id: %v", typeId)
+	}
+	if len(data) != 4 {
+		return nil, fmt.Errorf("unsupported request format; expected length: 4 elements")
+	}
+	uniqueId, ok := data[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid message unique id in request")
+	}
+	action, ok := data[2].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid action in request")
+	}
+
+	// Use the registry to get the request type for this protocol version and action
+	requestType, _, err := registry.GetTypes(protocol, action)
+	if err != nil {
+		return nil, fmt.Errorf("feature %s not supported for protocol %s: %w", action, protocol, err)
+	}
+
+	// Parse the payload using the dynamically retrieved type
+	request, err := ParseRawJsonRequest(data[3], requestType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse %s request: %w", action, err)
+	}
+
+	callRequest := CallRequest{
+		TypeId:   typeId,
+		UniqueId: uniqueId,
+		feature:  action,
+		Payload:  request,
+	}
+	return &callRequest, nil
 }

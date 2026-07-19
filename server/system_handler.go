@@ -5,11 +5,11 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 	"evsys/metrics/counters"
-	"evsys/ocpp/core"
-	"evsys/ocpp/firmware"
-	"evsys/ocpp/localauth"
-	"evsys/ocpp/remotetrigger"
-	"evsys/ocpp/smartcharging"
+	"evsys/ocpp/v16/core"
+	"evsys/ocpp/v16/firmware"
+	"evsys/ocpp/v16/localauth"
+	"evsys/ocpp/v16/remotetrigger"
+	"evsys/ocpp/v16/smartcharging"
 	"evsys/types"
 	"evsys/utility"
 	"fmt"
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var newTransactionId = 0
+var newTransactionId = 1
 
 const (
 	defaultHeartbeatInterval = 600
@@ -43,13 +43,15 @@ type ChargePointState struct {
 	transactions      map[int]*int
 	errorCode         core.ChargePointErrorCode
 	model             *entity.ChargePoint
+	triggerMessage    bool
 }
 
 func newChargePointState(chp *entity.ChargePoint) *ChargePointState {
 	return &ChargePointState{
-		connectors:   make(map[int]*entity.Connector),
-		transactions: make(map[int]*int),
-		model:        chp,
+		connectors:     make(map[int]*entity.Connector),
+		transactions:   make(map[int]*int),
+		model:          chp,
+		triggerMessage: chp.TriggerMessage,
 	}
 }
 
@@ -80,29 +82,31 @@ type AuthService interface {
 }
 
 type SystemHandler struct {
-	chargePoints   map[string]*ChargePointState
-	lastMeter      map[int]*entity.TransactionMeter
-	database       internal.Database
-	billing        BillingService
-	auth           AuthService
-	errorListener  ErrorListener
-	logger         internal.LogHandler
-	eventListeners []internal.EventHandler
-	trigger        *Trigger
-	debug          bool
-	acceptTags     bool
-	acceptPoints   bool
-	location       *time.Location
-	mux            sync.Mutex
+	chargePoints    map[string]*ChargePointState
+	lastMeter       map[int]*entity.TransactionMeter
+	database        internal.Database
+	billing         BillingService
+	auth            AuthService
+	errorListener   ErrorListener
+	logger          internal.LogHandler
+	eventListeners  []internal.EventHandler
+	trigger         *Trigger
+	protocolAdapter *ProtocolAdapter // Adapter for converting between OCPP versions
+	debug           bool
+	acceptTags      bool
+	acceptPoints    bool
+	location        *time.Location
+	mux             sync.Mutex
 }
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
-		chargePoints:   make(map[string]*ChargePointState),
-		lastMeter:      make(map[int]*entity.TransactionMeter),
-		eventListeners: make([]internal.EventHandler, 0),
-		location:       location,
-		mux:            sync.Mutex{},
+		chargePoints:    make(map[string]*ChargePointState),
+		lastMeter:       make(map[int]*entity.TransactionMeter),
+		eventListeners:  make([]internal.EventHandler, 0),
+		protocolAdapter: NewProtocolAdapter(),
+		location:        location,
+		mux:             sync.Mutex{},
 	}
 	return handler
 }
@@ -214,7 +218,7 @@ func (h *SystemHandler) OnStart() error {
 		// load transactions from database
 		transaction, err := h.database.GetLastTransaction()
 		if err != nil {
-			h.logger.Error("failed to load last transaction from database", err)
+			h.logger.Warn(fmt.Sprintf("no transactions in the database; id will start with %d; %v", newTransactionId, err))
 		}
 		if transaction != nil {
 			newTransactionId = transaction.Id + 1
@@ -381,60 +385,8 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {
-	h.mux.Lock()
-	defer h.mux.Unlock()
-	state, ok := h.getChargePoint(chargePointId)
-	if !ok {
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("unknown chargepoint; authorization blocked; id:%s", request.IdTag))
-		return core.NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked)), nil
-	}
-	if !state.model.IsEnabled {
-		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("chargepoint disabled; authorization blocked; id:%s", request.IdTag))
-		return core.NewAuthorizationResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked)), nil
-	}
-
-	authStatus := types.AuthorizationStatusInvalid
-	userTag := h.getUserTag(request.IdTag)
-	if userTag.IsEnabled {
-		authStatus = types.AuthorizationStatusAccepted
-	}
-
-	// invalid state indicated that user not listed in local database or not enabled locally
-	if authStatus == types.AuthorizationStatusInvalid {
-		// try to authorize with connected auth service; here goes the OCPI authorization
-		// for EVSE id always use connector 1, because authorize request does not have connector id
-		result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), userTag.IdTag)
-		if err == nil {
-			if result.allowed {
-				authStatus = types.AuthorizationStatusAccepted
-			} else if result.expired {
-				authStatus = types.AuthorizationStatusExpired
-			} else if result.blocked {
-				authStatus = types.AuthorizationStatusBlocked
-			}
-			// if status was changed, update user tag
-			if authStatus != types.AuthorizationStatusInvalid {
-				userTag.Source = sourceOCPI
-				userTag.Note = result.info
-				_ = h.database.UpdateTag(userTag)
-			}
-		}
-	}
-
-	eventMessage := &internal.EventMessage{
-		ChargePointId: chargePointId,
-		ConnectorId:   0,
-		Time:          h.getTime(),
-		Username:      userTag.Username,
-		IdTag:         fmt.Sprintf("%s %s", userTag.Source, userTag.IdTag),
-		Status:        string(authStatus),
-		Info:          userTag.Note,
-		TransactionId: 0,
-		Payload:       request,
-	}
-	go h.notifyEventListeners(internal.Authorize, eventMessage)
-
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s %s; status: %s", userTag.Source, userTag.IdTag, authStatus))
+	authStatus := h.authorizeIdTag(chargePointId, request.IdTag)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("id tag: %s; status: %s", request.IdTag, authStatus))
 	return core.NewAuthorizationResponse(types.NewIdTagInfo(authStatus)), nil
 }
 
@@ -489,6 +441,12 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	}
 
+	// TODO: check flow if the transaction is authorized on a charger itself (by credit card for example)
+	//auth := h.authorizeIdTag(chargePointId, request.IdTag)
+	//if auth != types.AuthorizationStatusAccepted {
+	//	return core.NewStartTransactionResponse(types.NewIdTagInfo(auth), 0), nil
+	//}
+
 	userTag := h.getUserTag(request.IdTag)
 
 	transaction := &entity.Transaction{
@@ -499,7 +457,7 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 		ConnectorId:   request.ConnectorId,
 		ChargePointId: chargePointId,
 		MeterStart:    request.MeterStart,
-		TimeStart:     request.Timestamp.Time,
+		TimeStart:     request.GetTimestamp(),
 		ReservationId: request.ReservationId,
 		Id:            newTransactionId,
 		UserTag:       userTag,
@@ -642,7 +600,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	}
 
 	transaction.IsFinished = true
-	transaction.TimeStop = request.Timestamp.Time
+	transaction.TimeStop = request.GetTimestamp()
 	transaction.MeterStop = request.MeterStop
 	transaction.Reason = string(request.Reason)
 
@@ -653,11 +611,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 				for _, value := range data.SampledValue {
 					if value.Context == types.ReadingContextTransactionBegin {
 						transaction.MeterStart = utility.ToInt(value.Value)
-						transaction.TimeStart = data.Timestamp.Time
+						transaction.TimeStart = data.GetTimestamp()
 					}
 					if value.Context == types.ReadingContextTransactionEnd {
 						transaction.MeterStop = utility.ToInt(value.Value)
-						transaction.TimeStop = data.Timestamp.Time
+						transaction.TimeStop = data.GetTimestamp()
 					}
 				}
 			}
@@ -754,11 +712,11 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 	for _, sampledValue := range request.MeterValue {
 
-		meter := entity.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.Timestamp.Time)
+		meter := entity.NewMeter(*transactionId, connector.Id, connector.Status, sampledValue.GetTimestamp())
 
 		for _, value := range sampledValue.SampledValue {
 
-			if value.Context != types.ReadingContextTrigger {
+			if chp.triggerMessage && value.Context != types.ReadingContextTrigger {
 				continue
 			}
 
@@ -844,7 +802,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 		}()
 
 		connector.Status = string(request.Status)
-		connector.StatusTime = request.Timestamp.Time
+		connector.StatusTime = request.GetTimestamp()
 		connector.State = h.stateFromStatus(request.Status)
 		connector.Info = request.Info
 		connector.VendorId = request.VendorId
@@ -871,7 +829,7 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	} else {
 		state.status = request.Status
 		state.model.Status = string(request.Status)
-		state.model.StatusTime = request.Timestamp.Time
+		state.model.StatusTime = request.GetTimestamp()
 		state.model.Info = request.Info
 		if h.database != nil {
 			err := h.database.UpdateChargePointStatus(state.model)
@@ -1260,6 +1218,12 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 }
 
 func (h *SystemHandler) checkListenTransaction(connector *entity.Connector, isOnline bool) {
+	if chp, ok := h.getChargePoint(connector.ChargePointId); ok {
+		if !chp.triggerMessage {
+			h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, "trigger messages are disabled")
+			return
+		}
+	}
 	if connector.CurrentTransactionId >= 0 {
 		h.logger.FeatureEvent("CheckListenTransaction", connector.ChargePointId, fmt.Sprintf("connector %d; status %s; online %v; transaction: %d", connector.Id, connector.Status, isOnline, connector.CurrentTransactionId))
 		if !isOnline {
@@ -1329,4 +1293,110 @@ func (h *SystemHandler) stateFromStatus(status core.ChargePointStatus) string {
 		return "unavailable"
 	}
 	return string(status)
+}
+
+// ============================================================================
+// PROTOCOL ADAPTER HELPERS
+// ============================================================================
+// These methods provide version-agnostic interfaces for common operations
+// They use the ProtocolAdapter to convert between OCPP versions
+
+// GetProtocolAdapter returns the protocol adapter instance
+func (h *SystemHandler) GetProtocolAdapter() *ProtocolAdapter {
+	return h.protocolAdapter
+}
+
+// setTransactionProtocolVersion sets the protocol version for a transaction
+// based on the charge point's protocol version
+func (h *SystemHandler) setTransactionProtocolVersion(transaction *entity.Transaction, chargePointId string) {
+	state, ok := h.getChargePoint(chargePointId)
+	if ok && state.model != nil && state.model.ProtocolVersion != "" {
+		transaction.ProtocolVersion = state.model.ProtocolVersion
+	} else {
+		// Default to OCPP 1.6J if not set
+		transaction.ProtocolVersion = "ocpp1.6"
+	}
+}
+
+// getConnectorByEvseAndConnectorId retrieves a connector using OCPP 2.0.1 EVSE structure
+// Falls back to connector ID only for OCPP 1.6J compatibility
+func (h *SystemHandler) getConnectorByEvseAndConnectorId(cps *ChargePointState, evseId *int, connectorId int) *entity.Connector {
+	// For OCPP 2.0.1, we might need to look up by EVSE ID
+	if evseId != nil {
+		for _, connector := range cps.connectors {
+			if connector.EvseId != nil && *connector.EvseId == *evseId && connector.Id == connectorId {
+				return connector
+			}
+		}
+	}
+
+	// Fall back to connector ID lookup (OCPP 1.6J style)
+	return h.getConnector(cps, connectorId)
+}
+
+// updateConnectorEvseId updates the EVSE ID for a connector (OCPP 2.0.1)
+// This is called when we receive EVSE information from a 2.0.1 charge point
+func (h *SystemHandler) updateConnectorEvseId(connector *entity.Connector, evseId *int) error {
+	if connector.EvseId == nil && evseId != nil {
+		connector.EvseId = evseId
+		if h.database != nil {
+			// Update database with EVSE ID
+			return h.database.UpdateConnector(connector)
+		}
+	}
+	return nil
+}
+
+func (h *SystemHandler) authorizeIdTag(chargePointId, idTag string) types.AuthorizationStatus {
+	h.mux.Lock()
+	defer h.mux.Unlock()
+	state, ok := h.getChargePoint(chargePointId)
+	if !ok {
+		return types.AuthorizationStatusBlocked
+	}
+	if !state.model.IsEnabled {
+		return types.AuthorizationStatusBlocked
+	}
+
+	authStatus := types.AuthorizationStatusInvalid
+	userTag := h.getUserTag(idTag)
+	if userTag.IsEnabled {
+		authStatus = types.AuthorizationStatusAccepted
+	}
+
+	// invalid state indicated that user not listed in local database or not enabled locally
+	if authStatus == types.AuthorizationStatusInvalid {
+		// try to authorize with connected auth service; here goes the OCPI authorization
+		// for EVSE id always use connector 1, because authorize request does not have connector id
+		result, err := h.authorize(state.model.LocationId, state.model.EvseId(1), userTag.IdTag)
+		if err == nil {
+			if result.allowed {
+				authStatus = types.AuthorizationStatusAccepted
+			} else if result.expired {
+				authStatus = types.AuthorizationStatusExpired
+			} else if result.blocked {
+				authStatus = types.AuthorizationStatusBlocked
+			}
+			// if status was changed, update user tag
+			if authStatus != types.AuthorizationStatusInvalid {
+				userTag.Source = sourceOCPI
+				userTag.Note = result.info
+				_ = h.database.UpdateTag(userTag)
+			}
+		}
+	}
+
+	eventMessage := &internal.EventMessage{
+		ChargePointId: chargePointId,
+		ConnectorId:   0,
+		Time:          h.getTime(),
+		Username:      userTag.Username,
+		IdTag:         fmt.Sprintf("%s %s", userTag.Source, userTag.IdTag),
+		Status:        string(authStatus),
+		Info:          userTag.Note,
+		TransactionId: 0,
+	}
+	go h.notifyEventListeners(internal.Authorize, eventMessage)
+
+	return authStatus
 }

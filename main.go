@@ -5,7 +5,6 @@ import (
 	"evsys/metrics/listen"
 	"evsys/server"
 	"flag"
-	"fmt"
 	"log"
 	_ "time/tzdata"
 )
@@ -18,8 +17,7 @@ func main() {
 
 	conf, err := config.GetConfig(configPath)
 	if err != nil {
-		log.Println(fmt.Sprintf("loading configuration failed: %s", err))
-		return
+		log.Fatalf("loading configuration failed: %s", err)
 	}
 	if conf.IsDebug {
 		log.Println("debug mode is enabled")
@@ -38,9 +36,9 @@ func main() {
 
 	centralSystem, err := server.NewCentralSystem(conf)
 	if err != nil {
-		log.Println("central system initialization failed", err)
-		return
+		log.Fatalf("central system initialization failed: %s", err)
 	}
+	centralSystem.EnableVersionAwareRouting()
 	centralSystem.Start()
 
 }

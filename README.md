@@ -65,7 +65,9 @@ Place the configuration file to `/etc/conf/config.yml`. Then run the following c
 evsys -conf=/etc/conf/config.yml
 ```
 After that, the server will be running and waiting for connections from charging points.
-To use API, make POST to the endpoint `http://<server_ip>:5001/api`. The body of the request should be a JSON object with the following structure:
+### API Usage
+
+To use the API, make a POST request to `http://<server_ip>:5001/api` with a JSON body:
 ```json
 {
   "charge_point_id": "Wallbox3",
@@ -74,7 +76,8 @@ To use API, make POST to the endpoint `http://<server_ip>:5001/api`. The body of
   "payload": "AllowOfflineTxForUnknownId"
 }
 ```
-In this structure you have to specify the charging point id, connector id if needed, feature name - standard OCPP protocol command name, and payload if the command requires. If a charge point is available, system will send a request to it, wait for answer and return it to the client. If the charge point is not available, system will return an error message. Here is an example of the response:
+
+The response contains OCPP data from the charge point:
 ```json
 {
   "configurationKey": [
@@ -86,8 +89,16 @@ In this structure you have to specify the charging point id, connector id if nee
   ],
   "unknownKey": []
 }
-``` 
-To see connected points id's you can use the following command, which is not listed in OCPP standard, but implemented in EVSYS:
+```
+
+**See complete API documentation:**
+- [API Overview](docs/API.md) - Request/response format, error handling, authentication
+- [OCPP 1.6 Reference](docs/API_OCPP16.md) - All OCPP 1.6J features and parameters
+- [OCPP 2.0.1 Reference](docs/API_OCPP201.md) - OCPP 2.0.1 features and migration guide
+
+#### Server Status
+
+To see connected charge points, use the `GetServerStatus` command (EVSYS-specific, not OCPP standard):
 ```json
 {
   "charge_point_id": "",
@@ -96,11 +107,11 @@ To see connected points id's you can use the following command, which is not lis
   "payload": ""
 }
 ```
-It will return the list of connected charging points:
+Response:
 ```json
 {
-  "connected_clients":"Wallbox3",
-  "total_clients":1
+  "connected_clients": "Wallbox3",
+  "total_clients": 1
 }
 ```
 

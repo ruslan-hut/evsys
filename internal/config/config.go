@@ -35,8 +35,8 @@ type Config struct {
 		Enabled  bool   `yaml:"enabled" env-default:"false"`
 		Host     string `yaml:"host" env-default:"127.0.0.1"`
 		Port     string `yaml:"port" env-default:"27017"`
-		User     string `yaml:"user" env-default:"admin"`
-		Password string `yaml:"password" env-default:"pass"`
+		User     string `yaml:"user" env-default:""`
+		Password string `yaml:"password" env-default:""`
 		Database string `yaml:"database" env-default:"evsys"`
 	}
 	Ocpi struct {

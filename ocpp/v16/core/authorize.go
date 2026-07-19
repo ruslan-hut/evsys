@@ -1,6 +1,9 @@
 package core
 
-import "evsys/types"
+import (
+	"evsys/types"
+	"fmt"
+)
 
 const AuthorizeFeatureName = "Authorize"
 
@@ -10,6 +13,17 @@ type AuthorizeRequest struct {
 
 func (f *AuthorizeRequest) GetFeatureName() string {
 	return AuthorizeFeatureName
+}
+
+// Validate checks required fields and length limits.
+func (f *AuthorizeRequest) Validate() error {
+	if f.IdTag == "" {
+		return fmt.Errorf("idTag is required")
+	}
+	if len(f.IdTag) > 20 {
+		return fmt.Errorf("idTag exceeds 20 characters")
+	}
+	return nil
 }
 
 type AuthorizeResponse struct {

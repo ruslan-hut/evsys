@@ -1,17 +1,21 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/ocpp"
+	"evsys/ocpp/common"
 	"evsys/utility"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/julienschmidt/httprouter"
 	"net"
 	"net/http"
 	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/julienschmidt/httprouter"
 )
 
 const (
@@ -51,6 +55,7 @@ type WebSocket struct {
 	pool           *Pool
 	id             string
 	uniqueId       string
+	protocol       common.ProtocolVersion
 	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
 	isClosed       bool
@@ -65,6 +70,7 @@ type Pool struct {
 	send       chan *envelope
 	logger     internal.LogHandler
 	mutex      sync.Mutex
+	stop       chan struct{}
 }
 
 func NewPool(logger internal.LogHandler) *Pool {
@@ -75,12 +81,16 @@ func NewPool(logger internal.LogHandler) *Pool {
 		send:       make(chan *envelope, 256),
 		logger:     logger,
 		mutex:      sync.Mutex{},
+		stop:       make(chan struct{}),
 	}
 }
 
 func (pool *Pool) Start() {
 	for {
 		select {
+		case <-pool.stop:
+			pool.closeAllClients()
+			return
 		case client := <-pool.register:
 			pool.checkAddClient(client)
 		case client := <-pool.unregister:
@@ -102,6 +112,20 @@ func (pool *Pool) Start() {
 			}
 		}
 	}
+}
+
+func (pool *Pool) Stop() {
+	close(pool.stop)
+}
+
+func (pool *Pool) closeAllClients() {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	for _, client := range pool.clients {
+		close(client.send)
+	}
+	pool.clients = make(map[string]*WebSocket)
+	pool.logger.Debug("all websocket connections closed")
 }
 
 func (pool *Pool) checkAddClient(client *WebSocket) {
@@ -147,6 +171,14 @@ func (ws *WebSocket) SetUniqueId(uniqueId string) {
 
 func (ws *WebSocket) IsClosed() bool {
 	return ws.isClosed
+}
+
+func (ws *WebSocket) GetProtocol() common.ProtocolVersion {
+	return ws.protocol
+}
+
+func (ws *WebSocket) SetProtocol(protocol common.ProtocolVersion) {
+	ws.protocol = protocol
 }
 
 func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
@@ -231,10 +263,19 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 
+	// Parse the negotiated protocol version
+	protocol := common.ParseProtocolVersion(requestedProto)
+	if protocol == common.UnknownVersion {
+		// Default to OCPP 1.6 for backward compatibility
+		protocol = common.DefaultVersion()
+		s.logger.Debug(fmt.Sprintf("unknown protocol '%s' for %s, defaulting to %s", requestedProto, id, protocol))
+	}
+
 	//s.logger.Debug(fmt.Sprintf("upgraded socket for %s and ready to receive data", id))
 	ws := WebSocket{
 		conn:           conn,
 		id:             id,
+		protocol:       protocol,
 		pool:           s.pool,
 		send:           make(chan []byte, 256),
 		logger:         s.logger,
@@ -393,4 +434,12 @@ func (s *Server) GetStatus() []byte {
 		return []byte{}
 	}
 	return data
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	s.logger.Debug("stopping websocket server...")
+	s.pool.Stop()
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.httpServer.Shutdown(shutdownCtx)
 }

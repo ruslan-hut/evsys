@@ -1,0 +1,18 @@
+[Unit]
+Description=EVSYS Migration (OCPP 2.0.1)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/bin
+ExecStart=/usr/local/bin/evsys-m -conf=/etc/conf/evsys-m.yml
+Restart=on-failure
+RestartSec=5s
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
