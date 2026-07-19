@@ -716,11 +716,10 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 		for _, value := range sampledValue.SampledValue {
 
-			if chp.triggerMessage && value.Context != types.ReadingContextTrigger {
-				continue
-			}
-
-			// read value of active energy import register only for triggered messages
+			// Every reading is recorded regardless of context: a charge point
+			// may report periodically on its own instead of only on request,
+			// and triggerMessage decides whether we ask for readings, not
+			// which of the ones that arrive are worth keeping.
 			if value.Measurand == types.MeasurandEnergyActiveImportRegister {
 
 				meter.Value = utility.ToInt(value.Value)
