@@ -11,10 +11,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EVSYS is an electric vehicle charging central system implementing OCPP 1.6J protocol. It manages charging points, users, and charging sessions as part of the Wattbrews platform.
 
-Related repositories:
-- [evsys-back](https://github.com/ruslan-hut/evsys-back): Backend for end-user applications
-- [evsys-front](https://github.com/ruslan-hut/evsys-front): Web application
-- [Electrum](https://github.com/ruslan-hut/electrum): Payment system integration
+## Linked Projects
+
+| Repository | Local path | Role |
+|---|---|---|
+| [evsys-back](https://github.com/ruslan-hut/evsys-back) | `~/projects/evsys-back` | Reads the same MongoDB, serves REST/WebSocket to all end-user clients |
+| [evsys-front](https://github.com/ruslan-hut/evsys-front) | `~/projects/evsys-front` | Angular web app (operator/admin) |
+| Wattbrews | `~/projects/Wattbrews` | Android app, Jetpack Compose + Kotlin |
+| wattbrews-web | `~/projects/wattbrews-web` | Angular 21 web app |
+| [Electrum](https://github.com/ruslan-hut/electrum) | `~/projects/electrum` | Payment system integration |
+
+evsys-front, Wattbrews and wattbrews-web are all clients of evsys-back, not of
+this service - but they render the data this service writes, so a field added
+here is invisible to users until it has been carried through every hop below.
+The Android app ships through the Play Store and old versions stay in use, so
+evsys-back changes must be additive; see its CLAUDE.md.
+
+**evsys and evsys-back share a database, not an API.** evsys writes the
+`charge_points`, `connectors`, `transactions` and `meter_values` collections;
+evsys-back decodes those same documents into its own structs. The two schemas
+are duplicated by hand and Go's BSON decoder silently ignores fields it has no
+struct member for, so a field added here simply never surfaces downstream and
+nothing fails loudly.
+
+### Rule: propagate entity changes downstream
+
+When adding or renaming a field on an entity in `/entity`, follow it through
+every layer before considering the change done:
+
+1. `~/projects/evsys-back/entity/` - the mirrored struct, matching the bson tag
+2. `~/projects/evsys-back/entity/charge_state.go` - the `ChargeState` DTO, if
+   the field belongs to a transaction; the transaction detail endpoint returns
+   this DTO rather than the entity, so a field missing here reaches no client
+3. `~/projects/evsys-back/impl/database/mongo.go` - the DTO mapping, and the
+   `$set` list in `UpdateChargePoint` if the field should be writable
+4. `~/projects/evsys-front/src/app/models/` - the TypeScript model
+5. The component template, if the value should actually be displayed
+
+Write a migration under `/migrations` when existing documents need the field
+backfilled. A missing field decodes as the zero value, and for a bool that
+means a feature silently switches off on every pre-existing document.
 
 ## Build and Run Commands
 
