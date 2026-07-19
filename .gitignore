@@ -2,3 +2,9 @@
 /.idea/
 /evsys
 /.claude
+.DS_Store
+
+# Database dumps - may contain production data, never commit
+/migrations/evsys-rehearsal/
+*.bson
+dump/

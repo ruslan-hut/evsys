@@ -23,22 +23,7 @@ The migration system:
 - Tracks migration status in `schema_version` collection
 - Provides detailed logging
 
-### Method 2: Manual Migration via CLI
-
-You can manually run migrations using the provided CLI tool:
-
-```bash
-# Run all pending migrations
-go run cmd/migrate/main.go -conf=config.yml
-
-# Check current schema version
-go run cmd/migrate/main.go -conf=config.yml -status
-
-# Rollback to specific version (use with caution!)
-go run cmd/migrate/main.go -conf=config.yml -rollback -version=0
-```
-
-### Method 3: Direct MongoDB Scripts
+### Method 2: Direct MongoDB Scripts
 
 For scenarios where you need to run migrations without the Go application:
 
@@ -74,11 +59,7 @@ load("001_ocpp_multiversion.js")
 
 **Rollback:**
 ```bash
-# Manual rollback
 mongosh evsys 001_rollback.js
-
-# Via CLI
-go run cmd/migrate/main.go -conf=config.yml -rollback -version=0
 ```
 
 ## Schema Version Tracking

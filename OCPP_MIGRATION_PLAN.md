@@ -674,7 +674,7 @@ func (h *Handler201) GetVersion() common.ProtocolVersion {
 - [x] Add `protocol_version` field to `charge_points`
 - [x] Add `evse_id` field to `connectors` (nullable for 1.6 compatibility)
 - [x] Add flexible `metadata` JSONB field to `transactions`
-- [ ] Create migration scripts
+- [x] Create migration scripts (`migrations/001_ocpp_multiversion.js` + `001_rollback.js`, Go equivalent in `internal/migrations.go`, run automatically on startup)
 
 **Files to Modify:**
 - `entity/charge_point.go`
