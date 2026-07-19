@@ -23,6 +23,13 @@ var newTransactionId = 1
 const (
 	defaultHeartbeatInterval = 600
 	sourceOCPI               = "OCPI"
+
+	// transactionStaleAfter is how long a transaction may go without a meter value before the
+	// sweeper treats it as abandoned. Meter values are triggered every 20s, so this leaves ample
+	// room for a charge point that is merely slow or briefly offline.
+	transactionStaleAfter = 20 * time.Minute
+	// transactionSweepInterval is how often abandoned transactions are looked for.
+	transactionSweepInterval = 5 * time.Minute
 )
 
 type BillingService interface {
@@ -249,7 +256,7 @@ func (h *SystemHandler) OnStart() error {
 		}
 	}
 
-	go h.checkAndFinishTransactions()
+	go h.sweepTransactions()
 
 	go h.notifyEventListeners(internal.Information, &internal.EventMessage{
 		Info: fmt.Sprintf("Started with %d charge points, %d connectors", totalPoints, totalConnectors),
@@ -378,6 +385,10 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 	} else {
 		regStatus = core.RegistrationStatusRejected
 		h.logger.Debug(fmt.Sprintf("charge point %s not registered", chargePointId))
+	}
+
+	if regStatus == core.RegistrationStatusAccepted {
+		go h.reconcileChargePointTransactions(chargePointId)
 	}
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, string(regStatus))
@@ -1148,34 +1159,87 @@ func (h *SystemHandler) OnOnlineStatusChanged(id string, isOnline bool) {
 	}
 }
 
+// sweepTransactions closes abandoned transactions on startup and then periodically, for the
+// lifetime of the process. StatusNotification is not a reliable trigger on its own: a charge point
+// that goes silent mid-transaction never sends one.
+func (h *SystemHandler) sweepTransactions() {
+	h.checkAndFinishTransactions()
+
+	ticker := time.NewTicker(transactionSweepInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		h.checkAndFinishTransactions()
+	}
+}
+
 func (h *SystemHandler) checkAndFinishTransactions() {
 	if h.database == nil {
 		return
 	}
 
-	transactions, err := h.database.GetUnfinishedTransactions()
+	transactions, err := h.database.GetUnfinishedTransactions(h.getTime().Add(-transactionStaleAfter))
 	if err != nil {
 		h.logger.Error("get unfinished transactions", err)
 		return
 	}
 	for _, transaction := range transactions {
 		h.logger.Warn(fmt.Sprintf("transaction #%v was not finished correctly", transaction.Id))
-		h.trigger.Unregister <- transaction.Id
+		h.finishAbandonedTransaction(transaction)
+	}
+	h.updateActiveTransactionsCounter()
+}
 
-		transaction.Init()
-		transaction.Lock()
-		transaction.IsFinished = true
-		transaction.TimeStop = h.getTime()
+/*
+reconcileChargePointTransactions closes transactions left open by a charge point that has just
+rebooted. The charge point loses its transactions across a restart, so anything still open is dead
+and its connector must be released, otherwise OnStartTransaction keeps answering with the stale id.
+
+A StopTransaction queued while the charge point was offline may still arrive afterwards; it is
+handled normally, since OnStopTransaction overwrites a transaction whose stored MeterStop is lower
+than the reported one.
+*/
+func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string) {
+	if h.database == nil {
+		return
+	}
+
+	transactions, err := h.database.GetUnfinishedTransactionsForChargePoint(chargePointId)
+	if err != nil {
+		h.logger.Error("get unfinished transactions for charge point", err)
+		return
+	}
+	for _, transaction := range transactions {
+		h.logger.Warn(fmt.Sprintf("transaction #%v was left open by a reboot of %s", transaction.Id, chargePointId))
+		h.finishAbandonedTransaction(transaction)
+	}
+	if len(transactions) > 0 {
+		h.updateActiveTransactionsCounter()
+	}
+}
+
+// finishAbandonedTransaction closes a single transaction that will never receive its
+// StopTransaction, bills it if any energy was measured, and frees the connector it was holding.
+func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transaction) {
+	h.trigger.Unregister <- transaction.Id
+
+	transaction.Init()
+	transaction.Lock()
+	transaction.IsFinished = true
+
+	meterValue, _ := h.database.ReadTransactionMeterValue(transaction.Id)
+	if meterValue != nil {
+		transaction.MeterStop = meterValue.Value
+		transaction.TimeStop = meterValue.Time
 		transaction.Reason = "stopped by system"
+	} else {
+		// no meter value ever arrived, so no energy was delivered and no time can be
+		// attributed; stopping at the start time keeps the duration out of billing
+		transaction.TimeStop = transaction.TimeStart
+		transaction.Reason = "aborted by system"
+	}
 
-		meterValue, _ := h.database.ReadTransactionMeterValue(transaction.Id)
-		if meterValue != nil {
-			transaction.MeterStop = meterValue.Value
-			transaction.TimeStop = meterValue.Time
-		}
-
-		err = h.billing.OnTransactionFinished(transaction)
-		if err != nil {
+	if meterValue != nil {
+		if err := h.billing.OnTransactionFinished(transaction); err != nil {
 			eventMessage := &internal.EventMessage{
 				ChargePointId: transaction.ChargePointId,
 				ConnectorId:   transaction.ConnectorId,
@@ -1186,34 +1250,53 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 			}
 			go h.notifyEventListeners(internal.Alert, eventMessage)
 		}
-
-		err = h.database.UpdateTransaction(transaction)
-		if err != nil {
-			h.logger.Error("update transaction", err)
-		}
-		transaction.Unlock()
-
-		state, _ := h.getChargePoint(transaction.ChargePointId)
-		if state != nil {
-			state.unregisterTransaction(transaction.Id)
-		}
-
-		err = h.database.DeleteTransactionMeterValues(transaction.Id)
-		if err != nil {
-			h.logger.Error("delete transaction meter values", err)
-		}
-
-		eventMessage := &internal.EventMessage{
-			ChargePointId: transaction.ChargePointId,
-			ConnectorId:   transaction.ConnectorId,
-			TransactionId: transaction.Id,
-			Username:      transaction.Username,
-			Time:          h.getTime(),
-			Info:          "transaction was stopped by system",
-		}
-		go h.notifyEventListeners(internal.Alert, eventMessage)
 	}
-	h.updateActiveTransactionsCounter()
+
+	if err := h.database.UpdateTransaction(transaction); err != nil {
+		h.logger.Error("update transaction", err)
+	}
+	transaction.Unlock()
+
+	state, _ := h.getChargePoint(transaction.ChargePointId)
+	if state != nil {
+		state.unregisterTransaction(transaction.Id)
+		h.releaseConnector(state, transaction)
+	}
+
+	if err := h.database.DeleteTransactionMeterValues(transaction.Id); err != nil {
+		h.logger.Error("delete transaction meter values", err)
+	}
+
+	eventMessage := &internal.EventMessage{
+		ChargePointId: transaction.ChargePointId,
+		ConnectorId:   transaction.ConnectorId,
+		TransactionId: transaction.Id,
+		Username:      transaction.Username,
+		Time:          h.getTime(),
+		Info:          fmt.Sprintf("transaction was %s", transaction.Reason),
+	}
+	go h.notifyEventListeners(internal.Alert, eventMessage)
+}
+
+// releaseConnector clears the connector pointer left behind by a transaction the sweeper closed.
+// Without this the connector stays pinned and OnStartTransaction keeps answering with the dead
+// transaction id, making the connector unusable.
+func (h *SystemHandler) releaseConnector(state *ChargePointState, transaction *entity.Transaction) {
+	connector := h.getConnector(state, transaction.ConnectorId)
+	if connector == nil {
+		return
+	}
+	connector.Lock()
+	defer connector.Unlock()
+
+	if connector.CurrentTransactionId != transaction.Id {
+		return
+	}
+	connector.CurrentTransactionId = -1
+	connector.CurrentPowerLimit = 0
+	if err := h.database.UpdateConnector(connector); err != nil {
+		h.logger.Error("update connector", err)
+	}
 }
 
 func (h *SystemHandler) checkListenTransaction(connector *entity.Connector, isOnline bool) {

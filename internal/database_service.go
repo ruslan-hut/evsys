@@ -3,6 +3,7 @@ package internal
 import (
 	"evsys/entity"
 	"evsys/ocpp/v16/core"
+	"time"
 )
 
 type Database interface {
@@ -42,7 +43,8 @@ type Database interface {
 	GetTransaction(id int) (*entity.Transaction, error)
 	AddTransaction(transaction *entity.Transaction) error
 	UpdateTransaction(transaction *entity.Transaction) error
-	GetUnfinishedTransactions() ([]*entity.Transaction, error)
+	GetUnfinishedTransactions(staleBefore time.Time) ([]*entity.Transaction, error)
+	GetUnfinishedTransactionsForChargePoint(chargePointId string) ([]*entity.Transaction, error)
 	SaveStopTransactionRequest(stopTransaction *core.StopTransactionRequest) error
 
 	AddTransactionMeterValue(meterValue *entity.TransactionMeter) error

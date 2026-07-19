@@ -718,13 +718,42 @@ func (m *MongoDB) GetTransaction(id int) (*entity.Transaction, error) {
 	return &transaction, nil
 }
 
+// GetUnfinishedTransactionsForChargePoint retrieves every unfinished transaction of a single charge
+// point, regardless of age. Used after a reboot, where every open transaction of that charge point
+// is known to be dead.
+func (m *MongoDB) GetUnfinishedTransactionsForChargePoint(chargePointId string) ([]*entity.Transaction, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{
+		{"charge_point_id", chargePointId},
+		{"is_finished", false},
+	}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	var transactions []*entity.Transaction
+	if err = cursor.All(m.ctx, &transactions); err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
 /*
 GetUnfinishedTransactions retrieves a list of transactions that have not been marked as finished.
-Aggregation pipeline is used to find unfinished transactions that are not currently associated with any connector
+A transaction is considered abandoned when either its connector has already moved on to another
+transaction, or it shows no activity since staleBefore. Activity is the later of the start time and
+the newest meter value; relying on the connector pointer alone would never release a transaction
+whose StopTransaction was lost, since that pointer is only cleared on a normal stop.
 
 Returns a slice of pointers to unfinished Transaction entities, or an error if the operation fails.
 */
-func (m *MongoDB) GetUnfinishedTransactions() ([]*entity.Transaction, error) {
+func (m *MongoDB) GetUnfinishedTransactions(staleBefore time.Time) ([]*entity.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -758,16 +787,56 @@ func (m *MongoDB) GetUnfinishedTransactions() ([]*entity.Transaction, error) {
 			},
 		},
 		{
-			{"$unwind", bson.D{{"path", "$connector"}}},
+			{"$unwind", bson.D{
+				{"path", "$connector"},
+				{"preserveNullAndEmptyArrays", true},
+			}},
+		},
+		{
+			{"$lookup", bson.D{
+				{"from", collectionMeterValues},
+				{"let", bson.D{{"tid", "$transaction_id"}}},
+				{"pipeline", bson.A{
+					bson.D{{"$match", bson.D{
+						{"$expr", bson.D{
+							{"$eq", bson.A{"$transaction_id", "$$tid"}},
+						}},
+					}}},
+					bson.D{{"$group", bson.D{
+						{"_id", nil},
+						{"last", bson.D{{"$max", "$time"}}},
+					}}},
+				}},
+				{"as", "meter"},
+			}},
+		},
+		{
+			{"$addFields", bson.D{
+				{"last_activity", bson.D{
+					{"$max", bson.A{
+						"$time_start",
+						bson.D{{"$arrayElemAt", bson.A{"$meter.last", 0}}},
+					}},
+				}},
+			}},
 		},
 		{
 			{"$match", bson.D{
 				{"$expr", bson.D{
-					{"$not", bson.D{
-						{"$eq", bson.A{"$transaction_id", "$connector.current_transaction_id"}},
+					{"$or", bson.A{
+						bson.D{{"$ne", bson.A{
+							"$transaction_id",
+							// a missing connector says nothing about whether the transaction moved
+							// on, so fall through to the staleness check rather than sweep at once
+							bson.D{{"$ifNull", bson.A{"$connector.current_transaction_id", "$transaction_id"}}},
+						}}},
+						bson.D{{"$lte", bson.A{"$last_activity", staleBefore}}},
 					}},
 				}},
 			}},
+		},
+		{
+			{"$unset", bson.A{"connector", "meter", "last_activity"}},
 		},
 	}
 
@@ -848,7 +917,7 @@ func (m *MongoDB) AddSampleMeterValue(meterValue *entity.TransactionMeter) error
 	return err
 }
 
-// ReadTransactionMeterValue read last transaction meter value sorted by timestamp
+// ReadTransactionMeterValue read last transaction meter value sorted by time
 func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*entity.TransactionMeter, error) {
 	connection, err := m.connect()
 	if err != nil {
@@ -858,7 +927,7 @@ func (m *MongoDB) ReadTransactionMeterValue(transactionId int) (*entity.Transact
 
 	filter := bson.D{{"transaction_id", transactionId}}
 	collection := connection.Database(m.database).Collection(collectionMeterValues)
-	opts := options.FindOne().SetSort(bson.D{{"timestamp", -1}})
+	opts := options.FindOne().SetSort(bson.D{{"time", -1}})
 	var meterValue entity.TransactionMeter
 	err = collection.FindOne(m.ctx, filter, opts).Decode(&meterValue)
 	if err != nil {

@@ -23,8 +23,19 @@ const (
 	collectionSchema = "schema_version"
 
 	// Migration version constants
-	MigrationOCPPMultiVersion = 1 // OCPP multi-version support (Phase 2, Task 2.7)
-	MigrationTriggerMessage   = 2 // Enable meter value triggering on existing charge points
+	MigrationOCPPMultiVersion  = 1 // OCPP multi-version support (Phase 2, Task 2.7)
+	MigrationTriggerMessage    = 2 // Enable meter value triggering on existing charge points
+	MigrationStuckTransactions = 3 // Close transactions abandoned before the sweeper was fixed
+
+	// stuckTransactionCutoff is how far back a transaction must have been idle to count as
+	// backlog. The runtime sweeper handles anything more recent, so this only has to be long
+	// enough that a session live at deploy time is never touched.
+	stuckTransactionCutoff = 24 * time.Hour
+
+	// Reasons written by the backlog migration. They double as the marker the rollback matches
+	// on, so they must stay distinct from the reasons the runtime sweeper writes.
+	reasonBacklogStopped = "stopped by system (backlog)"
+	reasonBacklogAborted = "aborted by system (backlog)"
 )
 
 // SchemaVersion tracks the current database schema version
@@ -47,6 +58,12 @@ func GetMigrations() []Migration {
 			Description: "Enable trigger_message on charge points that predate the flag",
 			Up:          migrationTriggerMessageUp,
 			Down:        migrationTriggerMessageDown,
+		},
+		{
+			Version:     MigrationStuckTransactions,
+			Description: "Close transactions abandoned while the sweeper could not reach them",
+			Up:          migrationStuckTransactionsUp,
+			Down:        migrationStuckTransactionsDown,
 		},
 	}
 }
@@ -225,6 +242,149 @@ func migrationTriggerMessageUp(ctx context.Context, db *mongo.Database) error {
 		return fmt.Errorf("failed to update charge_points: %w", err)
 	}
 	log.Printf("Enabled trigger_message on %d charge points", result.ModifiedCount)
+
+	return nil
+}
+
+/*
+migrationStuckTransactionsUp closes transactions that were abandoned before the sweeper could
+reach them.
+
+GetUnfinishedTransactions used to exclude any transaction whose connector still pointed at it, but
+that pointer is only cleared on a normal stop. A lost StopTransaction therefore left both the flag
+and the pointer set, and the pair excluded itself from every sweep. Those rows keep their connector
+pinned, which makes OnStartTransaction answer new sessions with the dead transaction id.
+
+Only transactions idle for longer than stuckTransactionCutoff are touched, so a session that is
+live at deploy time is left to the runtime sweeper. Rows that already carry a payment amount are
+skipped and reported: marking one finished would expose it to the billing worker downstream, and a
+months-old session must not be charged without a look first.
+*/
+func migrationStuckTransactionsUp(ctx context.Context, db *mongo.Database) error {
+	log.Println("Running migration: Close abandoned transactions")
+
+	cutoff := time.Now().Add(-stuckTransactionCutoff)
+	transactions := db.Collection("transactions")
+
+	cursor, err := transactions.Find(ctx, bson.M{
+		"is_finished": false,
+		"time_start":  bson.M{"$lt": cutoff},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to read unfinished transactions: %w", err)
+	}
+
+	// read the candidates out before writing, so the updates below cannot disturb the cursor
+	var candidates []struct {
+		Id            int       `bson:"transaction_id"`
+		ChargePointId string    `bson:"charge_point_id"`
+		ConnectorId   int       `bson:"connector_id"`
+		MeterStart    int       `bson:"meter_start"`
+		TimeStart     time.Time `bson:"time_start"`
+		PaymentAmount int       `bson:"payment_amount"`
+	}
+	if err = cursor.All(ctx, &candidates); err != nil {
+		return fmt.Errorf("failed to read unfinished transactions: %w", err)
+	}
+	log.Printf("Found %d transaction(s) idle since before %s", len(candidates), cutoff.Format(time.RFC3339))
+
+	var closed, skippedActive, skippedBilled int
+	for _, transaction := range candidates {
+		if transaction.PaymentAmount > 0 {
+			log.Printf("Transaction %d has payment_amount %d, skipping for manual review",
+				transaction.Id, transaction.PaymentAmount)
+			skippedBilled++
+			continue
+		}
+
+		meterStop := transaction.MeterStart
+		timeStop := transaction.TimeStart
+		reason := reasonBacklogAborted
+
+		var meterValue struct {
+			Value int       `bson:"value"`
+			Time  time.Time `bson:"time"`
+		}
+		err = db.Collection("meter_values").FindOne(
+			ctx,
+			bson.M{"transaction_id": transaction.Id},
+			options.FindOne().SetSort(bson.D{{Key: "time", Value: -1}}),
+		).Decode(&meterValue)
+		if err != nil && err != mongo.ErrNoDocuments {
+			return fmt.Errorf("failed to read meter values of transaction %d: %w", transaction.Id, err)
+		}
+		if err == nil {
+			// a sample newer than the cutoff means the session is still delivering energy
+			if meterValue.Time.After(cutoff) {
+				skippedActive++
+				continue
+			}
+			meterStop = meterValue.Value
+			timeStop = meterValue.Time
+			reason = reasonBacklogStopped
+		}
+
+		_, err = transactions.UpdateOne(
+			ctx,
+			bson.M{"transaction_id": transaction.Id},
+			bson.M{"$set": bson.M{
+				"is_finished": true,
+				"time_stop":   timeStop,
+				"meter_stop":  meterStop,
+				"reason":      reason,
+			}},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to close transaction %d: %w", transaction.Id, err)
+		}
+
+		// release the connector this transaction was holding, matching on the id so a
+		// connector that has since moved on to a live session is left alone
+		_, err = db.Collection("connectors").UpdateOne(
+			ctx,
+			bson.M{
+				"charge_point_id":        transaction.ChargePointId,
+				"connector_id":           transaction.ConnectorId,
+				"current_transaction_id": transaction.Id,
+			},
+			bson.M{"$set": bson.M{
+				"current_transaction_id": -1,
+				"current_power_limit":    0,
+			}},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to release connector of transaction %d: %w", transaction.Id, err)
+		}
+
+		closed++
+	}
+
+	log.Printf("Closed %d abandoned transactions (%d still active, %d skipped with a payment amount)",
+		closed, skippedActive, skippedBilled)
+
+	return nil
+}
+
+// migrationStuckTransactionsDown reopens the transactions this migration closed, matching on the
+// reasons it wrote. It cannot restore the connector pointers it cleared: by the time a rollback
+// runs those connectors may have started real sessions, and repinning them to a dead transaction
+// is the failure this migration exists to undo.
+func migrationStuckTransactionsDown(ctx context.Context, db *mongo.Database) error {
+	log.Println("Rolling back migration: Reopen transactions closed as abandoned")
+
+	result, err := db.Collection("transactions").UpdateMany(
+		ctx,
+		bson.M{"reason": bson.M{"$in": bson.A{reasonBacklogStopped, reasonBacklogAborted}}},
+		bson.M{"$set": bson.M{
+			"is_finished": false,
+			"time_stop":   time.Time{},
+			"reason":      "",
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to rollback transactions: %w", err)
+	}
+	log.Printf("Reopened %d transactions; connector pointers were not restored", result.ModifiedCount)
 
 	return nil
 }
