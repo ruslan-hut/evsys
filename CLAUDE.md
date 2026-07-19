@@ -74,7 +74,31 @@ go mod download
 go mod tidy
 ```
 
-**Note:** There are no tests in this codebase currently.
+**Tests:**
+```bash
+# unit tests only
+go test -short ./...
+
+# everything, including the MongoDB-backed integration tests
+docker run -d --name evsys-test-mongo -p 27019:27017 mongo:7
+MONGO_TEST_URI=mongodb://localhost:27019 go test -race ./...
+```
+
+Tests live in `server/`, `ocpp/v201` with its subpackages, and `internal/`.
+Handler tests in `server/` drive a `SystemHandler` against stub
+`internal.Database` implementations that embed the interface as a nil field, so
+any method the handler calls unexpectedly panics rather than silently returning
+a zero value.
+
+The `internal/` tests hit a real MongoDB and are skipped unless
+`MONGO_TEST_URI` is set; `-short` skips them too. They cover the
+abandoned-transaction sweep and the migrations, both of which live in
+aggregation pipelines rather than in Go, so a mock would test nothing.
+
+When touching the sweep, the migrations or `OnStopTransaction`, verify the
+change by mutation: break the fix on purpose and confirm a test fails. Several
+of these guard orderings and time windows that pass by accident under a weaker
+assertion.
 
 ## Configuration
 

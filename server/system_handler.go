@@ -30,6 +30,12 @@ const (
 	transactionStaleAfter = 20 * time.Minute
 	// transactionSweepInterval is how often abandoned transactions are looked for.
 	transactionSweepInterval = 5 * time.Minute
+	// transactionReleaseGrace is how long a transaction whose connector has moved on is left
+	// alone. OnStopTransaction finishes the transaction before it releases the connector, so the
+	// two are never briefly inconsistent on the happy path - but if that first write fails the
+	// connector is still released, and this keeps the sweeper off the result until the charge
+	// point has had a chance to report again.
+	transactionReleaseGrace = 2 * time.Minute
 )
 
 type BillingService interface {
@@ -313,6 +319,9 @@ func (h *SystemHandler) releaseFinishedTransaction(connector *entity.Connector) 
 	h.logger.Warn(fmt.Sprintf("connector %d of %s points at finished transaction %d, releasing",
 		connector.Id, connector.ChargePointId, connector.CurrentTransactionId))
 
+	connector.Lock()
+	defer connector.Unlock()
+
 	connector.CurrentTransactionId = -1
 	connector.CurrentPowerLimit = 0
 	if err = h.database.UpdateConnector(connector); err != nil {
@@ -462,7 +471,14 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 
 	if connector.CurrentTransactionId >= 0 && h.database != nil {
 
-		transaction, _ := h.database.GetTransaction(connector.CurrentTransactionId)
+		transaction, err := h.database.GetTransaction(connector.CurrentTransactionId)
+		if err != nil && !internal.IsNotFound(err) {
+			// the connector claims a transaction and the database cannot say what became of it.
+			// Starting anyway would overwrite the pointer, and with it any record of a session
+			// that is still running, so refuse until the state can be read again
+			h.logger.Error("start transaction: cannot read the transaction held by the connector", err)
+			return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
+		}
 		if transaction != nil {
 			if !transaction.IsFinished && transaction.ConnectorId == connector.Id {
 				h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("start transaction: connector %d is already started transaction %d", connector.Id, connector.CurrentTransactionId))
@@ -634,14 +650,19 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	id := fmt.Sprintf("%d", transaction.ConnectorId)
 	counters.ObservePowerRate(state.model.LocationId, chargePointId, id, 0)
 
-	connector.CurrentTransactionId = -1
-	connector.CurrentPowerLimit = 0
-	err = h.database.UpdateConnector(connector)
-	if err != nil {
-		h.logger.Error("update connector", err)
+	// The connector is released only once the transaction is durably finished. Releasing first
+	// leaves the database briefly showing an open transaction whose connector has moved on, which
+	// is exactly the shape of an abandoned one, and the sweeper would claim a stop in progress.
+	releaseConnector := func() {
+		connector.CurrentTransactionId = -1
+		connector.CurrentPowerLimit = 0
+		if err = h.database.UpdateConnector(connector); err != nil {
+			h.logger.Error("update connector", err)
+		}
 	}
 
 	if transaction.IsFinished && transaction.MeterStop >= request.MeterStop {
+		releaseConnector()
 		h.logger.Warn(fmt.Sprintf("transaction #%d is already finished", request.TransactionId))
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
@@ -707,6 +728,10 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 			}
 		}
 	}
+
+	// released even if the write above failed: the connector has to be usable again either way,
+	// and the sweeper still reaches a transaction left open once its grace period elapses
+	releaseConnector()
 
 	go func() {
 		consumedPower := transaction.MeterStop - transaction.MeterStart
@@ -1225,7 +1250,11 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		return
 	}
 
-	transactions, err := h.database.GetUnfinishedTransactions(h.getTime().Add(-transactionStaleAfter))
+	now := h.getTime()
+	transactions, err := h.database.GetUnfinishedTransactions(
+		now.Add(-transactionStaleAfter),
+		now.Add(-transactionReleaseGrace),
+	)
 	if err != nil {
 		h.logger.Error("get unfinished transactions", err)
 		return
@@ -1234,13 +1263,21 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		h.logger.Warn(fmt.Sprintf("transaction #%v was not finished correctly", transaction.Id))
 		h.finishAbandonedTransaction(transaction)
 	}
+	h.mux.Lock()
 	h.updateActiveTransactionsCounter()
+	h.mux.Unlock()
 }
 
 /*
 reconcileChargePointTransactions closes transactions left open by a charge point that has just
-rebooted. The charge point loses its transactions across a restart, so anything still open is dead
-and its connector must be released, otherwise OnStartTransaction keeps answering with the stale id.
+rebooted, so their connectors are released without waiting out the sweep interval.
+
+A transaction that is still reporting meter values is left alone. BootNotification does not always
+mean the charge point restarted: some firmware sends it on a plain WebSocket reconnect, and this
+fleet already has chargers that report Available mid-session. Closing a live transaction here would
+be unrecoverable, because OnMeterValues keeps recording against the closed id, OnStopTransaction
+drops the real stop as already finished, and the connector would be offered to a second driver
+while the first car is still drawing power.
 
 A StopTransaction queued while the charge point was offline may still arrive afterwards; it is
 handled normally, since OnStopTransaction overwrites a transaction whose stored MeterStop is lower
@@ -1256,12 +1293,21 @@ func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string) {
 		h.logger.Error("get unfinished transactions for charge point", err)
 		return
 	}
+	cutoff := h.getTime().Add(-transactionReleaseGrace)
 	for _, transaction := range transactions {
+		if meterValue, _ := h.database.ReadTransactionMeterValue(transaction.Id); meterValue != nil {
+			if meterValue.Time.After(cutoff) {
+				h.logger.Warn(fmt.Sprintf("transaction #%v is still reporting on %s, left open", transaction.Id, chargePointId))
+				continue
+			}
+		}
 		h.logger.Warn(fmt.Sprintf("transaction #%v was left open by a reboot of %s", transaction.Id, chargePointId))
 		h.finishAbandonedTransaction(transaction)
 	}
 	if len(transactions) > 0 {
+		h.mux.Lock()
 		h.updateActiveTransactionsCounter()
+		h.mux.Unlock()
 	}
 }
 
@@ -1305,11 +1351,16 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 	}
 	transaction.Unlock()
 
+	// getChargePoint and getConnector both mutate maps that every OCPP handler reads under
+	// h.mux; this runs on the sweep goroutine, so it has to take the same lock or the two race
+	// and crash the process on a concurrent map write
+	h.mux.Lock()
 	state, _ := h.getChargePoint(transaction.ChargePointId)
 	if state != nil {
 		state.unregisterTransaction(transaction.Id)
 		h.releaseConnector(state, transaction)
 	}
+	h.mux.Unlock()
 
 	if err := h.database.DeleteTransactionMeterValues(transaction.Id); err != nil {
 		h.logger.Error("delete transaction meter values", err)

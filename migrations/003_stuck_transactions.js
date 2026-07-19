@@ -25,10 +25,11 @@ var CUTOFF_HOURS = 24;
 var cutoff = new Date(Date.now() - CUTOFF_HOURS * 60 * 60 * 1000);
 print("Cutoff: " + cutoff.toISOString() + " (" + CUTOFF_HOURS + "h)");
 
+// materialised before the loop, so the updates below cannot disturb the cursor
 var candidates = db.transactions.find({
     is_finished: false,
     time_start: { $lt: cutoff }
-});
+}).toArray();
 
 var closed = 0;
 var skippedActive = 0;
@@ -118,7 +119,7 @@ print("Releasing connectors pinned to finished transactions...");
 
 var orphaned = 0;
 
-db.connectors.find({ current_transaction_id: { $gte: 0 } }).forEach(function (connector) {
+db.connectors.find({ current_transaction_id: { $gte: 0 } }).toArray().forEach(function (connector) {
     var finished = db.transactions.countDocuments({
         transaction_id: connector.current_transaction_id,
         is_finished: true

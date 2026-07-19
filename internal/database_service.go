@@ -43,7 +43,7 @@ type Database interface {
 	GetTransaction(id int) (*entity.Transaction, error)
 	AddTransaction(transaction *entity.Transaction) error
 	UpdateTransaction(transaction *entity.Transaction) error
-	GetUnfinishedTransactions(staleBefore time.Time) ([]*entity.Transaction, error)
+	GetUnfinishedTransactions(staleBefore, releasedBefore time.Time) ([]*entity.Transaction, error)
 	GetUnfinishedTransactionsForChargePoint(chargePointId string) ([]*entity.Transaction, error)
 	SaveStopTransactionRequest(stopTransaction *core.StopTransactionRequest) error
 

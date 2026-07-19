@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"evsys/entity"
 	"evsys/internal/config"
 	"evsys/ocpp/v16/core"
@@ -701,6 +702,13 @@ func (m *MongoDB) GetLastTransaction() (*entity.Transaction, error) {
 	return &transaction, nil
 }
 
+// IsNotFound reports whether err means the document does not exist, rather than the query having
+// failed. Callers that repair state have to tell those apart: an absent document is a fact they can
+// act on, a failed query says nothing at all.
+func IsNotFound(err error) bool {
+	return errors.Is(err, mongo.ErrNoDocuments)
+}
+
 func (m *MongoDB) GetTransaction(id int) (*entity.Transaction, error) {
 	var transaction entity.Transaction
 	connection, err := m.connect()
@@ -746,14 +754,19 @@ func (m *MongoDB) GetUnfinishedTransactionsForChargePoint(chargePointId string) 
 
 /*
 GetUnfinishedTransactions retrieves a list of transactions that have not been marked as finished.
-A transaction is considered abandoned when either its connector has already moved on to another
-transaction, or it shows no activity since staleBefore. Activity is the later of the start time and
-the newest meter value; relying on the connector pointer alone would never release a transaction
-whose StopTransaction was lost, since that pointer is only cleared on a normal stop.
+A transaction is considered abandoned when it shows no activity since staleBefore, or when its
+connector has already moved on and it has been idle since releasedBefore. Activity is the later of
+the start time and the newest meter value.
+
+Both branches require idleness, for different reasons. Relying on the connector pointer alone would
+never release a transaction whose StopTransaction was lost, since that pointer is only cleared on a
+normal stop. The pointer on its own is not proof either: a stop that fails to write the transaction
+still releases the connector, leaving a row that looks abandoned but may yet be finished properly.
+releasedBefore keeps the sweeper off those until the charge point has had a chance to report again.
 
 Returns a slice of pointers to unfinished Transaction entities, or an error if the operation fails.
 */
-func (m *MongoDB) GetUnfinishedTransactions(staleBefore time.Time) ([]*entity.Transaction, error) {
+func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Time) ([]*entity.Transaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -824,11 +837,17 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore time.Time) ([]*entity.Tr
 			{"$match", bson.D{
 				{"$expr", bson.D{
 					{"$or", bson.A{
-						bson.D{{"$ne", bson.A{
-							"$transaction_id",
-							// a missing connector says nothing about whether the transaction moved
-							// on, so fall through to the staleness check rather than sweep at once
-							bson.D{{"$ifNull", bson.A{"$connector.current_transaction_id", "$transaction_id"}}},
+						bson.D{{"$and", bson.A{
+							bson.D{{"$ne", bson.A{
+								"$transaction_id",
+								// a missing connector says nothing about whether the transaction
+								// moved on, so fall through to the staleness check rather than
+								// sweep at once
+								bson.D{{"$ifNull", bson.A{"$connector.current_transaction_id", "$transaction_id"}}},
+							}}},
+							// a stop in progress looks identical to an abandoned connector until
+							// UpdateTransaction lands, so give that write time to arrive
+							bson.D{{"$lte", bson.A{"$last_activity", releasedBefore}}},
 						}}},
 						bson.D{{"$lte", bson.A{"$last_activity", staleBefore}}},
 					}},
