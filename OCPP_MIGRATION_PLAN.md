@@ -676,6 +676,12 @@ func (h *Handler201) GetVersion() common.ProtocolVersion {
 - [x] Add flexible `metadata` JSONB field to `transactions`
 - [x] Create migration scripts (`migrations/001_ocpp_multiversion.js` + `001_rollback.js`, Go equivalent in `internal/migrations.go`, run automatically on startup)
 
+**Applied to production 2026-07-19:** schema version 0 → 1 in under a second;
+12 charge points, 33 connectors, 4549 transactions backfilled, no errors.
+Rehearsed first against a dump of production data via
+`migrations/rehearse-docker.sh` - migration, rollback and re-migration all
+verified clean.
+
 **Files to Modify:**
 - `entity/charge_point.go`
 - `entity/connector.go`
