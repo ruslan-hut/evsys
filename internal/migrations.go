@@ -24,6 +24,7 @@ const (
 
 	// Migration version constants
 	MigrationOCPPMultiVersion = 1 // OCPP multi-version support (Phase 2, Task 2.7)
+	MigrationTriggerMessage   = 2 // Enable meter value triggering on existing charge points
 )
 
 // SchemaVersion tracks the current database schema version
@@ -40,6 +41,12 @@ func GetMigrations() []Migration {
 			Description: "Add OCPP multi-version support fields (protocol_version, evse_id, metadata)",
 			Up:          migrationOCPPMultiVersionUp,
 			Down:        migrationOCPPMultiVersionDown,
+		},
+		{
+			Version:     MigrationTriggerMessage,
+			Description: "Enable trigger_message on charge points that predate the flag",
+			Up:          migrationTriggerMessageUp,
+			Down:        migrationTriggerMessageDown,
 		},
 	}
 }
@@ -192,5 +199,51 @@ func migrationOCPPMultiVersionDown(ctx context.Context, db *mongo.Database) erro
 	_, _ = connectorsCollection.Indexes().DropOne(ctx, "charge_point_evse_1")
 
 	log.Println("Rollback completed successfully")
+	return nil
+}
+
+// migrationTriggerMessageUp enables meter value triggering on charge points
+// that predate the trigger_message flag.
+//
+// Before the flag existed the server always triggered MeterValues during a
+// transaction. Documents written before it decode as false, which silently
+// stops checkListenTransaction from registering the connector, so no samples
+// are collected and finished transactions end up with no meter values.
+// Backfilling true restores the original behaviour; the flag stays available
+// as a per-charge-point opt-out.
+func migrationTriggerMessageUp(ctx context.Context, db *mongo.Database) error {
+	log.Println("Running migration: Enable trigger_message on existing charge points")
+
+	// Only touch documents missing the field, so points explicitly set to
+	// false since the flag shipped keep their setting.
+	result, err := db.Collection("charge_points").UpdateMany(
+		ctx,
+		bson.M{"trigger_message": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"trigger_message": true}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update charge_points: %w", err)
+	}
+	log.Printf("Enabled trigger_message on %d charge points", result.ModifiedCount)
+
+	return nil
+}
+
+// migrationTriggerMessageDown removes the trigger_message field again. It can
+// only match on the value, so a charge point enabled by hand after the
+// migration ran is indistinguishable from one this migration set.
+func migrationTriggerMessageDown(ctx context.Context, db *mongo.Database) error {
+	log.Println("Rolling back migration: Remove trigger_message from charge points")
+
+	result, err := db.Collection("charge_points").UpdateMany(
+		ctx,
+		bson.M{"trigger_message": true},
+		bson.M{"$unset": bson.M{"trigger_message": ""}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to rollback charge_points: %w", err)
+	}
+	log.Printf("Removed trigger_message from %d charge points", result.ModifiedCount)
+
 	return nil
 }

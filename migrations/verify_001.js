@@ -14,8 +14,10 @@ function check(label, ok, detail) {
 	if (!ok) fail++;
 }
 
+// At least 1: later migrations move the version on, and these checks must
+// still hold once they have.
 var sv = db.schema_version.findOne();
-check("schema_version is 1", !!sv && sv.version === 1, "got " + (sv ? sv.version : "none"));
+check("schema_version is at least 1", !!sv && sv.version >= 1, "got " + (sv ? sv.version : "none"));
 
 // Document counts must be untouched: migration 001 is additive only.
 if (typeof PRE !== "undefined" && PRE && PRE.counts) {

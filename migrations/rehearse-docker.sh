@@ -112,8 +112,13 @@ cmd_run() {
 	echo "    $pre"
 	echo "$pre" > "$WORK_DIR/pre-state.json"
 
-	if [[ "$pre" == *'"schema_version":1'* ]]; then
-		die "dump already has schema_version 1 - migration would be skipped, so this proves nothing"
+	# A dump already at the latest version leaves nothing to apply, which would
+	# make the run look like a pass without exercising anything.
+	# One verify_NNN.js per migration, so the count is the latest version.
+	local latest
+	latest=$(ls "$REPO_ROOT"/migrations/verify_*.js | wc -l | tr -d ' ')
+	if [[ "$pre" == *"\"schema_version\":$latest"* ]]; then
+		die "dump is already at schema_version $latest - no migration would run, so this proves nothing"
 	fi
 
 	echo "==> building evsys"
@@ -174,8 +179,15 @@ cmd_run() {
 
 	echo
 	echo "==> verifying"
-	docker cp "$REPO_ROOT/migrations/verify_001.js" "$CONTAINER:/verify_001.js" >/dev/null
-	if in_mongo --eval "var PRE=$pre" --file /verify_001.js; then
+	local verified=0
+	for script in "$REPO_ROOT"/migrations/verify_*.js; do
+		local name
+		name=$(basename "$script")
+		echo "--- $name ---"
+		docker cp "$script" "$CONTAINER:/$name" >/dev/null
+		in_mongo --eval "var PRE=$pre" --file "/$name" || verified=1
+	done
+	if [[ $verified -eq 0 ]]; then
 		echo
 		echo "full log: $WORK_DIR/evsys.log"
 		echo "inspect:  docker exec -it $CONTAINER mongosh $DB_NAME"
