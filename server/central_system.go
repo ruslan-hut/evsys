@@ -516,12 +516,10 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 			log.Println("checking for pending database migrations...")
 			err = database.RunMigrations()
 			if err != nil {
-				log.Printf("WARNING: database migration failed: %s", err)
-				log.Println("continuing with current schema - some features may not work correctly")
-			} else {
-				version, _ := database.GetSchemaVersion()
-				log.Printf("database schema is up to date (version %d)", version)
+				return cs, fmt.Errorf("database migration failed: %s", err)
 			}
+			version, _ := database.GetSchemaVersion()
+			log.Printf("database schema is up to date (version %d)", version)
 		}
 	} else {
 		database = nil
