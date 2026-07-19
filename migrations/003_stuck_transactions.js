@@ -104,6 +104,51 @@ print("   - Still active, skipped: " + skippedActive);
 print("   - With payment amount:   " + skippedBilled);
 print("");
 
+// Second pass, driven by the connectors rather than the transactions.
+//
+// These are the residue of the sweeper as it behaved before it released
+// connectors: it marked the transaction finished and left the pointer set. The
+// pass above cannot reach them, because it starts from transactions that are
+// still open. Until the pointer is cleared, OnStartTransaction answers every
+// session on that connector with ConcurrentTx.
+//
+// Pointers to a transaction that does not exist at all are left alone:
+// OnStartTransaction overwrites those on the next start.
+print("Releasing connectors pinned to finished transactions...");
+
+var orphaned = 0;
+
+db.connectors.find({ current_transaction_id: { $gte: 0 } }).forEach(function (connector) {
+    var finished = db.transactions.countDocuments({
+        transaction_id: connector.current_transaction_id,
+        is_finished: true
+    });
+    if (finished === 0) {
+        return;
+    }
+
+    print("   ! connector " + connector.connector_id + " of " + connector.charge_point_id +
+        " points at finished transaction " + connector.current_transaction_id + ", releasing");
+
+    db.connectors.updateOne(
+        {
+            charge_point_id: connector.charge_point_id,
+            connector_id: connector.connector_id,
+            current_transaction_id: connector.current_transaction_id
+        },
+        {
+            $set: {
+                current_transaction_id: -1,
+                current_power_limit: 0
+            }
+        }
+    );
+    orphaned++;
+});
+
+print("   - Connectors released:   " + orphaned);
+print("");
+
 print("Updating schema version...");
 db.schema_version.replaceOne(
     {},

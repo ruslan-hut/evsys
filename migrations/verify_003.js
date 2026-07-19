@@ -56,6 +56,30 @@ var pinnedCount = pinned.length > 0 ? pinned[0].n : 0;
 check("no closed transaction still pins its connector", pinnedCount === 0,
 	pinnedCount + " connector(s) still pinned");
 
+// No connector may point at a finished transaction, whoever closed it. This is
+// the wider invariant: the check above only covers rows this migration closed,
+// while these pointers were left by the sweeper before it released connectors.
+var orphaned = db.connectors.aggregate([
+	{ $match: { current_transaction_id: { $gte: 0 } } },
+	{
+		$lookup: {
+			from: "transactions",
+			let: { tid: "$current_transaction_id" },
+			pipeline: [{
+				$match: {
+					$expr: { $and: [{ $eq: ["$transaction_id", "$$tid"] }, { $eq: ["$is_finished", true] }] }
+				}
+			}],
+			as: "finished"
+		}
+	},
+	{ $match: { "finished.0": { $exists: true } } },
+	{ $count: "n" }
+]).toArray();
+var orphanedCount = orphaned.length > 0 ? orphaned[0].n : 0;
+check("no connector points at a finished transaction", orphanedCount === 0,
+	orphanedCount + " connector(s) still pinned");
+
 // time_stop must never precede time_start, or duration goes negative downstream.
 var negative = db.transactions.countDocuments({
 	reason: { $in: ["stopped by system (backlog)", "aborted by system (backlog)"] },

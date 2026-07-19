@@ -362,7 +362,81 @@ func migrationStuckTransactionsUp(ctx context.Context, db *mongo.Database) error
 	log.Printf("Closed %d abandoned transactions (%d still active, %d skipped with a payment amount)",
 		closed, skippedActive, skippedBilled)
 
+	orphaned, err := releaseOrphanedConnectors(ctx, db)
+	if err != nil {
+		return err
+	}
+	log.Printf("Released %d connector(s) pointing at a finished transaction", orphaned)
+
 	return nil
+}
+
+/*
+releaseOrphanedConnectors clears connector pointers that reference an already finished transaction.
+
+These are the residue of the sweeper as it behaved before it released connectors: it marked the
+transaction finished and left the pointer set. The pass above cannot reach them, because it starts
+from transactions that are still open, and neither can anything at runtime except the connector
+itself being used again. Until the pointer is cleared, OnStartTransaction answers every session on
+that connector with ConcurrentTx.
+
+Pointers to a transaction that does not exist at all are left alone: OnStartTransaction overwrites
+those on the next start, and clearing them here would also swallow a pointer left dangling by a
+failed lookup.
+*/
+func releaseOrphanedConnectors(ctx context.Context, db *mongo.Database) (int, error) {
+	connectors := db.Collection("connectors")
+
+	cursor, err := connectors.Find(ctx, bson.M{"current_transaction_id": bson.M{"$gte": 0}})
+	if err != nil {
+		return 0, fmt.Errorf("failed to read connectors: %w", err)
+	}
+
+	var pinned []struct {
+		Id            int    `bson:"connector_id"`
+		ChargePointId string `bson:"charge_point_id"`
+		TransactionId int    `bson:"current_transaction_id"`
+	}
+	if err = cursor.All(ctx, &pinned); err != nil {
+		return 0, fmt.Errorf("failed to read connectors: %w", err)
+	}
+
+	released := 0
+	for _, connector := range pinned {
+		count, err := db.Collection("transactions").CountDocuments(ctx, bson.M{
+			"transaction_id": connector.TransactionId,
+			"is_finished":    true,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("failed to read transaction %d: %w", connector.TransactionId, err)
+		}
+		if count == 0 {
+			continue
+		}
+
+		log.Printf("Connector %d of %s points at finished transaction %d, releasing",
+			connector.Id, connector.ChargePointId, connector.TransactionId)
+
+		_, err = connectors.UpdateOne(
+			ctx,
+			bson.M{
+				"charge_point_id":        connector.ChargePointId,
+				"connector_id":           connector.Id,
+				"current_transaction_id": connector.TransactionId,
+			},
+			bson.M{"$set": bson.M{
+				"current_transaction_id": -1,
+				"current_power_limit":    0,
+			}},
+		)
+		if err != nil {
+			return 0, fmt.Errorf("failed to release connector %d of %s: %w",
+				connector.Id, connector.ChargePointId, err)
+		}
+		released++
+	}
+
+	return released, nil
 }
 
 // migrationStuckTransactionsDown reopens the transactions this migration closed, matching on the

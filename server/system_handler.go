@@ -276,13 +276,49 @@ func (h *SystemHandler) initializeChargePointState(chp *entity.ChargePoint) *Cha
 		for _, c := range chp.Connectors {
 			c.Init()
 			state.connectors[c.Id] = c
-			if c.CurrentTransactionId != -1 {
-				state.registerTransaction(c.CurrentTransactionId)
+			if c.CurrentTransactionId == -1 {
+				continue
 			}
+			if h.releaseFinishedTransaction(c) {
+				continue
+			}
+			state.registerTransaction(c.CurrentTransactionId)
 		}
 	}
 	h.chargePoints[chp.Id] = state
 	return state
+}
+
+/*
+releaseFinishedTransaction clears a connector pointer that references an already finished
+transaction, and reports whether it did.
+
+Such a pointer is a dead end: OnStartTransaction refuses every new session on the connector with
+ConcurrentTx, and nothing driven by the transactions collection can find it, because the sweeper
+only looks at transactions that are still open.
+
+The pointer is cleared only when the transaction is positively known to be finished. A lookup that
+fails is left alone, since a transient database error is indistinguishable from a missing document
+and a live session must not be released on a guess.
+*/
+func (h *SystemHandler) releaseFinishedTransaction(connector *entity.Connector) bool {
+	if h.database == nil {
+		return false
+	}
+	transaction, err := h.database.GetTransaction(connector.CurrentTransactionId)
+	if err != nil || transaction == nil || !transaction.IsFinished {
+		return false
+	}
+
+	h.logger.Warn(fmt.Sprintf("connector %d of %s points at finished transaction %d, releasing",
+		connector.Id, connector.ChargePointId, connector.CurrentTransactionId))
+
+	connector.CurrentTransactionId = -1
+	connector.CurrentPowerLimit = 0
+	if err = h.database.UpdateConnector(connector); err != nil {
+		h.logger.Error("update connector", err)
+	}
+	return true
 }
 
 /**
@@ -433,21 +469,33 @@ func (h *SystemHandler) OnStartTransaction(chargePointId string, request *core.S
 				return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusAccepted), connector.CurrentTransactionId), nil
 			}
 
-			h.logger.Error("connector is busy", fmt.Errorf("%s@%d is now busy with transaction %d", chargePointId, request.ConnectorId, connector.CurrentTransactionId))
+			if transaction.IsFinished {
+				// pointer left behind by a stop that closed the transaction without releasing
+				// the connector; without clearing it here every start is refused forever
+				h.logger.Warn(fmt.Sprintf("connector %d still points at finished transaction %d, releasing", connector.Id, connector.CurrentTransactionId))
+				state.unregisterTransaction(connector.CurrentTransactionId)
+				connector.CurrentTransactionId = -1
+				connector.CurrentPowerLimit = 0
+				if err := h.database.UpdateConnector(connector); err != nil {
+					h.logger.Error("update connector", err)
+				}
+			} else {
+				h.logger.Error("connector is busy", fmt.Errorf("%s@%d is now busy with transaction %d", chargePointId, request.ConnectorId, connector.CurrentTransactionId))
 
-			eventMessage := &internal.EventMessage{
-				ChargePointId: chargePointId,
-				ConnectorId:   connector.Id,
-				Time:          time.Now(),
-				Username:      "",
-				IdTag:         request.IdTag,
-				Status:        connector.Status,
-				TransactionId: connector.CurrentTransactionId,
-				Info:          "New transaction was requested, but connector is busy with another transaction.",
-				Payload:       request,
+				eventMessage := &internal.EventMessage{
+					ChargePointId: chargePointId,
+					ConnectorId:   connector.Id,
+					Time:          time.Now(),
+					Username:      "",
+					IdTag:         request.IdTag,
+					Status:        connector.Status,
+					TransactionId: connector.CurrentTransactionId,
+					Info:          "New transaction was requested, but connector is busy with another transaction.",
+					Payload:       request,
+				}
+				go h.notifyEventListeners(internal.Alert, eventMessage)
+				return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 			}
-			go h.notifyEventListeners(internal.Alert, eventMessage)
-			return core.NewStartTransactionResponse(types.NewIdTagInfo(types.AuthorizationStatusConcurrentTx), connector.CurrentTransactionId), nil
 		}
 
 	}

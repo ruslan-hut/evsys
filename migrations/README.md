@@ -80,11 +80,24 @@ makes `OnStartTransaction` answer new sessions with the dead transaction id
 instead of starting a real one — the connector stops working entirely.
 
 **Changes:**
+
+Pass 1, driven by the transactions:
 - Closes `transactions` with `is_finished: false` idle for more than 24 hours:
   sets `is_finished`, `time_stop`, `meter_stop` and a `reason` of
   `stopped by system (backlog)` or `aborted by system (backlog)`
 - Resets `current_transaction_id` and `current_power_limit` on the `connectors`
   those transactions were holding
+
+Pass 2, driven by the connectors:
+- Resets `current_transaction_id` and `current_power_limit` on any connector
+  pointing at a transaction that is *already* `is_finished: true`
+
+Pass 2 exists because the sweeper used to close a transaction without releasing
+its connector, leaving a pointer no transaction-driven query can reach. Such a
+connector rejects every new session with `ConcurrentTx` — a harder failure than
+an open transaction, which at least answered `Accepted` with a stale id.
+Pointers to a transaction that does not exist at all are left alone;
+`OnStartTransaction` overwrites those on the next start.
 
 **Deliberately not changed:**
 - `payment_amount` is never written. A transaction with no meter values stops at
