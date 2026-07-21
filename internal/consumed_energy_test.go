@@ -72,6 +72,9 @@ func TestGetTodayConsumedEnergy(t *testing.T) {
 	if cp1.ID.Location != "loc1" || cp1.Consumed != 1500 {
 		t.Errorf("CP1 = location %q consumed %d, want loc1 / 1500", cp1.ID.Location, cp1.Consumed)
 	}
+	if cp1.Count != 2 {
+		t.Errorf("CP1 count = %d, want 2: the count must cover the same rows as the energy sum", cp1.Count)
+	}
 
 	cp2, ok := byChargePoint["CP2"]
 	if !ok {
@@ -79,6 +82,9 @@ func TestGetTodayConsumedEnergy(t *testing.T) {
 	}
 	if cp2.Consumed != 0 {
 		t.Errorf("a backwards meter should contribute 0, got %d", cp2.Consumed)
+	}
+	if cp2.Count != 1 {
+		t.Errorf("CP2 count = %d, want 1: a finished session counts even when its meter went backwards", cp2.Count)
 	}
 
 	cpx, ok := byChargePoint["CPX"]

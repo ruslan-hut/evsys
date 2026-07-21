@@ -1347,6 +1347,7 @@ func (m *MongoDB) GetTodayConsumedEnergy() ([]*entity.ConsumedEnergy, error) {
 			{"consumed", bson.D{{"$sum", bson.D{
 				{"$max", bson.A{0, bson.D{{"$subtract", bson.A{"$meter_stop", "$meter_start"}}}}},
 			}}}},
+			{"count", bson.D{{"$sum", 1}}},
 		}}},
 	}
 	cursor, err := collection.Aggregate(m.ctx, pipeline)

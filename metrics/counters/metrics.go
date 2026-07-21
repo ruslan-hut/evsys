@@ -57,21 +57,23 @@ func ErrorsToday(location, chargePointId, code string, count int) {
 	errorGauge.With(prometheus.Labels{"location": location, "code": code, "charge_point_id": chargePointId}).Set(float64(count))
 }
 
-var transactionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+// transactionGauge and powerGauge are fed together from one aggregation over the transactions
+// collection, so the transaction count and the energy total always describe the same sessions.
+var transactionGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: "ocpp",
 	Name:      "transaction_count",
-	Help:      "Total number of transactions.",
+	Help:      "Number of transactions finished today.",
 }, []string{"location", "charge_point_id"})
 
-func CountTransaction(location, chargePointId string) {
+func ObserveTransactionCount(location, chargePointId string, count int) {
 	if len(location) == 0 || len(chargePointId) == 0 {
 		return
 	}
-	transactionCounter.With(
+	transactionGauge.With(
 		prometheus.Labels{
 			"location":        location,
 			"charge_point_id": chargePointId,
-		}).Inc()
+		}).Set(float64(count))
 }
 
 var powerGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{

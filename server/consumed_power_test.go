@@ -18,8 +18,8 @@ func (s *consumedStubDB) GetTodayConsumedEnergy() ([]*entity.ConsumedEnergy, err
 	return s.result, nil
 }
 
-func consumedGroup(location, chargePointId string, consumed int) *entity.ConsumedEnergy {
-	c := &entity.ConsumedEnergy{Consumed: consumed}
+func consumedGroup(location, chargePointId string, consumed, count int) *entity.ConsumedEnergy {
+	c := &entity.ConsumedEnergy{Consumed: consumed, Count: count}
 	c.ID.Location = location
 	c.ID.ChargePointID = chargePointId
 	return c
@@ -62,29 +62,43 @@ written keeps its old value. The refresh has to zero the series it stops receivi
 morning starts with yesterday's totals on the graph.
 */
 func TestObserveConsumedPowerZeroesDroppedSeries(t *testing.T) {
+	cp1 := map[string]string{"location": "loc-cons", "charge_point_id": "CP1"}
+	cp2 := map[string]string{"location": "loc-cons", "charge_point_id": "CP2"}
 	db := &consumedStubDB{result: []*entity.ConsumedEnergy{
-		consumedGroup("loc-cons", "CP1", 33975),
-		consumedGroup("loc-cons", "CP2", 1200),
+		consumedGroup("loc-cons", "CP1", 33975, 3),
+		consumedGroup("loc-cons", "CP2", 1200, 1),
 	}}
 	h := &SystemHandler{database: db, logger: stopStubLogger{}}
 
 	h.observeConsumedPower()
 
-	if got := gaugeValue(t, "ocpp_consumed_power", map[string]string{"location": "loc-cons", "charge_point_id": "CP1"}); got != 33975 {
-		t.Errorf("CP1 gauge = %v, want 33975", got)
+	if got := gaugeValue(t, "ocpp_consumed_power", cp1); got != 33975 {
+		t.Errorf("CP1 energy gauge = %v, want 33975", got)
 	}
-	if got := gaugeValue(t, "ocpp_consumed_power", map[string]string{"location": "loc-cons", "charge_point_id": "CP2"}); got != 1200 {
-		t.Errorf("CP2 gauge = %v, want 1200", got)
+	if got := gaugeValue(t, "ocpp_transaction_count", cp1); got != 3 {
+		t.Errorf("CP1 transaction gauge = %v, want 3", got)
+	}
+	if got := gaugeValue(t, "ocpp_consumed_power", cp2); got != 1200 {
+		t.Errorf("CP2 energy gauge = %v, want 1200", got)
+	}
+	if got := gaugeValue(t, "ocpp_transaction_count", cp2); got != 1 {
+		t.Errorf("CP2 transaction gauge = %v, want 1", got)
 	}
 
 	// the day rolls over: CP2 has no transactions finished today
-	db.result = []*entity.ConsumedEnergy{consumedGroup("loc-cons", "CP1", 500)}
+	db.result = []*entity.ConsumedEnergy{consumedGroup("loc-cons", "CP1", 500, 1)}
 	h.observeConsumedPower()
 
-	if got := gaugeValue(t, "ocpp_consumed_power", map[string]string{"location": "loc-cons", "charge_point_id": "CP1"}); got != 500 {
-		t.Errorf("CP1 gauge after rollover = %v, want 500", got)
+	if got := gaugeValue(t, "ocpp_consumed_power", cp1); got != 500 {
+		t.Errorf("CP1 energy gauge after rollover = %v, want 500", got)
 	}
-	if got := gaugeValue(t, "ocpp_consumed_power", map[string]string{"location": "loc-cons", "charge_point_id": "CP2"}); got != 0 {
-		t.Errorf("CP2 gauge should be zeroed once it drops out of the aggregation, still reads %v", got)
+	if got := gaugeValue(t, "ocpp_transaction_count", cp1); got != 1 {
+		t.Errorf("CP1 transaction gauge after rollover = %v, want 1", got)
+	}
+	if got := gaugeValue(t, "ocpp_consumed_power", cp2); got != 0 {
+		t.Errorf("CP2 energy gauge should be zeroed once it drops out of the aggregation, still reads %v", got)
+	}
+	if got := gaugeValue(t, "ocpp_transaction_count", cp2); got != 0 {
+		t.Errorf("CP2 transaction gauge should be zeroed once it drops out of the aggregation, still reads %v", got)
 	}
 }

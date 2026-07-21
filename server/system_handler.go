@@ -750,7 +750,6 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		if consumedPower < 0 {
 			consumedPower = 0
 		}
-		counters.CountTransaction(state.model.LocationId, chargePointId)
 		counters.CountConsumedPower(state.model.LocationId, chargePointId, float64(consumedPower))
 		h.observeConsumedPower()
 
@@ -1303,11 +1302,13 @@ func (h *SystemHandler) observeConsumedPower() {
 	current := make(map[consumedSeriesKey]bool, len(consumed))
 	for _, c := range consumed {
 		counters.ObserveConsumedPower(c.ID.Location, c.ID.ChargePointID, float64(c.Consumed))
+		counters.ObserveTransactionCount(c.ID.Location, c.ID.ChargePointID, c.Count)
 		current[consumedSeriesKey{c.ID.Location, c.ID.ChargePointID}] = true
 	}
 	for key := range h.consumedSeries {
 		if !current[key] {
 			counters.ObserveConsumedPower(key.location, key.chargePointId, 0)
+			counters.ObserveTransactionCount(key.location, key.chargePointId, 0)
 		}
 	}
 	h.consumedSeries = current
@@ -1413,15 +1414,14 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 		// a charge point that went silent sends neither StopTransaction nor a StatusNotification,
 		// the two places that zero this gauge, so it would stay stuck on the last reading
 		counters.ObservePowerRate(state.model.LocationId, transaction.ChargePointId, strconv.Itoa(transaction.ConnectorId), 0)
-		// a session closed here never reaches OnStopTransaction, the only other place these
-		// counters grow, so its energy and the session itself would go unreported; a transaction
-		// with no meter value delivered nothing and is not counted
+		// a session closed here never reaches OnStopTransaction, the only other place this
+		// counter grows, so its energy would go unreported; a transaction with no meter value
+		// delivered nothing and adds nothing
 		if meterValue != nil {
 			consumed := transaction.MeterStop - transaction.MeterStart
 			if consumed < 0 {
 				consumed = 0
 			}
-			counters.CountTransaction(state.model.LocationId, transaction.ChargePointId)
 			counters.CountConsumedPower(state.model.LocationId, transaction.ChargePointId, float64(consumed))
 		}
 	}

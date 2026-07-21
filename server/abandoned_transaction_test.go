@@ -144,12 +144,12 @@ func counterValue(t *testing.T, name string, wantLabels map[string]string) float
 }
 
 /*
-TestFinishAbandonedTransactionCountsTransaction pins the transaction and consumed-energy counters.
-A session closed by the sweep never reaches OnStopTransaction, the only other place these counters
-grow, so a charge point that went silent would have its sessions and delivered energy missing from
-the ocpp_transaction_count and ocpp_consumed_today series.
+TestFinishAbandonedTransactionCountsConsumedEnergy pins the consumed-energy counter. A session
+closed by the sweep never reaches OnStopTransaction, the only other place this counter grows, so
+a charge point that went silent would have its delivered energy missing from the
+ocpp_consumed_today series.
 */
-func TestFinishAbandonedTransactionCountsTransaction(t *testing.T) {
+func TestFinishAbandonedTransactionCountsConsumedEnergy(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	labels := map[string]string{"location": "loc-counted", "charge_point_id": "CP1"}
 	db := &abandonedStubDB{
@@ -158,7 +158,6 @@ func TestFinishAbandonedTransactionCountsTransaction(t *testing.T) {
 	h := newStopHandler(t, db, 1)
 	h.chargePoints["CP1"].model.LocationId = "loc-counted"
 
-	countBefore := counterValue(t, "ocpp_transaction_count", labels)
 	consumedBefore := counterValue(t, "ocpp_consumed_today", labels)
 
 	h.finishAbandonedTransaction(&entity.Transaction{
@@ -166,16 +165,13 @@ func TestFinishAbandonedTransactionCountsTransaction(t *testing.T) {
 		MeterStart: 5000, TimeStart: now.Add(-time.Hour),
 	})
 
-	if got := counterValue(t, "ocpp_transaction_count", labels) - countBefore; got != 1 {
-		t.Errorf("transaction count should grow by 1, grew by %v", got)
-	}
 	if got := counterValue(t, "ocpp_consumed_today", labels) - consumedBefore; got != 28975 {
 		t.Errorf("consumed energy should grow by 28975, grew by %v", got)
 	}
 }
 
 // TestFinishAbandonedTransactionWithoutEnergyIsNotCounted keeps aborted transactions out of the
-// counters: no meter value means nothing was delivered, so there is no session to report.
+// energy counter: no meter value means nothing was delivered, so there is nothing to add.
 func TestFinishAbandonedTransactionWithoutEnergyIsNotCounted(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	labels := map[string]string{"location": "loc-aborted", "charge_point_id": "CP1"}
@@ -183,15 +179,15 @@ func TestFinishAbandonedTransactionWithoutEnergyIsNotCounted(t *testing.T) {
 	h := newStopHandler(t, db, 1)
 	h.chargePoints["CP1"].model.LocationId = "loc-aborted"
 
-	countBefore := counterValue(t, "ocpp_transaction_count", labels)
+	consumedBefore := counterValue(t, "ocpp_consumed_today", labels)
 
 	h.finishAbandonedTransaction(&entity.Transaction{
 		Id: 1, ConnectorId: 1, ChargePointId: "CP1",
 		TimeStart: now.Add(-time.Hour),
 	})
 
-	if got := counterValue(t, "ocpp_transaction_count", labels) - countBefore; got != 0 {
-		t.Errorf("an aborted transaction should not be counted, count grew by %v", got)
+	if got := counterValue(t, "ocpp_consumed_today", labels) - consumedBefore; got != 0 {
+		t.Errorf("an aborted transaction delivered nothing, consumed grew by %v", got)
 	}
 }
 
