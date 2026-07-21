@@ -68,7 +68,7 @@ func (stopStubLogger) Debug(_ string)              {}
 func (stopStubLogger) Warn(_ string)               {}
 func (stopStubLogger) Error(_ string, _ error)     {}
 
-func newStopHandler(t *testing.T, db *stopStubDB, transactionId int) *SystemHandler {
+func newStopHandler(t *testing.T, db internal.Database, transactionId int) *SystemHandler {
 	t.Helper()
 
 	trigger := NewTrigger(nil, stopStubLogger{})

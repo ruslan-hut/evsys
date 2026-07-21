@@ -1,0 +1,165 @@
+package server
+
+import (
+	"testing"
+	"time"
+
+	"evsys/entity"
+	"evsys/internal"
+	"evsys/metrics/counters"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// abandonedStubDB stubs what finishAbandonedTransaction touches. The embedded interface is nil, so
+// any other call panics. The samples disappear on DeleteTransactionMeterValues, the same way they
+// do in the real collection - a read placed after the delete would come back empty.
+type abandonedStubDB struct {
+	internal.Database
+	samples []entity.TransactionMeter
+	// savedMeterValues captures transaction.MeterValues at UpdateTransaction time, which is what
+	// actually lands in the document
+	savedMeterValues []entity.TransactionMeter
+	deleted          bool
+}
+
+func (s *abandonedStubDB) ReadTransactionMeterValue(int) (*entity.TransactionMeter, error) {
+	if len(s.samples) == 0 {
+		return nil, nil
+	}
+	last := s.samples[len(s.samples)-1]
+	return &last, nil
+}
+
+func (s *abandonedStubDB) ReadAllTransactionMeterValues(int) ([]entity.TransactionMeter, error) {
+	return s.samples, nil
+}
+
+func (s *abandonedStubDB) UpdateTransaction(t *entity.Transaction) error {
+	s.savedMeterValues = t.MeterValues
+	return nil
+}
+
+func (s *abandonedStubDB) DeleteTransactionMeterValues(int) error {
+	s.deleted = true
+	s.samples = nil
+	return nil
+}
+
+func (s *abandonedStubDB) UpdateConnector(*entity.Connector) error { return nil }
+
+/*
+TestFinishAbandonedTransactionKeepsMeterValues pins the meter value samples onto the transaction
+the sweeper closes. The sweep path used to read only the last sample and then delete the whole
+set, so every system-stopped transaction lost its consumption curve permanently, while a normal
+OnStopTransaction stores it in the document before deleting.
+*/
+func TestFinishAbandonedTransactionKeepsMeterValues(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := &abandonedStubDB{
+		samples: []entity.TransactionMeter{
+			{Id: 1, Value: 100, Time: now.Add(-40 * time.Minute)},
+			{Id: 1, Value: 200, Time: now.Add(-30 * time.Minute)},
+			{Id: 1, Value: 300, Time: now.Add(-25 * time.Minute)},
+		},
+	}
+	h := newStopHandler(t, db, 1)
+
+	transaction := &entity.Transaction{
+		Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+		MeterStart: 0, TimeStart: now.Add(-time.Hour),
+	}
+	h.finishAbandonedTransaction(transaction)
+
+	if !transaction.IsFinished || transaction.Reason != "stopped by system" {
+		t.Errorf("transaction should be finished as stopped by system, got finished=%v reason=%q",
+			transaction.IsFinished, transaction.Reason)
+	}
+	if transaction.MeterStop != 300 || !transaction.TimeStop.Equal(now.Add(-25*time.Minute)) {
+		t.Errorf("meter stop should come from the newest sample, got value=%d time=%v",
+			transaction.MeterStop, transaction.TimeStop)
+	}
+	if len(db.savedMeterValues) != 3 {
+		t.Errorf("all %d samples should be saved on the transaction before deletion, got %d",
+			3, len(db.savedMeterValues))
+	}
+	if !db.deleted {
+		t.Error("meter value samples should be deleted once the transaction is saved")
+	}
+}
+
+// powerRateValue reads the ocpp_current_power_rate gauge for one label set from the default
+// prometheus registry, which is where promauto registers it.
+func powerRateValue(t *testing.T, location, chargePointId, connectorId string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "ocpp_current_power_rate" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, pair := range metric.GetLabel() {
+				labels[pair.GetName()] = pair.GetValue()
+			}
+			if labels["location"] == location && labels["charge_point_id"] == chargePointId && labels["connector_id"] == connectorId {
+				return metric.GetGauge().GetValue()
+			}
+		}
+	}
+	t.Fatal("ocpp_current_power_rate metric not found")
+	return 0
+}
+
+/*
+TestFinishAbandonedTransactionResetsPowerRateGauge pins the gauge reset. A charge point that goes
+silent mid-session sends neither the StopTransaction nor the StatusNotification that normally zero
+ocpp_current_power_rate, so without a reset in the sweep path the graph stays stuck on the last
+observed power until the next session on that connector.
+*/
+func TestFinishAbandonedTransactionResetsPowerRateGauge(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := &abandonedStubDB{
+		samples: []entity.TransactionMeter{{Id: 1, Value: 300, Time: now.Add(-25 * time.Minute)}},
+	}
+	h := newStopHandler(t, db, 1)
+	h.chargePoints["CP1"].model.LocationId = "loc1"
+
+	counters.ObservePowerRate("loc1", "CP1", "1", 84000)
+
+	h.finishAbandonedTransaction(&entity.Transaction{
+		Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+		TimeStart: now.Add(-time.Hour),
+	})
+
+	if got := powerRateValue(t, "loc1", "CP1", "1"); got != 0 {
+		t.Errorf("power rate gauge should be reset to 0, still reads %v", got)
+	}
+}
+
+// TestFinishAbandonedTransactionWithoutMeterValues covers the aborted branch: no sample ever
+// arrived, so nothing can be attributed and the stop lands on the start time.
+func TestFinishAbandonedTransactionWithoutMeterValues(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := &abandonedStubDB{}
+	h := newStopHandler(t, db, 1)
+
+	transaction := &entity.Transaction{
+		Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+		MeterStart: 0, TimeStart: now.Add(-time.Hour),
+	}
+	h.finishAbandonedTransaction(transaction)
+
+	if transaction.Reason != "aborted by system" {
+		t.Errorf("reason = %q, want aborted by system", transaction.Reason)
+	}
+	if !transaction.TimeStop.Equal(transaction.TimeStart) {
+		t.Errorf("time stop should equal time start, got %v", transaction.TimeStop)
+	}
+	if db.savedMeterValues != nil {
+		t.Errorf("no meter values should be saved, got %v", db.savedMeterValues)
+	}
+}

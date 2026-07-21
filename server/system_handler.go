@@ -1325,6 +1325,11 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 		transaction.MeterStop = meterValue.Value
 		transaction.TimeStop = meterValue.Time
 		transaction.Reason = "stopped by system"
+		// the samples are deleted once the transaction is saved, so this is the only
+		// chance to keep the consumption curve on the transaction, as a normal stop does
+		if meterValues, _ := h.database.ReadAllTransactionMeterValues(transaction.Id); meterValues != nil {
+			transaction.MeterValues = meterValues
+		}
 	} else {
 		// no meter value ever arrived, so no energy was delivered and no time can be
 		// attributed; stopping at the start time keeps the duration out of billing
@@ -1359,6 +1364,9 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 	if state != nil {
 		state.unregisterTransaction(transaction.Id)
 		h.releaseConnector(state, transaction)
+		// a charge point that went silent sends neither StopTransaction nor a StatusNotification,
+		// the two places that zero this gauge, so it would stay stuck on the last reading
+		counters.ObservePowerRate(state.model.LocationId, transaction.ChargePointId, strconv.Itoa(transaction.ConnectorId), 0)
 	}
 	h.mux.Unlock()
 
