@@ -11,10 +11,12 @@ import (
 
 const (
 	featureName = "LoadBalancer"
-	baseLimit   = 50
-	highLimit   = 150
-	midLimit    = 90
+	baseLimit   = 85
 )
+
+// powerSlots are assigned highest-first, one connector per slot;
+// when all slots are taken, further connectors get baseLimit
+var powerSlots = []int{210, 195, 145, 115}
 
 type LoadBalancer struct {
 	database Repository
@@ -95,8 +97,7 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	if location.PowerLimit == 0 {
 		return
 	}
-	activeHigh := false
-	activeMid := false
+	usedSlots := make(map[int]bool)
 	// all active connectors on smart charging points
 	activeConnectors := 0
 	for _, chp := range location.Evses {
@@ -104,12 +105,7 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 			for _, connector := range chp.Connectors {
 				if connector.CurrentTransactionId >= 0 {
 					activeConnectors++
-					if connector.CurrentPowerLimit == highLimit {
-						activeHigh = true
-					}
-					if connector.CurrentPowerLimit == midLimit {
-						activeMid = true
-					}
+					usedSlots[connector.CurrentPowerLimit] = true
 				} else if connector.CurrentPowerLimit > 0 {
 					// clear power limit for connector with no active transaction
 					err := lb.updateConnectorPower(0, connector)
@@ -123,14 +119,14 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	if activeConnectors == 0 {
 		return
 	}
-	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("active connectors: %d; high=%v; mid=%v", activeConnectors, activeHigh, activeMid))
-
 	powerLimit := baseLimit
-	if !activeHigh {
-		powerLimit = highLimit
-	} else if !activeMid {
-		powerLimit = midLimit
+	for _, slot := range powerSlots {
+		if !usedSlots[slot] {
+			powerLimit = slot
+			break
+		}
 	}
+	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("active connectors: %d; assigning %dA to new sessions", activeConnectors, powerLimit))
 
 	// send set charging profile request to each active connector
 	for _, chp := range location.Evses {

@@ -348,7 +348,7 @@ When adding new OCPP features:
 - Power manager in `/power` package
 - Triggered on transaction start/stop and system initialization
 - Enforces `power_limit` at Location level
-- Algorithm: proportional allocation based on max current across connectors
+- Algorithm: fixed power slots (`powerSlots` in `power/load_balancer.go`) assigned highest-first, one active connector per slot; connectors beyond the last slot get `baseLimit`. A session keeps its limit until it stops; freed slots go to new sessions only
 - Updates sent via `SetChargingProfile` OCPP command
 
 ### Adding Event Handlers
