@@ -1367,6 +1367,17 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 		// a charge point that went silent sends neither StopTransaction nor a StatusNotification,
 		// the two places that zero this gauge, so it would stay stuck on the last reading
 		counters.ObservePowerRate(state.model.LocationId, transaction.ChargePointId, strconv.Itoa(transaction.ConnectorId), 0)
+		// a session closed here never reaches OnStopTransaction, the only other place these
+		// counters grow, so its energy and the session itself would go unreported; a transaction
+		// with no meter value delivered nothing and is not counted
+		if meterValue != nil {
+			consumed := transaction.MeterStop - transaction.MeterStart
+			if consumed < 0 {
+				consumed = 0
+			}
+			counters.CountTransaction(state.model.LocationId, transaction.ChargePointId)
+			counters.CountConsumedPower(state.model.LocationId, transaction.ChargePointId, float64(consumed))
+		}
 	}
 	h.mux.Unlock()
 
