@@ -192,6 +192,11 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.C
 			return fmt.Errorf("sending profile update request: %s", err)
 		}
 		connector.CurrentPowerLimit = powerLimit
+		if lb.database != nil {
+			if err := lb.database.UpdateTransactionPowerLimit(connector.CurrentTransactionId, powerLimit); err != nil {
+				lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error updating transaction power limit: %s", err))
+			}
+		}
 	} else {
 		connectorInfo := fmt.Sprintf("connector %d", connector.Id)
 		if connector.EvseId != nil {

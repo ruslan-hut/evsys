@@ -483,6 +483,20 @@ func (m *MongoDB) UpdateConnectorCurrentPower(connector *entity.Connector) error
 	return nil
 }
 
+func (m *MongoDB) UpdateTransactionPowerLimit(transactionId, limit int) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"transaction_id", transactionId}}
+	update := bson.M{"$set": bson.M{"power_limit": limit}}
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
 func (m *MongoDB) AddConnector(connector *entity.Connector) error {
 	existedConnector, _ := m.GetConnector(connector.Id, connector.ChargePointId)
 	if existedConnector != nil {

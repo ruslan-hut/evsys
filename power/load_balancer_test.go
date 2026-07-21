@@ -9,6 +9,7 @@ import (
 type stubRepo struct {
 	chargePoint *entity.ChargePoint
 	location    *entity.Location
+	txLimits    map[int]int // transactionId -> last recorded power limit
 }
 
 func (s *stubRepo) GetChargePoint(_ string) (*entity.ChargePoint, error) {
@@ -24,6 +25,14 @@ func (s *stubRepo) GetLocations() ([]*entity.Location, error) {
 }
 
 func (s *stubRepo) UpdateConnectorCurrentPower(_ *entity.Connector) error {
+	return nil
+}
+
+func (s *stubRepo) UpdateTransactionPowerLimit(transactionId, limit int) error {
+	if s.txLimits == nil {
+		s.txLimits = make(map[int]int)
+	}
+	s.txLimits[transactionId] = limit
 	return nil
 }
 
@@ -65,6 +74,8 @@ func newTestBalancer(connectorCount int) (*LoadBalancer, []*entity.Connector) {
 func TestSlotAssignmentSequence(t *testing.T) {
 	lb, connectors := newTestBalancer(6)
 
+	repo := lb.database.(*stubRepo)
+
 	// sessions start one by one: highest free slot first, then base limit
 	expected := []int{210, 195, 145, 115, baseLimit, baseLimit}
 	for i, want := range expected {
@@ -72,6 +83,10 @@ func TestSlotAssignmentSequence(t *testing.T) {
 		lb.CheckPowerLimit("chp1")
 		if got := connectors[i].CurrentPowerLimit; got != want {
 			t.Fatalf("connector %d: got %dA, want %dA", i+1, got, want)
+		}
+		// the assigned limit must also be recorded on the transaction
+		if got := repo.txLimits[i]; got != want {
+			t.Fatalf("transaction %d: recorded %dA, want %dA", i, got, want)
 		}
 	}
 }

@@ -32,6 +32,7 @@ type Transaction struct {
 	UserTag         *UserTag               `json:"user_tag,omitempty" bson:"user_tag"`
 	ProtocolVersion string                 `json:"protocol_version,omitempty" bson:"protocol_version,omitempty"` // OCPP protocol version: "ocpp1.6", "ocpp2.0.1", "ocpp2.1"
 	EvseId          *int                   `json:"evse_id,omitempty" bson:"evse_id,omitempty"`                   // OCPP 2.0.1+ EVSE identifier
+	PowerLimit      int                    `json:"power_limit" bson:"power_limit"`                               // load balancer amperage assigned to this session (0 = none recorded)
 	Metadata        map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`                 // Flexible storage for version-specific data
 	mutex           sync.Mutex
 }

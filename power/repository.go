@@ -7,4 +7,5 @@ type Repository interface {
 	GetLocation(locationId string) (*entity.Location, error)
 	GetLocations() ([]*entity.Location, error)
 	UpdateConnectorCurrentPower(connector *entity.Connector) error
+	UpdateTransactionPowerLimit(transactionId, limit int) error
 }
