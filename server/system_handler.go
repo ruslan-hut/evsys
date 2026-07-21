@@ -110,6 +110,18 @@ type SystemHandler struct {
 	acceptPoints    bool
 	location        *time.Location
 	mux             sync.Mutex
+
+	// consumedSeries remembers which label pairs the consumed power gauge currently holds, so a
+	// group that drops out of the daily aggregation - yesterday's sessions after midnight - is
+	// zeroed instead of staying stuck on its last value. Guarded by consumedMux, not h.mux: the
+	// refresh runs a database aggregation and must not block the OCPP handlers.
+	consumedSeries map[consumedSeriesKey]bool
+	consumedMux    sync.Mutex
+}
+
+type consumedSeriesKey struct {
+	location      string
+	chargePointId string
 }
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
@@ -740,6 +752,7 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 		counters.CountTransaction(state.model.LocationId, chargePointId)
 		counters.CountConsumedPower(state.model.LocationId, chargePointId, float64(consumedPower))
+		h.observeConsumedPower()
 
 		consumed := utility.IntToString(consumedPower)
 		price := utility.IntAsPrice(transaction.PaymentAmount)
@@ -1266,6 +1279,38 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 	h.mux.Lock()
 	h.updateActiveTransactionsCounter()
 	h.mux.Unlock()
+
+	h.observeConsumedPower()
+}
+
+// observeConsumedPower refreshes the ocpp_consumed_power gauge with today's per-charge-point
+// energy totals. Series absent from the aggregation result are set to zero, which is how the
+// gauge comes back down after midnight; without that, yesterday's totals would stay on the graph
+// until the process restarts.
+func (h *SystemHandler) observeConsumedPower() {
+	if h.database == nil {
+		return
+	}
+	consumed, err := h.database.GetTodayConsumedEnergy()
+	if err != nil {
+		h.logger.Error("get today consumed energy", err)
+		return
+	}
+
+	h.consumedMux.Lock()
+	defer h.consumedMux.Unlock()
+
+	current := make(map[consumedSeriesKey]bool, len(consumed))
+	for _, c := range consumed {
+		counters.ObserveConsumedPower(c.ID.Location, c.ID.ChargePointID, float64(c.Consumed))
+		current[consumedSeriesKey{c.ID.Location, c.ID.ChargePointID}] = true
+	}
+	for key := range h.consumedSeries {
+		if !current[key] {
+			counters.ObserveConsumedPower(key.location, key.chargePointId, 0)
+		}
+	}
+	h.consumedSeries = current
 }
 
 /*
@@ -1308,6 +1353,7 @@ func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string) {
 		h.mux.Lock()
 		h.updateActiveTransactionsCounter()
 		h.mux.Unlock()
+		h.observeConsumedPower()
 	}
 }
 

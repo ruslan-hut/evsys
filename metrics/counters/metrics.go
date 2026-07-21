@@ -74,6 +74,23 @@ func CountTransaction(location, chargePointId string) {
 		}).Inc()
 }
 
+var powerGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: "ocpp",
+	Name:      "consumed_power",
+	Help:      "Energy delivered by transactions finished today.",
+}, []string{"location", "charge_point_id"})
+
+func ObserveConsumedPower(location, chargePointId string, power float64) {
+	if len(location) == 0 || len(chargePointId) == 0 {
+		return
+	}
+	powerGauge.With(
+		prometheus.Labels{
+			"location":        location,
+			"charge_point_id": chargePointId,
+		}).Set(power)
+}
+
 var powerCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "ocpp",
 	Name:      "consumed_today",

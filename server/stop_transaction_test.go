@@ -46,6 +46,9 @@ func (s *stopStubDB) ReadAllTransactionMeterValues(int) ([]entity.TransactionMet
 }
 
 func (s *stopStubDB) DeleteTransactionMeterValues(int) error { return nil }
+func (s *stopStubDB) GetTodayConsumedEnergy() ([]*entity.ConsumedEnergy, error) {
+	return nil, nil
+}
 func (s *stopStubDB) GetConnector(int, string) (*entity.Connector, error) {
 	return nil, nil
 }

@@ -1302,6 +1302,64 @@ func (m *MongoDB) WriteError(data *entity.ErrorData) error {
 	return err
 }
 
+/*
+GetTodayConsumedEnergy sums the energy delivered by transactions finished since midnight UTC,
+grouped by location and charge point - the value the ocpp_consumed_power gauge reports. The
+location comes from the charge point document; a transaction whose charge point is unknown lands
+in a group with an empty location, which the metrics layer drops. A transaction whose meter went
+backwards contributes zero rather than a negative value.
+*/
+func (m *MongoDB) GetTodayConsumedEnergy() ([]*entity.ConsumedEnergy, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	endOfDay := startOfDay.Add(24 * time.Hour)
+
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{
+			{"is_finished", true},
+			{"time_stop", bson.D{
+				{"$gte", startOfDay},
+				{"$lt", endOfDay},
+			}},
+		}}},
+		{{"$lookup", bson.D{
+			{"from", collectionChargePoints},
+			{"localField", "charge_point_id"},
+			{"foreignField", "charge_point_id"},
+			{"as", "chp"},
+		}}},
+		{{"$unwind", bson.D{
+			{"path", "$chp"},
+			{"preserveNullAndEmptyArrays", true},
+		}}},
+		{{"$group", bson.D{
+			{"_id", bson.D{
+				{"location", bson.D{{"$ifNull", bson.A{"$chp.location_id", ""}}}},
+				{"charge_point_id", "$charge_point_id"},
+			}},
+			{"consumed", bson.D{{"$sum", bson.D{
+				{"$max", bson.A{0, bson.D{{"$subtract", bson.A{"$meter_stop", "$meter_start"}}}}},
+			}}}},
+		}}},
+	}
+	cursor, err := collection.Aggregate(m.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var result []*entity.ConsumedEnergy
+	if err = cursor.All(m.ctx, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (m *MongoDB) GetTodayErrorCount() ([]*entity.ErrorCounter, error) {
 	connection, err := m.connect()
 	if err != nil {
