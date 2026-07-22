@@ -1,6 +1,8 @@
 package server
 
 import (
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +12,33 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// capturingLogger records Warn messages so a test can assert on them. Warn is called synchronously
+// inside finishAbandonedTransaction, so no waiting is needed; the mutex only guards -race.
+type capturingLogger struct {
+	mu    sync.Mutex
+	warns []string
+}
+
+func (l *capturingLogger) FeatureEvent(_, _, _ string) {}
+func (l *capturingLogger) RawDataEvent(_, _ string)    {}
+func (l *capturingLogger) Debug(_ string)              {}
+func (l *capturingLogger) Error(_ string, _ error)     {}
+func (l *capturingLogger) Warn(m string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.warns = append(l.warns, m)
+}
+func (l *capturingLogger) has(substr string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, w := range l.warns {
+		if strings.Contains(w, substr) {
+			return true
+		}
+	}
+	return false
+}
 
 // abandonedStubDB stubs what finishAbandonedTransaction touches. The embedded interface is nil, so
 // any other call panics. The samples disappear on DeleteTransactionMeterValues, the same way they
@@ -85,6 +114,58 @@ func TestFinishAbandonedTransactionKeepsMeterValues(t *testing.T) {
 	}
 	if !db.deleted {
 		t.Error("meter value samples should be deleted once the transaction is saved")
+	}
+}
+
+// TestFinishAbandonedTransactionTracesActiveSession asserts the trace fires when the sweep closes a
+// transaction whose connector still reports an active charging status: the session is likely live on
+// the charger and its connector is being freed underneath a car that is still drawing power.
+func TestFinishAbandonedTransactionTracesActiveSession(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for _, tc := range []struct {
+		status    string
+		wantTrace bool
+	}{
+		{"Charging", true},
+		{"SuspendedEV", true},
+		{"SuspendedEVSE", true},
+		{"Available", false},
+		{"Finishing", false},
+		{"Preparing", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			db := &abandonedStubDB{}
+			h := newStopHandler(t, db, 1)
+			logger := &capturingLogger{}
+			h.logger = logger
+			h.chargePoints["CP1"].connectors[1].Status = tc.status
+
+			h.finishAbandonedTransaction(&entity.Transaction{
+				Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+				TimeStart: now.Add(-time.Hour),
+			})
+
+			got := logger.has("still reports " + tc.status)
+			if got != tc.wantTrace {
+				t.Errorf("status %s: trace logged = %v, want %v", tc.status, got, tc.wantTrace)
+			}
+		})
+	}
+}
+
+func TestIsActiveChargingStatus(t *testing.T) {
+	active := []string{"Charging", "SuspendedEV", "SuspendedEVSE"}
+	inactive := []string{"Available", "Preparing", "Finishing", "Faulted", "Unavailable", "Reserved", ""}
+	for _, s := range active {
+		if !isActiveChargingStatus(s) {
+			t.Errorf("isActiveChargingStatus(%q) = false, want true", s)
+		}
+	}
+	for _, s := range inactive {
+		if isActiveChargingStatus(s) {
+			t.Errorf("isActiveChargingStatus(%q) = true, want false", s)
+		}
 	}
 }
 

@@ -25,6 +25,12 @@ const (
 	defaultHeartbeatInterval = 600
 	sourceOCPI               = "OCPI"
 
+	// reasons the sweep writes when it closes a transaction the charger never stopped itself.
+	// A later StopTransaction carrying one of these on the stored record means the sweep closed
+	// a session that was still live.
+	reasonStoppedBySystem = "stopped by system"
+	reasonAbortedBySystem = "aborted by system"
+
 	// transactionStaleAfter is how long a transaction may go without a meter value before the
 	// sweeper treats it as abandoned. Meter values are triggered every 20s, so this leaves ample
 	// room for a charge point that is merely slow or briefly offline.
@@ -691,6 +697,26 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	transaction.Init()
 	transaction.Lock()
 	defer transaction.Unlock()
+
+	// a real StopTransaction arriving for a transaction the sweep already closed means that close
+	// was premature - the session was still live on the charger. Trace it before the normal path
+	// overwrites the system-generated figures with the charger's real ones.
+	if transaction.IsFinished && isSystemClosedReason(transaction.Reason) {
+		h.logger.Warn(fmt.Sprintf("late StopTransaction for transaction #%d on %s: system had closed it as %q at %s, charger now reports meter %d, reason %s",
+			request.TransactionId, chargePointId, transaction.Reason, transaction.TimeStop.Format(time.RFC3339), request.MeterStop, request.Reason))
+		eventMessage := &internal.EventMessage{
+			ChargePointId: chargePointId,
+			ConnectorId:   transaction.ConnectorId,
+			LocationId:    state.model.LocationId,
+			Evse:          state.EvseId(transaction.ConnectorId),
+			TransactionId: request.TransactionId,
+			Username:      transaction.Username,
+			IdTag:         transaction.IdTag,
+			Info:          fmt.Sprintf("late stop after the system closed the transaction as %q", transaction.Reason),
+			Payload:       request,
+		}
+		go h.notifyEventListeners(internal.Alert, eventMessage)
+	}
 
 	if meterValues != nil {
 		transaction.MeterValues = meterValues
@@ -1425,7 +1451,7 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 	if meterValue != nil {
 		transaction.MeterStop = meterValue.Value
 		transaction.TimeStop = meterValue.Time
-		transaction.Reason = "stopped by system"
+		transaction.Reason = reasonStoppedBySystem
 		// the samples are deleted once the transaction is saved, so this is the only
 		// chance to keep the consumption curve on the transaction, as a normal stop does
 		if meterValues, _ := h.database.ReadAllTransactionMeterValues(transaction.Id); meterValues != nil {
@@ -1435,7 +1461,7 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 		// no meter value ever arrived, so no energy was delivered and no time can be
 		// attributed; stopping at the start time keeps the duration out of billing
 		transaction.TimeStop = transaction.TimeStart
-		transaction.Reason = "aborted by system"
+		transaction.Reason = reasonAbortedBySystem
 	}
 
 	if meterValue != nil {
@@ -1462,8 +1488,23 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 	// and crash the process on a concurrent map write
 	h.mux.Lock()
 	state, _ := h.getChargePoint(transaction.ChargePointId)
+	abortedWhileActive := false
+	var connectorStatus string
 	if state != nil {
 		state.unregisterTransaction(transaction.Id)
+
+		// trace the dangerous case: the sweep is closing a transaction the charger may still
+		// consider live. The connector's last reported status is the only in-band signal here,
+		// and a charging status means an active session is being aborted and an occupied
+		// connector freed - the car keeps drawing power with no record kept, and the connector
+		// is offered to the next driver
+		if connector := h.getConnector(state, transaction.ConnectorId); connector != nil {
+			connector.Lock()
+			connectorStatus = connector.Status
+			connector.Unlock()
+			abortedWhileActive = isActiveChargingStatus(connectorStatus)
+		}
+
 		h.releaseConnector(state, transaction)
 		// a charge point that went silent sends neither StopTransaction nor a StatusNotification,
 		// the two places that zero this gauge, so it would stay stuck on the last reading
@@ -1485,15 +1526,43 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 		h.logger.Error("delete transaction meter values", err)
 	}
 
+	info := fmt.Sprintf("transaction was %s", transaction.Reason)
+	if abortedWhileActive {
+		// distinct warning so this is greppable apart from the routine close of a dead session
+		h.logger.Warn(fmt.Sprintf("transaction #%d on %s closed by system while connector %d still reports %s: session may be live on the charger",
+			transaction.Id, transaction.ChargePointId, transaction.ConnectorId, connectorStatus))
+		info = fmt.Sprintf("%s while connector still reports %s", info, connectorStatus)
+	}
+
 	eventMessage := &internal.EventMessage{
 		ChargePointId: transaction.ChargePointId,
 		ConnectorId:   transaction.ConnectorId,
 		TransactionId: transaction.Id,
 		Username:      transaction.Username,
+		Status:        connectorStatus,
 		Time:          h.getTime(),
-		Info:          fmt.Sprintf("transaction was %s", transaction.Reason),
+		Info:          info,
 	}
 	go h.notifyEventListeners(internal.Alert, eventMessage)
+}
+
+// isActiveChargingStatus reports whether a connector status means an EV is still in a charging
+// session - charging, or paused by either side. Preparing and Finishing are occupied but not
+// actively charging, so they are not treated as an aborted-while-active session.
+// isSystemClosedReason reports whether a stored transaction reason was written by the sweep rather
+// than by the charge point, so a StopTransaction landing on it can be recognised as a late stop.
+func isSystemClosedReason(reason string) bool {
+	return reason == reasonStoppedBySystem || reason == reasonAbortedBySystem
+}
+
+func isActiveChargingStatus(status string) bool {
+	switch status {
+	case string(core.ChargePointStatusCharging),
+		string(core.ChargePointStatusSuspendedEV),
+		string(core.ChargePointStatusSuspendedEVSE):
+		return true
+	}
+	return false
 }
 
 // releaseConnector clears the connector pointer left behind by a transaction the sweeper closed.

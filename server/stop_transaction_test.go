@@ -151,6 +151,74 @@ func TestOnStopTransactionWritesTransactionBeforeConnector(t *testing.T) {
 	}
 }
 
+// TestOnStopTransactionTracesLateStopAfterSystemClose covers a StopTransaction arriving for a
+// transaction the sweep had already aborted: the session was still live on the charger, so the
+// premature close must be traced, and the real figures must still overwrite the system ones.
+func TestOnStopTransactionTracesLateStopAfterSystemClose(t *testing.T) {
+	db := &stopStubDB{
+		transaction: &entity.Transaction{
+			Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+			MeterStart: 0, MeterStop: 0, IsFinished: true,
+			Reason:    reasonAbortedBySystem,
+			TimeStart: time.Now().UTC().Add(-time.Hour),
+		},
+	}
+	h := newStopHandler(t, db, 1)
+	logger := &capturingLogger{}
+	h.logger = logger
+
+	_, err := h.OnStopTransaction("CP1", &core.StopTransactionRequest{
+		TransactionId: 1,
+		MeterStop:     35708,
+		Timestamp:     types.NewDateTime(time.Now().UTC()),
+		Reason:        core.ReasonLocal,
+	})
+	if err != nil {
+		t.Fatalf("OnStopTransaction: %v", err)
+	}
+
+	if !logger.has("late StopTransaction for transaction #1") {
+		t.Errorf("expected a late-stop trace, got warns %v", logger.warns)
+	}
+	// the real stop must still land: overwrite the aborted figures
+	if db.transaction.MeterStop != 35708 {
+		t.Errorf("meter stop = %d, want 35708 (real stop must overwrite the system close)", db.transaction.MeterStop)
+	}
+	if db.transaction.Reason != string(core.ReasonLocal) {
+		t.Errorf("reason = %q, want %q", db.transaction.Reason, core.ReasonLocal)
+	}
+}
+
+// TestOnStopTransactionDuplicateStopIsNotTracedAsLate keeps the late-stop trace specific to system
+// closes: an ordinary repeated StopTransaction (the charger's own earlier stop) must not be flagged.
+func TestOnStopTransactionDuplicateStopIsNotTracedAsLate(t *testing.T) {
+	db := &stopStubDB{
+		transaction: &entity.Transaction{
+			Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+			MeterStart: 1000, MeterStop: 2500, IsFinished: true,
+			Reason:    string(core.ReasonLocal),
+			TimeStart: time.Now().UTC().Add(-time.Hour),
+		},
+	}
+	h := newStopHandler(t, db, 1)
+	logger := &capturingLogger{}
+	h.logger = logger
+
+	_, err := h.OnStopTransaction("CP1", &core.StopTransactionRequest{
+		TransactionId: 1,
+		MeterStop:     2500,
+		Timestamp:     types.NewDateTime(time.Now().UTC()),
+		Reason:        core.ReasonLocal,
+	})
+	if err != nil {
+		t.Fatalf("OnStopTransaction: %v", err)
+	}
+
+	if logger.has("late StopTransaction") {
+		t.Errorf("an ordinary duplicate stop must not be traced as late, got warns %v", logger.warns)
+	}
+}
+
 // TestOnStopTransactionReleasesConnectorOnDuplicateStop covers the early return for a transaction
 // that is already finished: the connector still has to come free, or a repeated StopTransaction
 // would leave it pinned to a closed transaction.
