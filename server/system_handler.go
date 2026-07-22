@@ -785,6 +785,16 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 
 	transactionId := request.TransactionId
 	if transactionId == nil {
+		// transactionId is optional in 1.6; a charger that reports periodically on
+		// its own (typically with trigger_message disabled) omits it. Recover the
+		// running transaction from the connector so the readings are still recorded
+		// instead of dropped.
+		if request.ConnectorId > 0 && connector.CurrentTransactionId >= 0 {
+			tid := connector.CurrentTransactionId
+			transactionId = &tid
+		}
+	}
+	if transactionId == nil {
 		h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("%v", request.MeterValue))
 		// check, if we received a triggered message, need to unregister connector
 		for _, sampledValues := range request.MeterValue {
