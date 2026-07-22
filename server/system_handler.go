@@ -5,6 +5,7 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 	"evsys/metrics/counters"
+	"evsys/ocpp"
 	"evsys/ocpp/v16/core"
 	"evsys/ocpp/v16/firmware"
 	"evsys/ocpp/v16/localauth"
@@ -46,6 +47,11 @@ type BillingService interface {
 
 type ErrorListener interface {
 	OnError(data *entity.ErrorData)
+}
+
+// RequestSender sends a proactive OCPP request to a connected charge point.
+type RequestSender interface {
+	SendRequest(clientId string, request ocpp.Request) (string, error)
 }
 
 type ChargePointState struct {
@@ -105,11 +111,15 @@ type SystemHandler struct {
 	eventListeners  []internal.EventHandler
 	trigger         *Trigger
 	protocolAdapter *ProtocolAdapter // Adapter for converting between OCPP versions
+	server          RequestSender    // used to push proactive requests to charge points
 	debug           bool
 	acceptTags      bool
 	acceptPoints    bool
-	location        *time.Location
-	mux             sync.Mutex
+	// meterSampleInterval, in seconds, is pushed to a charge point on boot to re-assert periodic
+	// metering; 0 disables the push
+	meterSampleInterval int
+	location            *time.Location
+	mux                 sync.Mutex
 
 	// consumedSeries remembers which label pairs the consumed power gauge currently holds, so a
 	// group that drops out of the daily aggregation - yesterday's sessions after midnight - is
@@ -182,6 +192,14 @@ func (h *SystemHandler) AddEventListener(eventListener internal.EventHandler) {
 
 func (h *SystemHandler) SetTrigger(trigger *Trigger) {
 	h.trigger = trigger
+}
+
+func (h *SystemHandler) SetServer(server RequestSender) {
+	h.server = server
+}
+
+func (h *SystemHandler) SetMeterSampleInterval(seconds int) {
+	h.meterSampleInterval = seconds
 }
 
 func (h *SystemHandler) SetErrorListener(listener ErrorListener) {
@@ -446,10 +464,34 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 
 	if regStatus == core.RegistrationStatusAccepted {
 		go h.reconcileChargePointTransactions(chargePointId)
+		go h.enforceMeterValueInterval(chargePointId, state.triggerMessage)
 	}
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, string(regStatus))
 	return core.NewBootNotificationResponse(types.NewDateTime(h.getTime()), defaultHeartbeatInterval, regStatus), nil
+}
+
+// enforceMeterValueInterval re-asserts periodic metering after a boot. A charge point that comes
+// back with MeterValueSampleInterval reset to 0 stops reporting meter values on its own, and with
+// triggering disabled nothing else refreshes the transaction, so the sweep then aborts live
+// sessions. Pushing the configured interval on every boot keeps that from happening silently. It
+// only applies to charge points with triggering off, which are the ones that depend on the charger
+// reporting by itself; where triggering is on the server polls and the interval is irrelevant. It
+// is a no-op unless meter_value_sample_interval is set in the config.
+func (h *SystemHandler) enforceMeterValueInterval(chargePointId string, triggerMessage bool) {
+	if triggerMessage || h.meterSampleInterval <= 0 || h.server == nil {
+		return
+	}
+	request := &core.ChangeConfigurationRequest{
+		Key:   "MeterValueSampleInterval",
+		Value: strconv.Itoa(h.meterSampleInterval),
+	}
+	if _, err := h.server.SendRequest(chargePointId, request); err != nil {
+		h.logger.Error(fmt.Sprintf("set meter value interval on %s", chargePointId), err)
+		return
+	}
+	h.logger.FeatureEvent(core.ChangeConfigurationFeatureName, chargePointId,
+		fmt.Sprintf("MeterValueSampleInterval=%d", h.meterSampleInterval))
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {

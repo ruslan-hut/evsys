@@ -4,6 +4,7 @@ is_debug: false
 time_zone: ${TIME_ZONE}
 accept_unknown_tag: false
 accept_unknown_chp: false
+meter_value_sample_interval: 15
 listen:
   type: port
   bind_ip: 0.0.0.0

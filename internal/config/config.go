@@ -11,7 +11,12 @@ type Config struct {
 	TimeZone         string `yaml:"time_zone" env-default:"Europe/Madrid"`
 	AcceptUnknownTag bool   `yaml:"accept_unknown_tag" env-default:"false"`
 	AcceptUnknownChp bool   `yaml:"accept_unknown_chp" env-default:"false"`
-	Listen           struct {
+	// MeterValueSampleInterval, in seconds, is re-asserted on every BootNotification via
+	// ChangeConfiguration. A charger that reboots with its interval reset to 0 stops sending
+	// meter values on its own; pushing this keeps that from silently starving the sweep. 0
+	// disables the push and leaves the charger's own configuration untouched.
+	MeterValueSampleInterval int `yaml:"meter_value_sample_interval" env-default:"0"`
+	Listen                   struct {
 		Type     string `yaml:"type" env-default:"port"`
 		BindIP   string `yaml:"bind_ip" env-default:"0.0.0.0"`
 		Port     string `yaml:"port" env-default:"5000"`

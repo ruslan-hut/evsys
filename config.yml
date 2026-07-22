@@ -4,6 +4,9 @@ is_debug: true
 time_zone: Europe/Madrid
 accept_unknown_tag: false
 accept_unknown_chp: false
+# seconds; re-asserted on each BootNotification so a charger that reboots with sampling
+# reset to 0 keeps reporting meter values. 0 disables the push.
+meter_value_sample_interval: 60
 listen:
   type: port
   bind_ip: 0.0.0.0

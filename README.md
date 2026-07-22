@@ -25,6 +25,7 @@ is_debug: false
 time_zone: UTC
 accept_unknown_tag: true
 accept_unknown_chp: true
+meter_value_sample_interval: 60  # seconds; re-asserted on each boot, 0 disables
 listen:
   type: port
   bind_ip: 0.0.0.0
