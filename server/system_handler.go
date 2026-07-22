@@ -1281,9 +1281,11 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		h.logger.Error("get unfinished transactions", err)
 		return
 	}
-	for _, transaction := range transactions {
-		h.logger.Warn(fmt.Sprintf("transaction #%v was not finished correctly", transaction.Id))
-		h.finishAbandonedTransaction(transaction)
+	for _, swept := range transactions {
+		idle := now.Sub(swept.LastActivity).Round(time.Second)
+		h.logger.Warn(fmt.Sprintf("transaction #%v closed by sweep: %s (idle %s, last activity %s)",
+			swept.Id, swept.Cause, idle, swept.LastActivity.Format(time.RFC3339)))
+		h.finishAbandonedTransaction(&swept.Transaction)
 	}
 	h.mux.Lock()
 	h.updateActiveTransactionsCounter()

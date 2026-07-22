@@ -125,6 +125,8 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 		// meterAgo of 0 means no meter value at all
 		meterAgo time.Duration
 		swept    bool
+		// cause is the sweep_cause the pipeline is expected to tag a swept row with
+		cause string
 	}{
 		{
 			name:       "live session reporting meter values is left alone",
@@ -144,6 +146,7 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			pointer:    1,
 			startedAgo: 30 * time.Minute,
 			swept:      true,
+			cause:      "no activity from the charge point",
 		},
 		{
 			name:       "pinned connector whose meter values dried up is swept",
@@ -151,6 +154,7 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			startedAgo: 2 * time.Hour,
 			meterAgo:   30 * time.Minute,
 			swept:      true,
+			cause:      "no activity from the charge point",
 		},
 		{
 			// the regression: OnStopTransaction clears the connector and persists it before it
@@ -167,6 +171,7 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			startedAgo: time.Hour,
 			meterAgo:   10 * time.Minute,
 			swept:      true,
+			cause:      "connector released without a stop",
 		},
 		{
 			name:        "missing connector with recent activity is left alone",
@@ -180,6 +185,7 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			noConnector: true,
 			startedAgo:  time.Hour,
 			swept:       true,
+			cause:       "no activity from the charge point",
 		},
 		{
 			name:       "finished transaction is never returned",
@@ -223,6 +229,14 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			if !test.swept && len(got) != 0 {
 				t.Fatalf("expected the transaction to be left alone, got %d", len(got))
 			}
+			if test.swept {
+				if got[0].Cause != test.cause {
+					t.Errorf("sweep_cause = %q, want %q", got[0].Cause, test.cause)
+				}
+				if got[0].LastActivity.IsZero() {
+					t.Error("last_activity not populated on swept transaction")
+				}
+			}
 		})
 	}
 }
@@ -254,13 +268,19 @@ func TestGetUnfinishedTransactionsStripsJoinFields(t *testing.T) {
 		t.Errorf("transaction decoded wrong: %+v", got[0])
 	}
 
+	// sweep_cause and last_activity are computed for the caller to log, and ride on the
+	// wrapper rather than the transaction; writing the transaction back must not persist them.
+	if err := db.UpdateTransaction(&got[0].Transaction); err != nil {
+		t.Fatalf("UpdateTransaction: %v", err)
+	}
+
 	var raw bson.M
 	withCollection(t, db, collectionTransactions, func(c *mongo.Collection) {
 		if err := c.FindOne(db.ctx, bson.M{"transaction_id": 7}).Decode(&raw); err != nil {
 			t.Fatalf("read back: %v", err)
 		}
 	})
-	for _, field := range []string{"connector", "meter", "last_activity"} {
+	for _, field := range []string{"connector", "meter", "last_activity", "sweep_cause"} {
 		if _, ok := raw[field]; ok {
 			t.Errorf("pipeline field %q leaked into the stored document", field)
 		}

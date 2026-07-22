@@ -37,6 +37,15 @@ type Transaction struct {
 	mutex           sync.Mutex
 }
 
+// SweptTransaction is an unfinished transaction the sweep may close, tagged with why the
+// aggregation selected it. Cause and LastActivity are computed by the pipeline and are not part
+// of the stored transaction document; the embedded Transaction is what gets written back.
+type SweptTransaction struct {
+	Transaction  `bson:",inline"`
+	Cause        string    `bson:"sweep_cause"`
+	LastActivity time.Time `bson:"last_activity"`
+}
+
 func (t *Transaction) Lock() {
 	t.mutex.Lock()
 }

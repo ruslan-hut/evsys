@@ -780,7 +780,7 @@ releasedBefore keeps the sweeper off those until the charge point has had a chan
 
 Returns a slice of pointers to unfinished Transaction entities, or an error if the operation fails.
 */
-func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Time) ([]*entity.Transaction, error) {
+func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Time) ([]*entity.SweptTransaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -869,7 +869,26 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 			}},
 		},
 		{
-			{"$unset", bson.A{"connector", "meter", "last_activity"}},
+			// classify why this row was selected, while the connector join is still
+			// available: a connector that no longer points here means the session was
+			// released without a stop landing, anything else means it just went silent
+			{"$addFields", bson.D{
+				{"sweep_cause", bson.D{
+					{"$cond", bson.A{
+						bson.D{{"$ne", bson.A{
+							"$transaction_id",
+							bson.D{{"$ifNull", bson.A{"$connector.current_transaction_id", "$transaction_id"}}},
+						}}},
+						"connector released without a stop",
+						"no activity from the charge point",
+					}},
+				}},
+			}},
+		},
+		{
+			// last_activity and sweep_cause survive for the caller to log; they are not
+			// stored, the caller writes back only the embedded transaction
+			{"$unset", bson.A{"connector", "meter"}},
 		},
 	}
 
@@ -878,7 +897,7 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 	if err != nil {
 		return nil, err
 	}
-	var transactions []*entity.Transaction
+	var transactions []*entity.SweptTransaction
 	if err = cursor.All(m.ctx, &transactions); err != nil {
 		return nil, err
 	}
