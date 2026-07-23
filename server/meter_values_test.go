@@ -207,3 +207,128 @@ func TestOnMeterValuesDropsWithoutActiveTransaction(t *testing.T) {
 		t.Fatalf("stored %d meter values, want 0", len(db.stored))
 	}
 }
+
+// newElectricalHandler builds the handler used by the electrical-measurand
+// tests, with a transaction already running on connector 1.
+func newElectricalHandler() (*SystemHandler, *meterStubDB) {
+	db := &meterStubDB{transaction: &entity.Transaction{Id: 1, MeterStart: 1000}}
+	h := &SystemHandler{
+		chargePoints: map[string]*ChargePointState{},
+		lastMeter:    map[int]*entity.TransactionMeter{},
+		database:     db,
+		billing:      meterStubBilling{},
+		logger:       meterStubLogger{},
+	}
+	h.chargePoints["CP1"] = newChargePointState(&entity.ChargePoint{Id: "CP1"})
+	return h, db
+}
+
+func electricalRequest(values ...types.SampledValue) *core.MeterValuesRequest {
+	transactionId := 1
+	// the energy register drives whether a reading is stored at all
+	values = append(values, types.SampledValue{
+		Value:     "1500",
+		Measurand: types.MeasurandEnergyActiveImportRegister,
+		Unit:      types.UnitOfMeasureWh,
+	})
+	return &core.MeterValuesRequest{
+		ConnectorId:   1,
+		TransactionId: &transactionId,
+		MeterValue: []types.MeterValue{{
+			Timestamp:    types.NewDateTime(time.Now()),
+			SampledValue: values,
+		}},
+	}
+}
+
+// Power alone cannot say whether a session was held back by the limit we set,
+// by the charge point's hardware or by the car. Voltage and current can, so
+// they have to survive ingestion.
+func TestOnMeterValuesStoresElectricalMeasurands(t *testing.T) {
+	h, db := newElectricalHandler()
+
+	request := electricalRequest(
+		types.SampledValue{Value: "497.5", Measurand: types.MeasurandVoltage, Unit: types.UnitOfMeasureV},
+		types.SampledValue{Value: "209.3", Measurand: types.MeasurandCurrentImport, Unit: types.UnitOfMeasureA},
+		types.SampledValue{Value: "210", Measurand: types.MeasurandCurrentOffered, Unit: types.UnitOfMeasureA},
+	)
+	if _, err := h.OnMeterValues("CP1", request); err != nil {
+		t.Fatalf("OnMeterValues: %v", err)
+	}
+
+	if len(db.stored) != 1 {
+		t.Fatalf("stored %d meter values, want 1", len(db.stored))
+	}
+	stored := db.stored[0]
+	if stored.Voltage != 497.5 {
+		t.Errorf("voltage = %v, want 497.5", stored.Voltage)
+	}
+	if stored.CurrentImport != 209.3 {
+		t.Errorf("current import = %v, want 209.3", stored.CurrentImport)
+	}
+	if stored.CurrentOffered != 210 {
+		t.Errorf("current offered = %v, want 210", stored.CurrentOffered)
+	}
+}
+
+// A charge point reporting one sample per phase must not have the reading
+// decided by whichever phase happened to be serialized last: the highest is the
+// one that binds against a per-phase limit.
+func TestOnMeterValuesKeepsHighestPhase(t *testing.T) {
+	h, db := newElectricalHandler()
+
+	request := electricalRequest(
+		types.SampledValue{Value: "30", Measurand: types.MeasurandCurrentImport, Phase: types.PhaseL1},
+		types.SampledValue{Value: "32", Measurand: types.MeasurandCurrentImport, Phase: types.PhaseL2},
+		types.SampledValue{Value: "29", Measurand: types.MeasurandCurrentImport, Phase: types.PhaseL3},
+	)
+	if _, err := h.OnMeterValues("CP1", request); err != nil {
+		t.Fatalf("OnMeterValues: %v", err)
+	}
+
+	if got := db.stored[0].CurrentImport; got != 32 {
+		t.Errorf("current import = %v, want 32 (highest phase)", got)
+	}
+}
+
+// A DC charge point may report its own grid connection as well as its output.
+// An Inlet reading says nothing about what reached the car, so recording it
+// would make the very comparison these fields exist for meaningless.
+func TestOnMeterValuesIgnoresGridSideReadings(t *testing.T) {
+	h, db := newElectricalHandler()
+
+	request := electricalRequest(
+		types.SampledValue{Value: "400", Measurand: types.MeasurandVoltage, Location: types.LocationInlet},
+		types.SampledValue{Value: "497.5", Measurand: types.MeasurandVoltage, Location: types.LocationOutlet},
+		types.SampledValue{Value: "180", Measurand: types.MeasurandCurrentImport, Location: types.LocationInlet},
+	)
+	if _, err := h.OnMeterValues("CP1", request); err != nil {
+		t.Fatalf("OnMeterValues: %v", err)
+	}
+
+	stored := db.stored[0]
+	if stored.Voltage != 497.5 {
+		t.Errorf("voltage = %v, want the outlet reading 497.5", stored.Voltage)
+	}
+	if stored.CurrentImport != 0 {
+		t.Errorf("current import = %v, want 0: only a grid-side reading was offered", stored.CurrentImport)
+	}
+}
+
+// Charge points that report none of these must still store their readings.
+func TestOnMeterValuesWithoutElectricalMeasurands(t *testing.T) {
+	h, db := newElectricalHandler()
+
+	if _, err := h.OnMeterValues("CP1", electricalRequest()); err != nil {
+		t.Fatalf("OnMeterValues: %v", err)
+	}
+
+	stored := db.stored[0]
+	if stored.Voltage != 0 || stored.CurrentImport != 0 || stored.CurrentOffered != 0 {
+		t.Errorf("expected zero electrical readings, got %v/%v/%v",
+			stored.Voltage, stored.CurrentImport, stored.CurrentOffered)
+	}
+	if stored.Value != 1500 {
+		t.Errorf("stored value = %d, want 1500", stored.Value)
+	}
+}

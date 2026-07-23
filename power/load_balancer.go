@@ -5,6 +5,7 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 	"evsys/ocpp"
+	"evsys/ocpp/v16/core"
 	"evsys/ocpp/v16/smartcharging"
 	"fmt"
 	"sync"
@@ -19,6 +20,11 @@ const (
 	// it delays nothing; it only has to be generous enough that a slow link is
 	// not reported as silence.
 	profileResponseTimeout = 30 * time.Second
+	// stackLevelRetries is how many times a rejected profile is retried a stack
+	// level lower. One step is enough for the off-by-one in the OCPP 1.6
+	// definition of ChargeProfileMaxStackLevel; more would just walk the whole
+	// range against a charge point rejecting for some other reason.
+	stackLevelRetries = 1
 )
 
 // profileStatus is the shape shared by the SetChargingProfile and
@@ -34,28 +40,42 @@ const profileAccepted = "Accepted"
 var powerSlots = []int{330, 195, 145, 115}
 
 type LoadBalancer struct {
-	database Repository
-	server   Handler
-	log      internal.LogHandler
-	mutex    sync.Mutex
+	database     Repository
+	server       Handler
+	log          internal.LogHandler
+	capabilities *capabilityStore
+	mutex        sync.Mutex
 }
 
 func NewLoadBalancer(database Repository, server Handler, log internal.LogHandler) *LoadBalancer {
 	return &LoadBalancer{
-		database: database,
-		server:   server,
-		log:      log,
-		mutex:    sync.Mutex{},
+		database:     database,
+		server:       server,
+		log:          log,
+		capabilities: newCapabilityStore(),
+		mutex:        sync.Mutex{},
 	}
 }
 
+// OnChargePointBoot runs on its own goroutine: it reads the charge point's smart
+// charging configuration, which is a round trip and must not hold up the
+// connection's read pump.
 func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) {
-	lb.mutex.Lock()
-	defer lb.mutex.Unlock()
+	go lb.onChargePointBoot(chargePointId)
+}
+
+func (lb *LoadBalancer) onChargePointBoot(chargePointId string) {
+	// getLocation only reads fields fixed at construction, so it is safe to call
+	// before taking the balancer lock - and discovery must not hold that lock
+	// while it waits on the network.
 	location, _ := lb.getLocation(chargePointId)
 	if location == nil {
 		return
 	}
+	lb.discoverCapabilities(chargePointId)
+
+	lb.mutex.Lock()
+	defer lb.mutex.Unlock()
 	var request ocpp.Request
 	var description string
 	if location.DefaultPowerLimit == 0 {
@@ -66,17 +86,62 @@ func (lb *LoadBalancer) OnChargePointBoot(chargePointId string) {
 		request = smartcharging.NewSetChargingProfileRequest(0, smartcharging.NewDefaultChargingProfile(location.DefaultPowerLimit))
 	}
 	lb.log.FeatureEvent(featureName, chargePointId, description)
-	if err := lb.sendProfile(chargePointId, description, request); err != nil {
+	if err := lb.sendProfile(chargePointId, description, request, nil); err != nil {
 		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error sending request: %s", err))
+	}
+}
+
+// ensureCapabilities reads a charge point's smart charging limits if we do not
+// already have them. Nothing is persisted between runs of the central system,
+// and a charge point only reports its configuration when asked, so without this
+// a restart would leave every charge point on the fallback defaults until it
+// next rebooted - which, for a charge point that stays up, may be never.
+//
+// A charge point that does not answer is not asked again for
+// discoveryRetryInterval, so a mute charger costs one timeout rather than one
+// per session event.
+func (lb *LoadBalancer) ensureCapabilities(chargePointId string) {
+	if !lb.capabilities.beginDiscovery(chargePointId, time.Now(), discoveryRetryInterval) {
+		return
+	}
+	lb.discoverCapabilities(chargePointId)
+}
+
+// discoverCapabilities asks the charge point what charging profiles it will
+// accept, so we stop guessing at the stack level and the rate unit.
+func (lb *LoadBalancer) discoverCapabilities(chargePointId string) {
+	request := core.NewGetConfigurationRequest([]string{keyMaxStackLevel, keyAllowedRateUnit})
+	payload, err := lb.server.SendRequestSync(chargePointId, request, capabilityTimeout)
+	if err != nil {
+		lb.log.FeatureEvent(featureName, chargePointId,
+			fmt.Sprintf("smart charging configuration unavailable, using defaults: %s", err))
+		return
+	}
+	reported, err := parseCapabilities(payload)
+	if err != nil {
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("smart charging configuration: %s", err))
+		return
+	}
+	stored := lb.capabilities.record(chargePointId, reported)
+	lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf(
+		"smart charging configuration: %s=%d (using %d), %s=%s",
+		keyMaxStackLevel, reported.maxStackLevel, stored.maxStackLevel,
+		keyAllowedRateUnit, reported.allowedUnits))
+	if !reported.allowsCurrent {
+		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf(
+			"CANNOT ENFORCE POWER LIMITS: charge point accepts %s schedules only, and the balancer works in amperes",
+			reported.allowedUnits))
 	}
 }
 
 // sendProfile queues a charging profile request and logs the charge point's
 // verdict once it arrives. A charge point that rejects a profile keeps charging
 // at whatever its own hardware allows, which looks identical to a limit
-// correctly applied unless the response is read - so the verdict is recorded
-// even though nothing acts on it yet.
-func (lb *LoadBalancer) sendProfile(chargePointId, description string, request ocpp.Request) error {
+// correctly applied unless the response is read.
+//
+// onRejected, when set, runs on the same goroutine once the charge point has
+// refused the profile.
+func (lb *LoadBalancer) sendProfile(chargePointId, description string, request ocpp.Request, onRejected func(status string)) error {
 	response, release, err := lb.server.SendRequestWithResponse(chargePointId, request)
 	if err != nil {
 		return err
@@ -94,6 +159,9 @@ func (lb *LoadBalancer) sendProfile(chargePointId, description string, request o
 			if status.Status != profileAccepted {
 				lb.log.FeatureEvent(featureName, chargePointId,
 					fmt.Sprintf("%s: REJECTED by charge point, status %s", description, status.Status))
+				if onRejected != nil {
+					onRejected(status.Status)
+				}
 				return
 			}
 			lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("%s: accepted", description))
@@ -103,6 +171,48 @@ func (lb *LoadBalancer) sendProfile(chargePointId, description string, request o
 		}
 	}()
 	return nil
+}
+
+// sendTransactionProfile installs a session's power limit, stepping the stack
+// level down and retrying if the charge point refuses. OCPP 1.6 defines
+// ChargeProfileMaxStackLevel both as the highest usable level and as the number
+// of levels available, so a charge point reporting 10 may accept only 0..9. The
+// retry settles that against the hardware instead of guessing, and the working
+// level is remembered for later profiles.
+func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powerLimit int, connectorInfo string, retriesLeft int) error {
+	chargePointId := connector.ChargePointId
+	limits := lb.capabilities.get(chargePointId)
+	if limits.known && !limits.allowsCurrent {
+		return fmt.Errorf("charge point accepts %s schedules only", limits.allowedUnits)
+	}
+	stackLevel := limits.stackLevelFor(smartcharging.TxProfileStackLevel)
+	transactionId := connector.CurrentTransactionId
+
+	description := fmt.Sprintf("power limit %dA for %s at stack level %d", powerLimit, connectorInfo, stackLevel)
+	lb.log.FeatureEvent(featureName, chargePointId, "setting "+description)
+
+	request := smartcharging.NewSetChargingProfileRequest(
+		connector.Id, smartcharging.NewTransactionChargingProfile(
+			connector.Id, transactionId, powerLimit, stackLevel))
+
+	return lb.sendProfile(chargePointId, description, request, func(_ string) {
+		if retriesLeft <= 0 || stackLevel <= 0 {
+			return
+		}
+		if !lb.capabilities.lowerStackLevel(chargePointId, stackLevel-1) {
+			return
+		}
+		// The connector is read again rather than captured: retrying a limit for
+		// a session that has since stopped would install a profile for a
+		// transaction the charge point no longer has.
+		if connector.CurrentTransactionId != transactionId {
+			return
+		}
+		if err := lb.sendTransactionProfile(connector, powerLimit, connectorInfo, retriesLeft-1); err != nil {
+			lb.log.FeatureEvent(featureName, chargePointId,
+				fmt.Sprintf("retry at stack level %d failed: %s", stackLevel-1, err))
+		}
+	})
 }
 
 func (lb *LoadBalancer) OnSystemStart() {
@@ -138,6 +248,13 @@ func (lb *LoadBalancer) OnSystemStart() {
 }
 
 func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
+	// Before the lock: capabilities are read over the network, and a charge
+	// point that boots while the central system is down never sends the
+	// BootNotification that would otherwise have supplied them. Discovering
+	// here means every charge point learns its own limits on its first session
+	// after a restart, whether or not it announced itself.
+	lb.ensureCapabilities(chargePointId)
+
 	lb.mutex.Lock()
 	defer lb.mutex.Unlock()
 	location, _ := lb.getLocation(chargePointId)
@@ -231,15 +348,7 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.C
 		if connector.EvseId != nil {
 			connectorInfo = fmt.Sprintf("EVSE %d / connector %d", *connector.EvseId, connector.Id)
 		}
-		description := fmt.Sprintf("power limit %dA for %s", powerLimit, connectorInfo)
-		lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("setting power limit to %dA for %s", powerLimit, connectorInfo))
-
-		request := smartcharging.NewSetChargingProfileRequest(
-			connector.Id, smartcharging.NewTransactionChargingProfile(
-				connector.Id,
-				connector.CurrentTransactionId,
-				powerLimit))
-		if err := lb.sendProfile(chargePointId, description, request); err != nil {
+		if err := lb.sendTransactionProfile(connector, powerLimit, connectorInfo, stackLevelRetries); err != nil {
 			return fmt.Errorf("sending profile update request: %s", err)
 		}
 		connector.CurrentPowerLimit = powerLimit

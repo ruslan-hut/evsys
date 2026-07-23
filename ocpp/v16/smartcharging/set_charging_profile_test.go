@@ -7,8 +7,8 @@ import "testing"
 // SetChargingProfile replace the profile already installed for the first, so the
 // first session silently loses its limit.
 func TestTransactionProfileIdIsUniquePerConnector(t *testing.T) {
-	first := NewTransactionChargingProfile(1, 100, 330)
-	second := NewTransactionChargingProfile(2, 101, 195)
+	first := NewTransactionChargingProfile(1, 100, 330, TxProfileStackLevel)
+	second := NewTransactionChargingProfile(2, 101, 195, TxProfileStackLevel)
 
 	if first.ChargingProfileId == second.ChargingProfileId {
 		t.Fatalf("connectors 1 and 2 share chargingProfileId %d", first.ChargingProfileId)
@@ -29,8 +29,8 @@ func TestTransactionProfileIdIsUniquePerConnector(t *testing.T) {
 // The same connector must keep the same id across updates, otherwise raising a
 // session's limit installs a second profile instead of replacing the first.
 func TestTransactionProfileIdIsStablePerConnector(t *testing.T) {
-	before := NewTransactionChargingProfile(2, 100, 115)
-	after := NewTransactionChargingProfile(2, 100, 330)
+	before := NewTransactionChargingProfile(2, 100, 115, TxProfileStackLevel)
+	after := NewTransactionChargingProfile(2, 100, 330, TxProfileStackLevel)
 
 	if before.ChargingProfileId != after.ChargingProfileId {
 		t.Fatalf("connector 2 changed chargingProfileId from %d to %d",

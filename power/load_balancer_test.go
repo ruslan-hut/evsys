@@ -1,8 +1,13 @@
 package power
 
 import (
+	"errors"
 	"evsys/entity"
 	"evsys/ocpp"
+	"evsys/ocpp/v16/core"
+	"evsys/ocpp/v16/smartcharging"
+	"evsys/types"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -40,25 +45,66 @@ func (s *stubRepo) UpdateTransactionPowerLimit(transactionId, limit int) error {
 }
 
 type stubServer struct {
-	// payload is the CallResult the stub charge point answers with; empty means
-	// it accepts the profile.
+	mutex sync.Mutex
+	// payload is the CallResult the stub charge point answers profiles with;
+	// empty means it accepts them.
 	payload string
+	// configPayload is the CallResult it answers GetConfiguration with; empty
+	// means the charge point does not answer at all.
+	configPayload string
+	// configCalls counts how many times its configuration was read.
+	configCalls int
+	// profiles records the charging profiles the balancer installed, in order.
+	profiles []*types.ChargingProfile
 }
 
 func (s *stubServer) SendRequest(_ string, _ ocpp.Request) (string, error) {
 	return "", nil
 }
 
+func (s *stubServer) SendRequestSync(_ string, request ocpp.Request, _ time.Duration) (string, error) {
+	if _, ok := request.(*core.GetConfigurationRequest); ok {
+		s.mutex.Lock()
+		defer s.mutex.Unlock()
+		s.configCalls++
+		if s.configPayload == "" {
+			return "", errors.New("no response")
+		}
+		return s.configPayload, nil
+	}
+	return `{"status":"Accepted"}`, nil
+}
+
+func (s *stubServer) configurationReads() int {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.configCalls
+}
+
 // SendRequestWithResponse answers immediately so the verdict goroutine the load
 // balancer spawns finishes within the test rather than sitting on its timeout.
-func (s *stubServer) SendRequestWithResponse(_ string, _ ocpp.Request) (<-chan string, func(), error) {
+func (s *stubServer) SendRequestWithResponse(_ string, request ocpp.Request) (<-chan string, func(), error) {
+	s.mutex.Lock()
 	payload := s.payload
+	if profile, ok := request.(*smartcharging.SetChargingProfileRequest); ok {
+		s.profiles = append(s.profiles, profile.ChargingProfile)
+	}
+	s.mutex.Unlock()
+
 	if payload == "" {
 		payload = `{"status":"Accepted"}`
 	}
 	response := make(chan string, 1)
 	response <- payload
 	return response, func() {}, nil
+}
+
+// installedProfiles returns a copy, since the balancer writes to the slice from
+// its verdict goroutines.
+func (s *stubServer) installedProfiles() []*types.ChargingProfile {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return append([]*types.ChargingProfile{}, s.profiles...)
 }
 
 // stubLog records feature events so a test can assert on what the load balancer
@@ -162,6 +208,238 @@ func TestUnreadableProfileResponseIsReported(t *testing.T) {
 	lb.CheckPowerLimit("chp1")
 
 	log.waitForEvent(t, "unreadable response")
+}
+
+func configResponse(maxStackLevel, allowedUnits string) string {
+	return `{"configurationKey":[` +
+		`{"key":"ChargeProfileMaxStackLevel","readonly":true,"value":"` + maxStackLevel + `"},` +
+		`{"key":"ChargingScheduleAllowedChargingRateUnit","readonly":true,"value":"` + allowedUnits + `"}]}`
+}
+
+// A charge point that caps the stack level below ours must not be sent profiles
+// it will refuse.
+func TestStackLevelClampedToReportedMaximum(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("3", "Current")
+	log := lb.log.(*stubLog)
+
+	lb.onChargePointBoot("chp1")
+	log.waitForEvent(t, "ChargeProfileMaxStackLevel=3")
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+	log.waitForEvent(t, "at stack level 3")
+
+	for _, profile := range server.installedProfiles() {
+		if profile.ChargingProfilePurpose != types.ChargingProfilePurposeTxProfile {
+			continue
+		}
+		if profile.StackLevel > 3 {
+			t.Fatalf("installed stack level %d, above the reported maximum of 3", profile.StackLevel)
+		}
+	}
+}
+
+// OCPP 1.6 does not say whether ChargeProfileMaxStackLevel is inclusive, so a
+// charge point reporting 10 may accept only 0..9. A rejection must be retried a
+// level lower rather than leaving the session unlimited.
+func TestRejectedProfileRetriesALevelLower(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	server.payload = `{"status":"Rejected"}`
+	log := lb.log.(*stubLog)
+
+	lb.onChargePointBoot("chp1")
+	log.waitForEvent(t, "ChargeProfileMaxStackLevel=10")
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+	log.waitForEvent(t, "at stack level 9")
+
+	levels := map[int]bool{}
+	for _, profile := range server.installedProfiles() {
+		if profile.ChargingProfilePurpose == types.ChargingProfilePurposeTxProfile {
+			levels[profile.StackLevel] = true
+		}
+	}
+	if !levels[10] || !levels[9] {
+		t.Fatalf("expected attempts at stack levels 10 and 9, got %v", levels)
+	}
+	// one step down only: a charge point rejecting for some other reason must
+	// not make the balancer walk the whole range
+	if levels[8] {
+		t.Fatalf("retried more than one level down: %v", levels)
+	}
+}
+
+// The retry must remember the level that worked, so the next session starts
+// there instead of taking the rejection again.
+func TestNegotiatedStackLevelIsRemembered(t *testing.T) {
+	lb, connectors := newTestBalancer(2)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	server.payload = `{"status":"Rejected"}`
+	log := lb.log.(*stubLog)
+
+	lb.onChargePointBoot("chp1")
+	log.waitForEvent(t, "ChargeProfileMaxStackLevel=10")
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+	log.waitForEvent(t, "at stack level 9")
+
+	if got := lb.capabilities.get("chp1").maxStackLevel; got != 9 {
+		t.Fatalf("remembered stack level %d, want 9", got)
+	}
+}
+
+// A charge point that accepts only Power schedules cannot be given an amperage
+// limit; saying so beats sending a profile that will be refused.
+func TestPowerOnlyChargePointIsReported(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Power")
+	log := lb.log.(*stubLog)
+
+	lb.onChargePointBoot("chp1")
+	log.waitForEvent(t, "CANNOT ENFORCE POWER LIMITS")
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+	log.waitForEvent(t, "accepts Power schedules only")
+
+	for _, profile := range server.installedProfiles() {
+		if profile.ChargingProfilePurpose == types.ChargingProfilePurposeTxProfile {
+			t.Fatal("installed a transaction profile the charge point cannot honour")
+		}
+	}
+}
+
+// A charge point that does not answer the configuration read must keep working
+// on the protocol defaults rather than losing its limits.
+func TestUnknownCapabilitiesFallBackToDefaults(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	log := lb.log.(*stubLog)
+
+	lb.onChargePointBoot("chp1") // stub answers no configuration
+	log.waitForEvent(t, "using defaults")
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	if got := connectors[0].CurrentPowerLimit; got != powerSlots[0] {
+		t.Fatalf("got %dA, want %dA", got, powerSlots[0])
+	}
+	log.waitForEvent(t, fmt.Sprintf("at stack level %d", smartcharging.TxProfileStackLevel))
+}
+
+// Nothing about a charge point's configuration survives a restart of the
+// central system, and a charge point that stays up sends no BootNotification to
+// prompt a fresh read. Its limits therefore have to be discovered on first use,
+// or a restart would leave every charge point on the fallback defaults forever.
+func TestCapabilitiesDiscoveredWithoutBootNotification(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("3", "Current")
+	log := lb.log.(*stubLog)
+
+	// no onChargePointBoot: the charge point was already connected
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	log.waitForEvent(t, "ChargeProfileMaxStackLevel=3")
+	log.waitForEvent(t, "at stack level 3")
+	if got := server.configurationReads(); got != 1 {
+		t.Fatalf("read the configuration %d times, want 1", got)
+	}
+}
+
+// Once read, the configuration is not read again on every session event.
+func TestCapabilitiesReadOnlyOnce(t *testing.T) {
+	lb, connectors := newTestBalancer(2)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+
+	for i := range connectors {
+		connectors[i].CurrentTransactionId = i
+		lb.CheckPowerLimit("chp1")
+	}
+	lb.CheckPowerLimit("chp1")
+
+	if got := server.configurationReads(); got != 1 {
+		t.Fatalf("read the configuration %d times, want 1", got)
+	}
+}
+
+// A charge point that does not answer must not be asked again on every start and
+// stop: each attempt costs a full timeout.
+func TestMuteChargePointIsNotReaskedImmediately(t *testing.T) {
+	lb, connectors := newTestBalancer(2)
+	server := lb.server.(*stubServer) // no configPayload: never answers
+
+	for i := range connectors {
+		connectors[i].CurrentTransactionId = i
+		lb.CheckPowerLimit("chp1")
+	}
+
+	if got := server.configurationReads(); got != 1 {
+		t.Fatalf("asked a mute charge point %d times, want 1 within the retry interval", got)
+	}
+	// and it is asked again once the interval has passed
+	if !lb.capabilities.beginDiscovery("chp1", time.Now().Add(discoveryRetryInterval+time.Second), discoveryRetryInterval) {
+		t.Fatal("mute charge point was never retried")
+	}
+}
+
+func TestCapabilityStoreLearnsCeilingWithoutBlockingDiscovery(t *testing.T) {
+	now := time.Now()
+
+	t.Run("a rejection does not count as having read the configuration", func(t *testing.T) {
+		store := newCapabilityStore()
+		store.lowerStackLevel("chp1", 9)
+
+		if !store.beginDiscovery("chp1", now, discoveryRetryInterval) {
+			t.Fatal("a rejected profile blocked the configuration read; a charge point " +
+				"that refuses everything would never be asked what it accepts")
+		}
+		if got := store.get("chp1").stackLevelFor(smartcharging.TxProfileStackLevel); got != 9 {
+			t.Fatalf("stack level %d, want the learned ceiling 9", got)
+		}
+	})
+
+	t.Run("a learned ceiling survives a later configuration read", func(t *testing.T) {
+		store := newCapabilityStore()
+		store.lowerStackLevel("chp1", 9)
+
+		reported, err := parseCapabilities(configResponse("10", "Current"))
+		if err != nil {
+			t.Fatalf("parseCapabilities: %v", err)
+		}
+		stored := store.record("chp1", reported)
+
+		if stored.maxStackLevel != 9 {
+			t.Fatalf("stack level %d, want 9: the charge point reports 10 every time, "+
+				"so discarding what its refusal taught us re-pays the rejection", stored.maxStackLevel)
+		}
+		if !stored.allowsCurrent {
+			t.Fatal("the reported rate unit was lost")
+		}
+	})
+
+	t.Run("a higher learned ceiling does not override a lower report", func(t *testing.T) {
+		store := newCapabilityStore()
+		store.lowerStackLevel("chp1", 9)
+
+		reported, err := parseCapabilities(configResponse("3", "Current"))
+		if err != nil {
+			t.Fatalf("parseCapabilities: %v", err)
+		}
+		if got := store.record("chp1", reported).maxStackLevel; got != 3 {
+			t.Fatalf("stack level %d, want the reported 3", got)
+		}
+	})
 }
 
 func TestSlotAssignmentSequence(t *testing.T) {

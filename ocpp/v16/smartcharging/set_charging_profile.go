@@ -50,18 +50,20 @@ func NewDefaultChargingProfile(limit int) *types.ChargingProfile {
 // another on the same multi-connector charge point.
 const txProfileIdBase = 10
 
-// txProfileStackLevel must not exceed the charge point's reported
-// ChargeProfileMaxStackLevel, or the profile is rejected outright.
-const txProfileStackLevel = 10
+// TxProfileStackLevel is the level we ask for when the charge point has not told
+// us its ChargeProfileMaxStackLevel. A profile above the reported maximum is
+// rejected outright, so callers should clamp this to whatever the charge point
+// advertised.
+const TxProfileStackLevel = 10
 
-func NewTransactionChargingProfile(connectorId, transactionId, limit int) *types.ChargingProfile {
+func NewTransactionChargingProfile(connectorId, transactionId, limit, stackLevel int) *types.ChargingProfile {
 	period := types.ChargingSchedulePeriod{
 		StartPeriod: 0,
 		Limit:       float64(limit),
 	}
 	return &types.ChargingProfile{
 		ChargingProfileId:      txProfileIdBase + connectorId,
-		StackLevel:             txProfileStackLevel,
+		StackLevel:             stackLevel,
 		TransactionId:          transactionId,
 		ChargingProfilePurpose: types.ChargingProfilePurposeTxProfile,
 		ChargingProfileKind:    types.ChargingProfileKindRelative,

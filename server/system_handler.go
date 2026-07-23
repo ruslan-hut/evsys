@@ -924,6 +924,20 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 				meter.PowerActive = utility.ToInt(value.Value)
 			}
 
+			// Voltage and current say whether a session was held back by the
+			// limit we set, by the charge point's own hardware or by the car -
+			// which a power figure on its own cannot distinguish.
+			if isVehicleSideReading(value) {
+				switch value.Measurand {
+				case types.MeasurandVoltage:
+					meter.Voltage = keepHigher(meter.Voltage, value.Value)
+				case types.MeasurandCurrentImport:
+					meter.CurrentImport = keepHigher(meter.CurrentImport, value.Value)
+				case types.MeasurandCurrentOffered:
+					meter.CurrentOffered = keepHigher(meter.CurrentOffered, value.Value)
+				}
+			}
+
 		}
 
 		if meter.Value > 0 {
@@ -951,6 +965,32 @@ func (h *SystemHandler) OnMeterValues(chargePointId string, request *core.MeterV
 	}
 
 	return core.NewMeterValuesResponse(), nil
+}
+
+// isVehicleSideReading reports whether a sample measures the side of the charge
+// point the vehicle draws from. A DC charge point may also report its own grid
+// connection, and an Inlet reading of 210A at 400V three-phase says nothing
+// about what reached the car. An unset location means the charge point did not
+// distinguish, which is the common case and the one we want.
+func isVehicleSideReading(value types.SampledValue) bool {
+	switch value.Location {
+	case "", types.LocationOutlet, types.LocationCable, types.LocationEV:
+		return true
+	default:
+		return false
+	}
+}
+
+// keepHigher folds a sampled reading into the value kept so far. A charge point
+// may report one sample per phase; the highest is the one that binds against a
+// per-phase limit, and single-phase and DC readings are unaffected because there
+// is only ever one sample.
+func keepHigher(current float64, sampled string) float64 {
+	value, err := strconv.ParseFloat(sampled, 64)
+	if err != nil || value < current {
+		return current
+	}
+	return value
 }
 
 func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core.StatusNotificationRequest) (*core.StatusNotificationResponse, error) {

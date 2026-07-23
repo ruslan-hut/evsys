@@ -183,6 +183,18 @@ func (pa *ProtocolAdapter) EntityToTransactionInfo(tx *entity.Transaction) v201.
 // METER VALUE ADAPTERS
 // ============================================================================
 
+// isVehicleSideReading201 reports whether a 2.0.1 sample measures the side of
+// the charge point the vehicle draws from, rather than its grid connection.
+// See isVehicleSideReading for why the distinction matters.
+func isVehicleSideReading201(value v201.SampledValue) bool {
+	switch value.Location {
+	case "", v201.LocationOutlet, v201.LocationCable, v201.LocationEV:
+		return true
+	default:
+		return false
+	}
+}
+
 // MeterValue201ToTransactionMeter converts OCPP 2.0.1 MeterValue to internal TransactionMeter
 func (pa *ProtocolAdapter) MeterValue201ToTransactionMeter(
 	meterValue v201.MeterValue,
@@ -211,6 +223,18 @@ func (pa *ProtocolAdapter) MeterValue201ToTransactionMeter(
 			tm.PowerActive = int(sampledValue.Value)
 		case v201.MeasurandSoC:
 			tm.BatteryLevel = int(sampledValue.Value)
+		case v201.MeasurandVoltage:
+			if isVehicleSideReading201(sampledValue) && sampledValue.Value > tm.Voltage {
+				tm.Voltage = sampledValue.Value
+			}
+		case v201.MeasurandCurrentImport:
+			if isVehicleSideReading201(sampledValue) && sampledValue.Value > tm.CurrentImport {
+				tm.CurrentImport = sampledValue.Value
+			}
+		case v201.MeasurandCurrentOffered:
+			if isVehicleSideReading201(sampledValue) && sampledValue.Value > tm.CurrentOffered {
+				tm.CurrentOffered = sampledValue.Value
+			}
 		}
 
 		// Handle unit of measure multiplier
