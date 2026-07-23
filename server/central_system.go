@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"evsys/billing"
 	"evsys/internal"
 	"evsys/internal/config"
@@ -33,6 +34,10 @@ import (
 	"time"
 )
 
+// apiResponseTimeout bounds how long a REST caller waits for a charge point to
+// answer the command it forwarded.
+const apiResponseTimeout = 10 * time.Second
+
 type CentralSystem struct {
 	server            *Server
 	api               *Api
@@ -45,7 +50,6 @@ type CentralSystem struct {
 	powerManager      PowerManager
 	location          *time.Location
 	supportedProtocol []string
-	pendingRequests   map[string]chan string
 	connections       sync.Map               // chargePointId → common.ProtocolVersion
 	featureRegistry   common.FeatureRegistry // Registry for all OCPP features
 	routingEnabled    bool                   // Flag to enable new routing (default: false for backward compatibility)
@@ -121,8 +125,8 @@ func (cs *CentralSystem) handleIncomingMessage(ws ocpp.WebSocket, data []byte) e
 			cs.logger.Warn(fmt.Sprintf("invalid message received from charge point %s: %s", chargePointId, string(data)))
 			return nil
 		}
-		if responseChan, ok := cs.pendingRequests[result.UniqueId]; ok {
-			responseChan <- result.Payload
+		if !cs.server.ResolveResponse(result.UniqueId, result.Payload) {
+			cs.logger.Debug(fmt.Sprintf("unmatched response from %s: %s", chargePointId, result.Payload))
 		}
 		return nil
 	}
@@ -326,29 +330,23 @@ func (cs *CentralSystem) handleApiRequest(w http.ResponseWriter, command Central
 		return err
 	}
 
-	id, err := cs.server.SendRequest(command.ChargePointId, request)
+	payload, err := cs.server.SendRequestSync(command.ChargePointId, request, apiResponseTimeout)
+	if errors.Is(err, ErrResponseTimeout) {
+		cs.logger.Warn(fmt.Sprintf("timeout waiting for response from %s", command.ChargePointId))
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	response := make(chan string)
-	cs.pendingRequests[id] = response
-
-	select {
-	case payload := <-response:
-		if payload == "" {
-			w.WriteHeader(http.StatusNoContent)
-		} else {
-			w.Header().Add("Content-Type", "application/json; charset=utf-8")
-			_, err = w.Write([]byte(payload))
-			if err != nil {
-				cs.logger.Error("cs command send response", err)
-			}
-		}
-	case <-time.After(10 * time.Second):
-		cs.logger.Warn(fmt.Sprintf("timeout waiting for response from %s", command.ChargePointId))
+	if payload == "" {
 		w.WriteHeader(http.StatusNoContent)
+		return nil
 	}
-	delete(cs.pendingRequests, id)
+	w.Header().Add("Content-Type", "application/json; charset=utf-8")
+	if _, err = w.Write([]byte(payload)); err != nil {
+		cs.logger.Error("cs command send response", err)
+	}
 
 	return nil
 }
@@ -492,7 +490,6 @@ func (cs *CentralSystem) Stop() {
 
 func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	cs := &CentralSystem{}
-	cs.pendingRequests = make(map[string]chan string)
 	cs.featureRegistry = common.GetGlobalRegistry()
 	cs.routingEnabled = false // Default: use legacy routing for backward compatibility
 

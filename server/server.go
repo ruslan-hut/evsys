@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"evsys/internal"
 	"evsys/internal/config"
 	"evsys/ocpp"
@@ -22,6 +23,10 @@ const (
 	wsEndpoint           = "/ws/:id"
 	featureNameWebSocket = "WebSocket"
 )
+
+// ErrResponseTimeout is returned when a charge point accepted a request but did
+// not answer it within the caller's deadline.
+var ErrResponseTimeout = errors.New("timeout waiting for response")
 
 type envelope struct {
 	recipient   string
@@ -47,6 +52,11 @@ type Server struct {
 	messageHandler func(ws ocpp.WebSocket, data []byte) error
 	logger         internal.LogHandler
 	watchdog       internal.StatusHandler
+	// pending maps a request's unique id to the caller waiting for its
+	// CallResult. Guarded by pendingMutex: entries are created on the caller's
+	// goroutine and resolved on the connection's read pump.
+	pending      map[string]chan string
+	pendingMutex sync.Mutex
 }
 
 type WebSocket struct {
@@ -191,6 +201,7 @@ func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
 		upgrader: websocket.Upgrader{Subprotocols: []string{}},
 		pool:     pool,
 		logger:   logger,
+		pending:  make(map[string]chan string),
 	}
 
 	// register itself as a router for httpServer handler
@@ -393,7 +404,9 @@ func (s *Server) SendResponse(ws ocpp.WebSocket, response ocpp.Response) error {
 	return nil
 }
 
-// SendRequest send request to the websocket and return the unique id of the request
+// SendRequest send request to the websocket and return the unique id of the request.
+// The charge point's answer is discarded; use SendRequestWithResponse or
+// SendRequestSync when the answer matters.
 func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, error) {
 	if !s.pool.recipientAvailable(clientId) {
 		return "", fmt.Errorf("%s is not available", clientId)
@@ -408,6 +421,79 @@ func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, err
 	}
 	s.pool.send <- env
 	return callRequest.UniqueId, nil
+}
+
+// SendRequestWithResponse queues a request and returns the channel that will
+// receive the charge point's raw CallResult payload. The error reports only
+// whether the request could be queued, so a caller can distinguish an offline
+// charge point from one that simply has not answered yet, and wait for the
+// answer off its hot path.
+//
+// release must be called once the caller stops listening, otherwise the pending
+// entry leaks.
+func (s *Server) SendRequestWithResponse(clientId string, request ocpp.Request) (response <-chan string, release func(), err error) {
+	if !s.pool.recipientAvailable(clientId) {
+		return nil, nil, fmt.Errorf("%s is not available", clientId)
+	}
+	callRequest, err := CreateCallRequest(request)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating call request: %s", err)
+	}
+	// Registered before the request is queued: a charge point on a fast link can
+	// answer before this function returns, and an answer that arrives with
+	// nobody registered is dropped.
+	channel := s.registerPending(callRequest.UniqueId)
+	s.pool.send <- &envelope{
+		recipient:   clientId,
+		callRequest: &callRequest,
+	}
+	return channel, func() { s.releasePending(callRequest.UniqueId) }, nil
+}
+
+// SendRequestSync queues a request and blocks until the charge point answers,
+// returning the raw CallResult payload. It reports ErrResponseTimeout if the
+// answer does not arrive within timeout.
+func (s *Server) SendRequestSync(clientId string, request ocpp.Request, timeout time.Duration) (string, error) {
+	response, release, err := s.SendRequestWithResponse(clientId, request)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	select {
+	case payload := <-response:
+		return payload, nil
+	case <-time.After(timeout):
+		return "", ErrResponseTimeout
+	}
+}
+
+// ResolveResponse hands a CallResult payload to the caller waiting on it and
+// reports whether anyone was waiting.
+func (s *Server) ResolveResponse(uniqueId, payload string) bool {
+	s.pendingMutex.Lock()
+	channel, ok := s.pending[uniqueId]
+	s.pendingMutex.Unlock()
+	if !ok {
+		return false
+	}
+	// The channel is buffered, so a caller that has already given up waiting
+	// cannot wedge the connection's read pump here.
+	channel <- payload
+	return true
+}
+
+func (s *Server) registerPending(uniqueId string) chan string {
+	channel := make(chan string, 1)
+	s.pendingMutex.Lock()
+	s.pending[uniqueId] = channel
+	s.pendingMutex.Unlock()
+	return channel
+}
+
+func (s *Server) releasePending(uniqueId string) {
+	s.pendingMutex.Lock()
+	delete(s.pending, uniqueId)
+	s.pendingMutex.Unlock()
 }
 
 type Status struct {

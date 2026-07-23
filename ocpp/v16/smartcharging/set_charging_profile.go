@@ -43,14 +43,25 @@ func NewDefaultChargingProfile(limit int) *types.ChargingProfile {
 	}
 }
 
-func NewTransactionChargingProfile(transactionId, limit int) *types.ChargingProfile {
+// txProfileIdBase offsets transaction profile ids clear of the default profile,
+// which uses id 1. OCPP 1.6 scopes chargingProfileId to the charge point rather
+// than to the connector, so every connector needs its own id: a shared id lets
+// the profile installed for one connector replace the one already installed for
+// another on the same multi-connector charge point.
+const txProfileIdBase = 10
+
+// txProfileStackLevel must not exceed the charge point's reported
+// ChargeProfileMaxStackLevel, or the profile is rejected outright.
+const txProfileStackLevel = 10
+
+func NewTransactionChargingProfile(connectorId, transactionId, limit int) *types.ChargingProfile {
 	period := types.ChargingSchedulePeriod{
 		StartPeriod: 0,
 		Limit:       float64(limit),
 	}
 	return &types.ChargingProfile{
-		ChargingProfileId:      10,
-		StackLevel:             10,
+		ChargingProfileId:      txProfileIdBase + connectorId,
+		StackLevel:             txProfileStackLevel,
 		TransactionId:          transactionId,
 		ChargingProfilePurpose: types.ChargingProfilePurposeTxProfile,
 		ChargingProfileKind:    types.ChargingProfileKindRelative,
