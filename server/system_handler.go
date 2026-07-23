@@ -15,6 +15,7 @@ import (
 	"evsys/utility"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -1201,9 +1202,14 @@ func (h *SystemHandler) OnGetConfiguration(chargePointId string, key string) (*c
 	if !ok {
 		return nil, fmt.Errorf("charge point not found")
 	}
+	// A comma-separated list asks for several keys in one round trip; a single
+	// key has no comma, so callers passing one keep working unchanged. An empty
+	// payload still asks for everything.
 	keys := make([]string, 0)
-	if key != "" {
-		keys = append(keys, key)
+	for _, name := range strings.Split(key, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			keys = append(keys, name)
+		}
 	}
 	request := core.NewGetConfigurationRequest(keys)
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get configuration: %v", request.Key))
@@ -1244,12 +1250,14 @@ func (h *SystemHandler) OnGetCompositeSchedule(chargePointId string, connectorId
 	if !ok {
 		return nil, fmt.Errorf("charge point not found")
 	}
-	duration, err := strconv.Atoi(payload)
+	query, err := parseCompositeScheduleQuery(payload)
 	if err != nil {
-		return nil, fmt.Errorf("invalid payload")
+		return nil, err
 	}
-	request := smartcharging.NewGetCompositeScheduleRequest(connectorId, duration)
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("get schedule: connector %d; duration %d", request.ConnectorId, request.Duration))
+	request := smartcharging.NewGetCompositeScheduleRequestInUnit(connectorId, query.Duration, query.ChargingRateUnit)
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf(
+		"get schedule: connector %d; duration %d; unit %q",
+		request.ConnectorId, request.Duration, request.ChargingRateUnit))
 	return request, nil
 }
 
@@ -1266,6 +1274,35 @@ func (h *SystemHandler) OnClearChargingProfile(chargePointId string, payload str
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId,
 		fmt.Sprintf("connector %d; purpose %v; stack level %d", request.ConnectorId, request.ChargingProfilePurpose, request.StackLevel))
 	return &request, nil
+}
+
+// compositeScheduleQuery is the object form of the GetCompositeSchedule payload.
+// A bare number is still accepted so callers that only pass a duration keep
+// working; the object form exists so a diagnostic read can pin the unit.
+type compositeScheduleQuery struct {
+	Duration         int                        `json:"duration"`
+	ChargingRateUnit types.ChargingRateUnitType `json:"chargingRateUnit,omitempty"`
+}
+
+// parseCompositeScheduleQuery accepts either `3600` or
+// `{"duration":3600,"chargingRateUnit":"A"}`.
+func parseCompositeScheduleQuery(payload string) (compositeScheduleQuery, error) {
+	if duration, err := strconv.Atoi(strings.TrimSpace(payload)); err == nil {
+		return compositeScheduleQuery{Duration: duration}, nil
+	}
+	var query compositeScheduleQuery
+	if err := json.Unmarshal([]byte(payload), &query); err != nil {
+		return query, fmt.Errorf("invalid payload")
+	}
+	if query.Duration <= 0 {
+		return query, fmt.Errorf("duration must be positive")
+	}
+	switch query.ChargingRateUnit {
+	case "", types.ChargingRateUnitAmperes, types.ChargingRateUnitWatts:
+		return query, nil
+	default:
+		return query, fmt.Errorf("unsupported charging rate unit %q", query.ChargingRateUnit)
+	}
 }
 
 func (h *SystemHandler) OnGetDiagnostics(chargePointId string, payload string) (*firmware.GetDiagnosticsRequest, error) {
