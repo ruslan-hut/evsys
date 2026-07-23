@@ -16,7 +16,14 @@ type Config struct {
 	// meter values on its own; pushing this keeps that from silently starving the sweep. 0
 	// disables the push and leaves the charger's own configuration untouched.
 	MeterValueSampleInterval int `yaml:"meter_value_sample_interval" env-default:"0"`
-	Listen                   struct {
+	// MeterValuesMeasurands lists the measurands the central system needs a charge point to
+	// include in periodic MeterValues, on top of whatever it already reports. Voltage and
+	// current are what separate a session limited by the load balancer from one limited by
+	// the hardware or the car, but a charger's default sample list is often just the energy
+	// register - so these are unioned into MeterValuesSampledData on every boot. Empty leaves
+	// the charger's own configuration untouched.
+	MeterValuesMeasurands []string `yaml:"meter_values_measurands"`
+	Listen                struct {
 		Type     string `yaml:"type" env-default:"port"`
 		BindIP   string `yaml:"bind_ip" env-default:"0.0.0.0"`
 		Port     string `yaml:"port" env-default:"5000"`

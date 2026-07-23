@@ -596,6 +596,7 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	systemHandler.SetTrigger(trigger)
 	systemHandler.SetServer(wsServer)
 	systemHandler.SetMeterSampleInterval(conf.MeterValueSampleInterval)
+	systemHandler.SetMeterMeasurands(conf.MeterValuesMeasurands)
 
 	err = systemHandler.OnStart()
 	if err != nil {

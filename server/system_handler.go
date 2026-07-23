@@ -22,6 +22,10 @@ import (
 
 var newTransactionId = 1
 
+// meterConfigTimeout bounds the boot-time read of a charge point's sample list.
+// Enforcement runs on its own goroutine, so this delays nothing else.
+const meterConfigTimeout = 15 * time.Second
+
 const (
 	defaultHeartbeatInterval = 600
 	sourceOCPI               = "OCPI"
@@ -59,6 +63,10 @@ type ErrorListener interface {
 // RequestSender sends a proactive OCPP request to a connected charge point.
 type RequestSender interface {
 	SendRequest(clientId string, request ocpp.Request) (string, error)
+	// SendRequestSync blocks until the charge point answers with its raw
+	// CallResult payload, or timeout elapses. Needed where the answer drives the
+	// next request - reading a config value before deciding whether to change it.
+	SendRequestSync(clientId string, request ocpp.Request, timeout time.Duration) (string, error)
 }
 
 type ChargePointState struct {
@@ -125,8 +133,11 @@ type SystemHandler struct {
 	// meterSampleInterval, in seconds, is pushed to a charge point on boot to re-assert periodic
 	// metering; 0 disables the push
 	meterSampleInterval int
-	location            *time.Location
-	mux                 sync.Mutex
+	// meterMeasurands are unioned into a charge point's MeterValuesSampledData on boot, so the
+	// electrical readings the diagnostics rely on are actually reported; empty disables the push
+	meterMeasurands []string
+	location        *time.Location
+	mux             sync.Mutex
 
 	// consumedSeries remembers which label pairs the consumed power gauge currently holds, so a
 	// group that drops out of the daily aggregation - yesterday's sessions after midnight - is
@@ -207,6 +218,10 @@ func (h *SystemHandler) SetServer(server RequestSender) {
 
 func (h *SystemHandler) SetMeterSampleInterval(seconds int) {
 	h.meterSampleInterval = seconds
+}
+
+func (h *SystemHandler) SetMeterMeasurands(measurands []string) {
+	h.meterMeasurands = measurands
 }
 
 func (h *SystemHandler) SetErrorListener(listener ErrorListener) {
@@ -472,6 +487,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 	if regStatus == core.RegistrationStatusAccepted {
 		go h.reconcileChargePointTransactions(chargePointId)
 		go h.enforceMeterValueInterval(chargePointId, state.triggerMessage)
+		go h.enforceMeterMeasurands(chargePointId)
 	}
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, string(regStatus))
@@ -499,6 +515,77 @@ func (h *SystemHandler) enforceMeterValueInterval(chargePointId string, triggerM
 	}
 	h.logger.FeatureEvent(core.ChangeConfigurationFeatureName, chargePointId,
 		fmt.Sprintf("MeterValueSampleInterval=%d", h.meterSampleInterval))
+}
+
+// meterMeasurandsKey is the OCPP 1.6 configuration key holding the comma-separated
+// list of measurands a charge point includes in periodic MeterValues.
+const meterMeasurandsKey = "MeterValuesSampledData"
+
+// enforceMeterMeasurands makes sure a charge point reports the measurands the
+// diagnostics need. A charger's default sample list is often just the energy
+// register, so Voltage and Current.Offered - the readings that show whether a
+// limit was binding - never arrive unless asked for. The required measurands are
+// unioned into whatever the charge point already reports, so its own extras
+// survive, and the write is skipped when nothing is missing.
+func (h *SystemHandler) enforceMeterMeasurands(chargePointId string) {
+	if len(h.meterMeasurands) == 0 || h.server == nil {
+		return
+	}
+	read := core.NewGetConfigurationRequest([]string{meterMeasurandsKey})
+	payload, err := h.server.SendRequestSync(chargePointId, read, meterConfigTimeout)
+	if err != nil {
+		h.logger.Error(fmt.Sprintf("read %s on %s", meterMeasurandsKey, chargePointId), err)
+		return
+	}
+	var response core.GetConfigurationResponse
+	if err = json.Unmarshal([]byte(payload), &response); err != nil {
+		h.logger.Error(fmt.Sprintf("parse %s on %s", meterMeasurandsKey, chargePointId), err)
+		return
+	}
+	current := ""
+	for _, key := range response.ConfigurationKey {
+		if key.Key == meterMeasurandsKey && key.Value != nil {
+			current = *key.Value
+		}
+	}
+	merged, changed := mergeMeasurands(current, h.meterMeasurands)
+	if !changed {
+		h.logger.FeatureEvent(core.ChangeConfigurationFeatureName, chargePointId,
+			fmt.Sprintf("%s already includes %v", meterMeasurandsKey, h.meterMeasurands))
+		return
+	}
+	write := &core.ChangeConfigurationRequest{Key: meterMeasurandsKey, Value: merged}
+	if _, err = h.server.SendRequest(chargePointId, write); err != nil {
+		h.logger.Error(fmt.Sprintf("set %s on %s", meterMeasurandsKey, chargePointId), err)
+		return
+	}
+	h.logger.FeatureEvent(core.ChangeConfigurationFeatureName, chargePointId,
+		fmt.Sprintf("%s=%s", meterMeasurandsKey, merged))
+}
+
+// mergeMeasurands unions required measurands into a charge point's existing
+// comma-separated sample list, preserving order and the charge point's own
+// entries, and reports whether anything was added. Comparison is
+// case-insensitive because OCPP measurand names are, but an absent measurand is
+// appended in its canonical form.
+func mergeMeasurands(current string, required []string) (string, bool) {
+	existing := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, item := range strings.Split(current, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			existing = append(existing, item)
+			seen[strings.ToLower(item)] = true
+		}
+	}
+	changed := false
+	for _, measurand := range required {
+		if measurand = strings.TrimSpace(measurand); measurand != "" && !seen[strings.ToLower(measurand)] {
+			existing = append(existing, measurand)
+			seen[strings.ToLower(measurand)] = true
+			changed = true
+		}
+	}
+	return strings.Join(existing, ","), changed
 }
 
 func (h *SystemHandler) OnAuthorize(chargePointId string, request *core.AuthorizeRequest) (*core.AuthorizeResponse, error) {

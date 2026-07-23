@@ -26,6 +26,10 @@ time_zone: UTC
 accept_unknown_tag: true
 accept_unknown_chp: true
 meter_value_sample_interval: 60  # seconds; re-asserted on each boot, 0 disables
+meter_values_measurands:           # unioned into MeterValuesSampledData on boot; empty leaves it untouched
+  - Voltage
+  - Current.Import
+  - Current.Offered
 listen:
   type: port
   bind_ip: 0.0.0.0

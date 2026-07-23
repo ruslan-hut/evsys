@@ -7,6 +7,14 @@ accept_unknown_chp: false
 # seconds; re-asserted on each BootNotification so a charger that reboots with sampling
 # reset to 0 keeps reporting meter values. 0 disables the push.
 meter_value_sample_interval: 60
+# Measurands unioned into each charger's MeterValuesSampledData on boot, so the electrical
+# readings the diagnostics rely on are actually reported. A charger's default sample list is
+# often just the energy register, so voltage and current never arrive unless asked for. The
+# charger's own extra measurands are preserved; empty leaves its configuration untouched.
+meter_values_measurands:
+  - Voltage
+  - Current.Import
+  - Current.Offered
 listen:
   type: port
   bind_ip: 0.0.0.0
