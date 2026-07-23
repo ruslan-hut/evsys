@@ -465,6 +465,9 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 	defer h.mux.Unlock()
 
 	regStatus := core.RegistrationStatusAccepted
+	// getChargePoint returns a non-nil state whenever ok is true, so the
+	// goroutines below - which dereference state - stay inside this branch
+	// rather than relying on regStatus to imply it.
 	state, ok := h.getChargePoint(chargePointId)
 	if ok {
 		if h.database != nil {
@@ -479,15 +482,12 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 				}
 			}
 		}
-	} else {
-		regStatus = core.RegistrationStatusRejected
-		h.logger.Debug(fmt.Sprintf("charge point %s not registered", chargePointId))
-	}
-
-	if regStatus == core.RegistrationStatusAccepted {
 		go h.reconcileChargePointTransactions(chargePointId)
 		go h.enforceMeterValueInterval(chargePointId, state.triggerMessage)
 		go h.enforceMeterMeasurands(chargePointId)
+	} else {
+		regStatus = core.RegistrationStatusRejected
+		h.logger.Debug(fmt.Sprintf("charge point %s not registered", chargePointId))
 	}
 
 	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, string(regStatus))
