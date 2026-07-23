@@ -1516,3 +1516,21 @@ func (m *MongoDB) updateSchemaVersionInternal(db *mongo.Database, version int) e
 	)
 	return err
 }
+
+// UpdateConnectorProfileVerdict records what a charge point answered about the
+// last charging profile installed on a connector. It is keyed by identity rather
+// than taking a connector, because the answer arrives on a goroutine that no
+// longer owns the connector it came from.
+func (m *MongoDB) UpdateConnectorProfileVerdict(chargePointId string, connectorId int, verdict *entity.ProfileVerdict) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	filter := bson.D{{"connector_id", connectorId}, {"charge_point_id", chargePointId}}
+	update := bson.M{"$set": bson.M{"last_profile": verdict}}
+	collection := connection.Database(m.database).Collection(collectionConnectors)
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}

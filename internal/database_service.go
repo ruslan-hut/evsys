@@ -25,6 +25,7 @@ type Database interface {
 	UpdateConnector(connector *entity.Connector) error
 	AddConnector(connector *entity.Connector) error
 	GetConnector(id int, chargePointId string) (*entity.Connector, error)
+	UpdateConnectorProfileVerdict(chargePointId string, connectorId int, verdict *entity.ProfileVerdict) error
 
 	GetUserTag(idTag string) (*entity.UserTag, error)
 	AddUserTag(userTag *entity.UserTag) error

@@ -22,7 +22,38 @@ type Connector struct {
 	CurrentPowerLimit    int       `json:"current_power_limit" bson:"current_power_limit"`
 	CurrentTransactionId int       `json:"current_transaction_id" bson:"current_transaction_id"`
 	EvseId               *int      `json:"evse_id,omitempty" bson:"evse_id,omitempty"` // OCPP 2.0.1+ EVSE identifier (nullable for 1.6 compatibility)
-	mutex                sync.Mutex
+	// LastProfile is the charge point's answer to the last power limit installed
+	// here. CurrentPowerLimit records what was asked for and is written before
+	// the answer arrives, so on its own it cannot distinguish a limit in force
+	// from one the charge point refused. Nil until a profile has been sent.
+	LastProfile *ProfileVerdict `json:"last_profile,omitempty" bson:"last_profile,omitempty"`
+	mutex       sync.Mutex
+}
+
+// Statuses reported for an installed charging profile. The first three are
+// OCPP's own; the rest describe answers that never arrived or made no sense,
+// which are just as much a failure to enforce a limit.
+const (
+	ProfileStatusAccepted     = "Accepted"
+	ProfileStatusRejected     = "Rejected"
+	ProfileStatusNotSupported = "NotSupported"
+	ProfileStatusNoResponse   = "NoResponse"
+	ProfileStatusUnreadable   = "Unreadable"
+)
+
+// ProfileVerdict is what a charge point said about a charging profile, kept so
+// the question "is this limit actually in force" can be answered from the
+// database instead of by grepping the log.
+type ProfileVerdict struct {
+	Status     string    `json:"status" bson:"status"`
+	Limit      int       `json:"limit" bson:"limit"`
+	StackLevel int       `json:"stack_level" bson:"stack_level"`
+	Time       time.Time `json:"time" bson:"time"`
+}
+
+// Accepted reports whether the charge point took the profile.
+func (v *ProfileVerdict) Accepted() bool {
+	return v != nil && v.Status == ProfileStatusAccepted
 }
 
 func (c *Connector) Lock() {

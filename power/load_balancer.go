@@ -44,16 +44,21 @@ type LoadBalancer struct {
 	server       Handler
 	log          internal.LogHandler
 	capabilities *capabilityStore
-	mutex        sync.Mutex
+	// profileTimeout is how long to wait for a charge point to rule on a
+	// profile. A field rather than a constant so a test can drive the
+	// no-response path without waiting out the real one.
+	profileTimeout time.Duration
+	mutex          sync.Mutex
 }
 
 func NewLoadBalancer(database Repository, server Handler, log internal.LogHandler) *LoadBalancer {
 	return &LoadBalancer{
-		database:     database,
-		server:       server,
-		log:          log,
-		capabilities: newCapabilityStore(),
-		mutex:        sync.Mutex{},
+		database:       database,
+		server:         server,
+		log:            log,
+		capabilities:   newCapabilityStore(),
+		profileTimeout: profileResponseTimeout,
+		mutex:          sync.Mutex{},
 	}
 }
 
@@ -139,38 +144,63 @@ func (lb *LoadBalancer) discoverCapabilities(chargePointId string) {
 // at whatever its own hardware allows, which looks identical to a limit
 // correctly applied unless the response is read.
 //
-// onRejected, when set, runs on the same goroutine once the charge point has
-// refused the profile.
-func (lb *LoadBalancer) sendProfile(chargePointId, description string, request ocpp.Request, onRejected func(status string)) error {
+// onVerdict, when set, runs on the same goroutine once the outcome is known -
+// including when no usable answer arrived, which is as much a failure to
+// enforce a limit as an outright refusal.
+func (lb *LoadBalancer) sendProfile(chargePointId, description string, request ocpp.Request, onVerdict func(status string)) error {
 	response, release, err := lb.server.SendRequestWithResponse(chargePointId, request)
 	if err != nil {
 		return err
 	}
 	go func() {
 		defer release()
+		verdict := entity.ProfileStatusNoResponse
 		select {
 		case payload := <-response:
 			var status profileStatus
 			if err := json.Unmarshal([]byte(payload), &status); err != nil {
+				verdict = entity.ProfileStatusUnreadable
 				lb.log.FeatureEvent(featureName, chargePointId,
 					fmt.Sprintf("%s: unreadable response: %s", description, payload))
-				return
+				break
 			}
-			if status.Status != profileAccepted {
+			verdict = status.Status
+			if verdict != profileAccepted {
 				lb.log.FeatureEvent(featureName, chargePointId,
-					fmt.Sprintf("%s: REJECTED by charge point, status %s", description, status.Status))
-				if onRejected != nil {
-					onRejected(status.Status)
-				}
-				return
+					fmt.Sprintf("%s: REJECTED by charge point, status %s", description, verdict))
+				break
 			}
 			lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("%s: accepted", description))
-		case <-time.After(profileResponseTimeout):
+		case <-time.After(lb.profileTimeout):
 			lb.log.FeatureEvent(featureName, chargePointId,
-				fmt.Sprintf("%s: no response within %s", description, profileResponseTimeout))
+				fmt.Sprintf("%s: no response within %s", description, lb.profileTimeout))
+		}
+		if onVerdict != nil {
+			onVerdict(verdict)
 		}
 	}()
 	return nil
+}
+
+// recordVerdict stores what the charge point said about a limit, so the
+// question "is this limit in force" is a database read rather than a log grep.
+// The connector document is updated by identity and the in-memory connector is
+// left alone: this runs after the balancer lock has been released, and the next
+// pass reads the connector fresh from the database anyway.
+func (lb *LoadBalancer) recordVerdict(connector *entity.Connector, status string, powerLimit, stackLevel int) {
+	if lb.database == nil {
+		return
+	}
+	verdict := &entity.ProfileVerdict{
+		Status:     status,
+		Limit:      powerLimit,
+		StackLevel: stackLevel,
+		Time:       time.Now(),
+	}
+	if err := lb.database.UpdateConnectorProfileVerdict(connector.ChargePointId, connector.Id, verdict); err != nil {
+		lb.log.FeatureEvent(featureName, connector.ChargePointId,
+			fmt.Sprintf("error recording profile verdict: %s", err))
+	}
 }
 
 // sendTransactionProfile installs a session's power limit, stepping the stack
@@ -195,8 +225,18 @@ func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powe
 		connector.Id, smartcharging.NewTransactionChargingProfile(
 			connector.Id, transactionId, powerLimit, stackLevel))
 
-	return lb.sendProfile(chargePointId, description, request, func(_ string) {
+	return lb.sendProfile(chargePointId, description, request, func(status string) {
+		lb.recordVerdict(connector, status, powerLimit, stackLevel)
+		if status == entity.ProfileStatusAccepted {
+			return
+		}
 		if retriesLeft <= 0 || stackLevel <= 0 {
+			return
+		}
+		// Only an outright refusal is worth stepping down for. Silence means the
+		// charge point never weighed in, so a lower level would be no more
+		// likely to land and would only overwrite the record of what happened.
+		if status != entity.ProfileStatusRejected && status != entity.ProfileStatusNotSupported {
 			return
 		}
 		if !lb.capabilities.lowerStackLevel(chargePointId, stackLevel-1) {

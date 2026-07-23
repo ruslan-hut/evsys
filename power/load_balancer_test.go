@@ -15,9 +15,11 @@ import (
 )
 
 type stubRepo struct {
+	mutex       sync.Mutex
 	chargePoint *entity.ChargePoint
 	location    *entity.Location
-	txLimits    map[int]int // transactionId -> last recorded power limit
+	txLimits    map[int]int                         // transactionId -> last recorded power limit
+	verdicts    map[string][]*entity.ProfileVerdict // "chargePointId/connectorId" -> verdicts, in order
 }
 
 func (s *stubRepo) GetChargePoint(_ string) (*entity.ChargePoint, error) {
@@ -44,6 +46,42 @@ func (s *stubRepo) UpdateTransactionPowerLimit(transactionId, limit int) error {
 	return nil
 }
 
+// Verdicts are written from the goroutine that waits on the charge point, so
+// the test's own reads have to be guarded.
+func (s *stubRepo) UpdateConnectorProfileVerdict(chargePointId string, connectorId int, verdict *entity.ProfileVerdict) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.verdicts == nil {
+		s.verdicts = make(map[string][]*entity.ProfileVerdict)
+	}
+	key := fmt.Sprintf("%s/%d", chargePointId, connectorId)
+	s.verdicts[key] = append(s.verdicts[key], verdict)
+	return nil
+}
+
+// recordedVerdicts returns a copy of the verdicts stored for a connector.
+func (s *stubRepo) recordedVerdicts(chargePointId string, connectorId int) []*entity.ProfileVerdict {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	key := fmt.Sprintf("%s/%d", chargePointId, connectorId)
+	return append([]*entity.ProfileVerdict{}, s.verdicts[key]...)
+}
+
+// waitForVerdicts blocks until a connector has at least count verdicts recorded.
+func (s *stubRepo) waitForVerdicts(t *testing.T, chargePointId string, connectorId, count int) []*entity.ProfileVerdict {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if recorded := s.recordedVerdicts(chargePointId, connectorId); len(recorded) >= count {
+			return recorded
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("connector %d recorded %d verdicts, want at least %d",
+		connectorId, len(s.recordedVerdicts(chargePointId, connectorId)), count)
+	return nil
+}
+
 type stubServer struct {
 	mutex sync.Mutex
 	// payload is the CallResult the stub charge point answers profiles with;
@@ -52,6 +90,9 @@ type stubServer struct {
 	// configPayload is the CallResult it answers GetConfiguration with; empty
 	// means the charge point does not answer at all.
 	configPayload string
+	// silent makes the stub accept profile requests and never answer them, so
+	// the balancer falls through to its response timeout.
+	silent bool
 	// configCalls counts how many times its configuration was read.
 	configCalls int
 	// profiles records the charging profiles the balancer installed, in order.
@@ -86,15 +127,20 @@ func (s *stubServer) configurationReads() int {
 func (s *stubServer) SendRequestWithResponse(_ string, request ocpp.Request) (<-chan string, func(), error) {
 	s.mutex.Lock()
 	payload := s.payload
+	silent := s.silent
 	if profile, ok := request.(*smartcharging.SetChargingProfileRequest); ok {
 		s.profiles = append(s.profiles, profile.ChargingProfile)
 	}
 	s.mutex.Unlock()
 
+	response := make(chan string, 1)
+	if silent {
+		// queued but never answered
+		return response, func() {}, nil
+	}
 	if payload == "" {
 		payload = `{"status":"Accepted"}`
 	}
-	response := make(chan string, 1)
 	response <- payload
 	return response, func() {}, nil
 }
@@ -208,6 +254,114 @@ func TestUnreadableProfileResponseIsReported(t *testing.T) {
 	lb.CheckPowerLimit("chp1")
 
 	log.waitForEvent(t, "unreadable response")
+}
+
+// current_power_limit records what was asked for and is written before the
+// charge point answers, so on its own it cannot tell a limit in force from one
+// that was refused. The verdict has to be stored for that question to be
+// answerable without reading the log.
+func TestProfileVerdictIsRecorded(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  string
+		expected string
+	}{
+		{name: "accepted", payload: `{"status":"Accepted"}`, expected: entity.ProfileStatusAccepted},
+		{name: "rejected", payload: `{"status":"Rejected"}`, expected: entity.ProfileStatusRejected},
+		{name: "not supported", payload: `{"status":"NotSupported"}`, expected: entity.ProfileStatusNotSupported},
+		{name: "unreadable answer", payload: `not json`, expected: entity.ProfileStatusUnreadable},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lb, connectors := newTestBalancer(1)
+			lb.server.(*stubServer).payload = test.payload
+			repo := lb.database.(*stubRepo)
+
+			connectors[0].CurrentTransactionId = 7
+			lb.CheckPowerLimit("chp1")
+
+			verdict := repo.waitForVerdicts(t, "chp1", 1, 1)[0]
+			if verdict.Status != test.expected {
+				t.Errorf("status = %q, want %q", verdict.Status, test.expected)
+			}
+			if verdict.Limit != powerSlots[0] {
+				t.Errorf("limit = %d, want %d", verdict.Limit, powerSlots[0])
+			}
+			if verdict.StackLevel != smartcharging.TxProfileStackLevel {
+				t.Errorf("stack level = %d, want %d", verdict.StackLevel, smartcharging.TxProfileStackLevel)
+			}
+			if verdict.Time.IsZero() {
+				t.Error("verdict has no timestamp; an old refusal would be indistinguishable from a current one")
+			}
+		})
+	}
+}
+
+// The stack-level retry must leave behind the outcome of the attempt that
+// actually settled, not the one that was superseded.
+func TestRetryRecordsBothAttempts(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	server.payload = `{"status":"Rejected"}`
+	repo := lb.database.(*stubRepo)
+
+	lb.onChargePointBoot("chp1")
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	verdicts := repo.waitForVerdicts(t, "chp1", 1, 2)
+	if verdicts[0].StackLevel != 10 || verdicts[1].StackLevel != 9 {
+		t.Fatalf("recorded stack levels %d then %d, want 10 then 9",
+			verdicts[0].StackLevel, verdicts[1].StackLevel)
+	}
+}
+
+// Silence is not a refusal: the charge point never weighed in, so a lower stack
+// level is no more likely to land and retrying would only overwrite the record
+// of what actually happened.
+func TestSilenceIsRecordedAndNotRetried(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	repo := lb.database.(*stubRepo)
+	// the real wait is 30s; the path under test is what happens when it expires
+	lb.profileTimeout = 10 * time.Millisecond
+
+	lb.onChargePointBoot("chp1")
+	server.mutex.Lock()
+	server.silent = true
+	server.mutex.Unlock()
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	verdicts := repo.waitForVerdicts(t, "chp1", 1, 1)
+	if verdicts[0].Status != entity.ProfileStatusNoResponse {
+		t.Fatalf("status = %q, want %q", verdicts[0].Status, entity.ProfileStatusNoResponse)
+	}
+	if got := lb.capabilities.get("chp1").maxStackLevel; got != 10 {
+		t.Fatalf("stack level lowered to %d; only an explicit refusal should lower it", got)
+	}
+	// and the profile was not resent at a lower level
+	time.Sleep(50 * time.Millisecond)
+	if recorded := repo.recordedVerdicts("chp1", 1); len(recorded) != 1 {
+		t.Fatalf("recorded %d verdicts, want 1: silence was retried", len(recorded))
+	}
+}
+
+func TestVerdictAcceptedHelper(t *testing.T) {
+	var missing *entity.ProfileVerdict
+	if missing.Accepted() {
+		t.Error("a connector that was never sent a profile reads as enforced")
+	}
+	if (&entity.ProfileVerdict{Status: entity.ProfileStatusRejected}).Accepted() {
+		t.Error("a refused profile reads as enforced")
+	}
+	if !(&entity.ProfileVerdict{Status: entity.ProfileStatusAccepted}).Accepted() {
+		t.Error("an accepted profile does not read as enforced")
+	}
 }
 
 func configResponse(maxStackLevel, allowedUnits string) string {
