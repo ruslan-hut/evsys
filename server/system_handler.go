@@ -1401,8 +1401,20 @@ func (h *SystemHandler) OnGetDiagnostics(chargePointId string, payload string) (
 		return nil, fmt.Errorf("empty location")
 	}
 	request := firmware.NewGetDiagnosticsRequest(payload)
-	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId, fmt.Sprintf("location: %s***", payload[0:10]))
+	// Log only a prefix to keep the full URL - which may carry FTP credentials -
+	// out of the log; a short location must not slice out of bounds.
+	h.logger.FeatureEvent(request.GetFeatureName(), chargePointId,
+		fmt.Sprintf("location: %s***", locationPrefix(payload)))
 	return request, nil
+}
+
+// locationPrefix returns at most the first 10 characters of a diagnostics upload
+// URL, so the full path and any credentials past it stay out of the log.
+func locationPrefix(location string) string {
+	if len(location) <= 10 {
+		return location
+	}
+	return location[:10]
 }
 
 func (h *SystemHandler) OnReset(chargePointId string, payload string) (*core.ResetRequest, error) {

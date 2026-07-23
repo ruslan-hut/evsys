@@ -200,3 +200,24 @@ func (validationStubLogger) RawDataEvent(_, _ string)    {}
 func (validationStubLogger) Debug(_ string)              {}
 func (validationStubLogger) Warn(_ string)               {}
 func (validationStubLogger) Error(_ string, _ error)     {}
+
+// A diagnostics upload URL shorter than the logging prefix must not slice out of
+// bounds. The front-end URL validator accepts "ftp://a/" (8 chars), so this is
+// reachable, not hypothetical.
+func TestLocationPrefix(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "", want: ""},
+		{in: "ftp://a/", want: "ftp://a/"},
+		{in: "ftp://host", want: "ftp://host"},
+		{in: "ftp://user:pass@host/path", want: "ftp://user"},
+		{in: "ftp://host/diagnostics/upload/", want: "ftp://host"},
+	}
+	for _, test := range tests {
+		if got := locationPrefix(test.in); got != test.want {
+			t.Errorf("locationPrefix(%q) = %q, want %q", test.in, got, test.want)
+		}
+	}
+}
