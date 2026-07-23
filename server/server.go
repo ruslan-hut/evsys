@@ -55,9 +55,17 @@ type Server struct {
 	// pending maps a request's unique id to the caller waiting for its
 	// CallResult. Guarded by pendingMutex: entries are created on the caller's
 	// goroutine and resolved on the connection's read pump.
-	pending      map[string]chan string
-	pendingMutex sync.Mutex
+	pending map[string]chan string
+	// fireAndForget holds unique ids of requests sent without a waiting caller
+	// (via SendRequest). Their CallResult is expected but discarded, so it must
+	// not be logged as unmatched. Guarded by pendingMutex.
+	fireAndForget map[string]struct{}
+	pendingMutex  sync.Mutex
 }
+
+// maxFireAndForget bounds the fire-and-forget set so a charge point that drops
+// off between the request and its answer cannot leak entries indefinitely.
+const maxFireAndForget = 1024
 
 type WebSocket struct {
 	conn           *websocket.Conn
@@ -197,11 +205,12 @@ func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
 	go pool.Start()
 
 	server := Server{
-		conf:     conf,
-		upgrader: websocket.Upgrader{Subprotocols: []string{}},
-		pool:     pool,
-		logger:   logger,
-		pending:  make(map[string]chan string),
+		conf:          conf,
+		upgrader:      websocket.Upgrader{Subprotocols: []string{}},
+		pool:          pool,
+		logger:        logger,
+		pending:       make(map[string]chan string),
+		fireAndForget: make(map[string]struct{}),
 	}
 
 	// register itself as a router for httpServer handler
@@ -419,6 +428,7 @@ func (s *Server) SendRequest(clientId string, request ocpp.Request) (string, err
 		recipient:   clientId,
 		callRequest: &callRequest,
 	}
+	s.markFireAndForget(callRequest.UniqueId)
 	s.pool.send <- env
 	return callRequest.UniqueId, nil
 }
@@ -472,6 +482,15 @@ func (s *Server) SendRequestSync(clientId string, request ocpp.Request, timeout 
 func (s *Server) ResolveResponse(uniqueId, payload string) bool {
 	s.pendingMutex.Lock()
 	channel, ok := s.pending[uniqueId]
+	if !ok {
+		// A fire-and-forget request expects a CallResult that nobody waits on;
+		// report it as resolved so it is not logged as unmatched.
+		if _, discard := s.fireAndForget[uniqueId]; discard {
+			delete(s.fireAndForget, uniqueId)
+			s.pendingMutex.Unlock()
+			return true
+		}
+	}
 	s.pendingMutex.Unlock()
 	if !ok {
 		return false
@@ -493,6 +512,23 @@ func (s *Server) registerPending(uniqueId string) chan string {
 func (s *Server) releasePending(uniqueId string) {
 	s.pendingMutex.Lock()
 	delete(s.pending, uniqueId)
+	s.pendingMutex.Unlock()
+}
+
+// markFireAndForget records a request whose CallResult is expected but has no
+// waiting caller, so ResolveResponse can drop the answer silently instead of
+// logging it as unmatched.
+func (s *Server) markFireAndForget(uniqueId string) {
+	s.pendingMutex.Lock()
+	// A charge point that drops off before answering leaves its id behind;
+	// evict an arbitrary stale entry rather than let the set grow without bound.
+	if len(s.fireAndForget) >= maxFireAndForget {
+		for id := range s.fireAndForget {
+			delete(s.fireAndForget, id)
+			break
+		}
+	}
+	s.fireAndForget[uniqueId] = struct{}{}
 	s.pendingMutex.Unlock()
 }
 
