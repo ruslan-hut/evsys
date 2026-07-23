@@ -5,6 +5,13 @@ time_zone: ${TIME_ZONE}
 accept_unknown_tag: false
 accept_unknown_chp: false
 meter_value_sample_interval: 15
+# Unioned into each charger's MeterValuesSampledData on boot so voltage and
+# current are actually reported; a charger's default sample list is often just
+# the energy register. The charger's own extra measurands are preserved.
+meter_values_measurands:
+  - Voltage
+  - Current.Import
+  - Current.Offered
 listen:
   type: port
   bind_ip: 0.0.0.0
