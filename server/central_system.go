@@ -201,7 +201,7 @@ func (cs *CentralSystem) handleIncomingMessageVersionAware(ws ocpp.WebSocket, me
 	request := callRequest.Payload
 	action := request.GetFeatureName()
 
-	cs.logger.Debug(fmt.Sprintf("handling %s from %s (protocol: %s)", action, chargePointId, protocol))
+	//cs.logger.Debug(fmt.Sprintf("handling %s from %s (protocol: %s)", action, chargePointId, protocol))
 
 	// Route to appropriate handler based on protocol version
 	var confirmation ocpp.Response
