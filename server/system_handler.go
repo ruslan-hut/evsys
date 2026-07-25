@@ -48,6 +48,11 @@ const (
 	// connector is still released, and this keeps the sweeper off the result until the charge
 	// point has had a chance to report again.
 	transactionReleaseGrace = 2 * time.Minute
+	// bootReconcileDelay holds the post-boot reconcile back until the charge point has flushed the
+	// messages it queued while offline. A charger that lost power sends its own StopTransaction a
+	// few seconds after the boot handshake is accepted, and reconciling before it lands writes a
+	// synthetic close over a session the charger is about to close properly.
+	bootReconcileDelay = 60 * time.Second
 )
 
 type BillingService interface {
@@ -136,8 +141,11 @@ type SystemHandler struct {
 	// meterMeasurands are unioned into a charge point's MeterValuesSampledData on boot, so the
 	// electrical readings the diagnostics rely on are actually reported; empty disables the push
 	meterMeasurands []string
-	location        *time.Location
-	mux             sync.Mutex
+	// bootReconcileDelay is how long the post-boot reconcile waits for the charge point's queued
+	// offline messages; a field rather than the constant alone so tests can shorten it
+	bootReconcileDelay time.Duration
+	location           *time.Location
+	mux                sync.Mutex
 
 	// consumedSeries remembers which label pairs the consumed power gauge currently holds, so a
 	// group that drops out of the daily aggregation - yesterday's sessions after midnight - is
@@ -154,12 +162,13 @@ type consumedSeriesKey struct {
 
 func NewSystemHandler(location *time.Location) *SystemHandler {
 	handler := &SystemHandler{
-		chargePoints:    make(map[string]*ChargePointState),
-		lastMeter:       make(map[int]*entity.TransactionMeter),
-		eventListeners:  make([]internal.EventHandler, 0),
-		protocolAdapter: NewProtocolAdapter(),
-		location:        location,
-		mux:             sync.Mutex{},
+		chargePoints:       make(map[string]*ChargePointState),
+		lastMeter:          make(map[int]*entity.TransactionMeter),
+		eventListeners:     make([]internal.EventHandler, 0),
+		protocolAdapter:    NewProtocolAdapter(),
+		bootReconcileDelay: bootReconcileDelay,
+		location:           location,
+		mux:                sync.Mutex{},
 	}
 	return handler
 }
@@ -482,7 +491,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 				}
 			}
 		}
-		go h.reconcileChargePointTransactions(chargePointId)
+		go h.reconcileAfterBoot(chargePointId)
 		go h.enforceMeterValueInterval(chargePointId, state.triggerMessage)
 		go h.enforceMeterMeasurands(chargePointId)
 	} else {
@@ -789,8 +798,9 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 	// a real StopTransaction arriving for a transaction the sweep already closed means that close
 	// was premature - the session was still live on the charger. Trace it before the normal path
 	// overwrites the system-generated figures with the charger's real ones.
-	if transaction.IsFinished && isSystemClosedReason(transaction.Reason) {
-		h.logger.Warn(fmt.Sprintf("late StopTransaction for transaction #%d on %s: system had closed it as %q at %s, charger now reports meter %d, reason %s",
+	systemClosed := transaction.IsFinished && isSystemClosedReason(transaction.Reason)
+	if systemClosed {
+		h.logger.Warn(fmt.Sprintf("late StopTransaction for transaction #%d on %s: system had closed it as %q with stop time %s, charger now reports meter %d, reason %s",
 			request.TransactionId, chargePointId, transaction.Reason, transaction.TimeStop.Format(time.RFC3339), request.MeterStop, request.Reason))
 		eventMessage := &internal.EventMessage{
 			ChargePointId: chargePointId,
@@ -829,7 +839,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 	}
 
-	if transaction.IsFinished && transaction.MeterStop >= request.MeterStop {
+	// A system close is never authoritative, so it is replaced even when the meter has not moved:
+	// a charger that lost power stops reporting before it stops charging, so its StopTransaction
+	// commonly carries the same reading as the last sample the sweep closed on. Treating that as a
+	// duplicate would keep the synthetic reason and stop time on the record and drop the real ones.
+	if transaction.IsFinished && !systemClosed && transaction.MeterStop >= request.MeterStop {
 		releaseConnector()
 		h.logger.Warn(fmt.Sprintf("transaction #%d is already finished", request.TransactionId))
 		eventMessage := &internal.EventMessage{
@@ -845,6 +859,14 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		}
 		go h.notifyEventListeners(internal.Alert, eventMessage)
 		return core.NewStopTransactionResponse(), nil
+	}
+
+	// energy the sweep already added to the consumed counter when it closed this transaction on the
+	// last sample; only what the charger reports on top of that is new, or the session is counted
+	// twice. An aborted close had no meter value and added nothing.
+	countedByClose := 0
+	if systemClosed && transaction.Reason == reasonStoppedBySystem {
+		countedByClose = transaction.MeterStop - transaction.MeterStart
 	}
 
 	transaction.IsFinished = true
@@ -906,7 +928,11 @@ func (h *SystemHandler) OnStopTransaction(chargePointId string, request *core.St
 		if consumedPower < 0 {
 			consumedPower = 0
 		}
-		counters.CountConsumedPower(state.model.LocationId, chargePointId, float64(consumedPower))
+		newlyConsumed := consumedPower - countedByClose
+		if newlyConsumed < 0 {
+			newlyConsumed = 0
+		}
+		counters.CountConsumedPower(state.model.LocationId, chargePointId, float64(newlyConsumed))
 		h.observeConsumedPower()
 
 		consumed := utility.IntToString(consumedPower)
@@ -1582,9 +1608,22 @@ drops the real stop as already finished, and the connector would be offered to a
 while the first car is still drawing power.
 
 A StopTransaction queued while the charge point was offline may still arrive afterwards; it is
-handled normally, since OnStopTransaction overwrites a transaction whose stored MeterStop is lower
-than the reported one.
+handled normally, since OnStopTransaction overwrites a transaction the system had closed itself.
 */
+// reconcileAfterBoot waits out bootReconcileDelay and then reconciles. OCPP 1.6 charge points flush
+// the messages they buffered while offline only after the BootNotification is accepted, so the
+// charger's own StopTransaction for a session it lost to a power cut arrives seconds behind the
+// boot. Reconciling immediately closed that session first, leaving the real stop to land on an
+// already finished transaction. Waiting costs nothing: a session that is genuinely dead stays dead,
+// and the reconcile re-reads the open transactions when the delay elapses, so one closed in the
+// meantime is simply no longer in the list.
+func (h *SystemHandler) reconcileAfterBoot(chargePointId string) {
+	if h.bootReconcileDelay > 0 {
+		time.Sleep(h.bootReconcileDelay)
+	}
+	h.reconcileChargePointTransactions(chargePointId)
+}
+
 func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string) {
 	if h.database == nil {
 		return

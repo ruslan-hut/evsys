@@ -154,6 +154,106 @@ func TestFinishAbandonedTransactionTracesActiveSession(t *testing.T) {
 	}
 }
 
+// bootReconcileStubDB serves the open transactions of a charge point and lets a test close one
+// while the post-boot reconcile is still waiting, the way a queued StopTransaction does.
+type bootReconcileStubDB struct {
+	internal.Database
+	mu      sync.Mutex
+	open    []*entity.Transaction
+	queried bool
+	updated bool
+}
+
+func (s *bootReconcileStubDB) GetUnfinishedTransactionsForChargePoint(string) ([]*entity.Transaction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queried = true
+	return s.open, nil
+}
+
+func (s *bootReconcileStubDB) ReadTransactionMeterValue(int) (*entity.TransactionMeter, error) {
+	return nil, nil
+}
+
+func (s *bootReconcileStubDB) ReadAllTransactionMeterValues(int) ([]entity.TransactionMeter, error) {
+	return nil, nil
+}
+
+func (s *bootReconcileStubDB) UpdateTransaction(*entity.Transaction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updated = true
+	return nil
+}
+
+func (s *bootReconcileStubDB) DeleteTransactionMeterValues(int) error { return nil }
+func (s *bootReconcileStubDB) UpdateConnector(*entity.Connector) error {
+	return nil
+}
+func (s *bootReconcileStubDB) GetTodayConsumedEnergy() ([]*entity.ConsumedEnergy, error) {
+	return nil, nil
+}
+
+// stopArrives clears the open transactions, standing in for the StopTransaction the charge point
+// flushes once the boot handshake is accepted.
+func (s *bootReconcileStubDB) stopArrives() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.open = nil
+}
+
+func (s *bootReconcileStubDB) state() (queried, updated bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.queried, s.updated
+}
+
+/*
+TestReconcileAfterBootWaitsForQueuedStop covers the race behind the premature closes: an OCPP 1.6
+charge point flushes the messages it buffered while offline only after its BootNotification is
+accepted, so its own StopTransaction for a session lost to a power cut lands seconds behind the
+boot. Reconciling immediately closed that session as "stopped by system" first. The reconcile must
+read the open transactions only once the delay has elapsed, by which time the real stop has closed
+this one.
+*/
+func TestReconcileAfterBootWaitsForQueuedStop(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := &bootReconcileStubDB{
+		open: []*entity.Transaction{{
+			Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+			MeterStart: 20000, TimeStart: now.Add(-time.Hour),
+		}},
+	}
+	h := newStopHandler(t, db, 1)
+	h.bootReconcileDelay = 200 * time.Millisecond
+
+	done := make(chan struct{})
+	go func() {
+		h.reconcileAfterBoot("CP1")
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if queried, _ := db.state(); queried {
+		t.Fatal("the reconcile read the open transactions before the charge point could flush its queued messages")
+	}
+	db.stopArrives()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile did not run")
+	}
+
+	queried, updated := db.state()
+	if !queried {
+		t.Error("the reconcile should still run once the delay elapses")
+	}
+	if updated {
+		t.Error("a transaction closed by the charger's own stop during the delay must not be closed again by the reconcile")
+	}
+}
+
 func TestIsActiveChargingStatus(t *testing.T) {
 	active := []string{"Charging", "SuspendedEV", "SuspendedEVSE"}
 	inactive := []string{"Available", "Preparing", "Finishing", "Faulted", "Unavailable", "Reserved", ""}

@@ -7,6 +7,7 @@ import (
 
 	"evsys/entity"
 	"evsys/internal"
+	"evsys/metrics/counters"
 	"evsys/ocpp/v16/core"
 	"evsys/types"
 )
@@ -247,5 +248,101 @@ func TestOnStopTransactionReleasesConnectorOnDuplicateStop(t *testing.T) {
 	}
 	if db.connector == nil || db.connector.CurrentTransactionId != -1 {
 		t.Error("a duplicate stop must still release the connector")
+	}
+}
+
+/*
+TestOnStopTransactionOverwritesSystemCloseWithUnchangedMeter covers the shape a power cut actually
+has: the charger stops reporting before it stops charging, so the StopTransaction it flushes after
+the reboot carries the very reading the system closed the transaction on. The already-finished
+early return used to swallow it, leaving "stopped by system" and the last sample's timestamp on a
+session the charger had reported as PowerLoss.
+*/
+func TestOnStopTransactionOverwritesSystemCloseWithUnchangedMeter(t *testing.T) {
+	stoppedAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
+	db := &stopStubDB{
+		transaction: &entity.Transaction{
+			Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+			MeterStart: 20000, MeterStop: 31524, IsFinished: true,
+			Reason:    reasonStoppedBySystem,
+			TimeStart: time.Now().UTC().Add(-time.Hour),
+			TimeStop:  time.Now().UTC().Add(-25 * time.Minute),
+		},
+	}
+	h := newStopHandler(t, db, 1)
+	logger := &capturingLogger{}
+	h.logger = logger
+
+	_, err := h.OnStopTransaction("CP1", &core.StopTransactionRequest{
+		TransactionId: 1,
+		MeterStop:     31524,
+		Timestamp:     types.NewDateTime(stoppedAt),
+		Reason:        core.ReasonPowerLoss,
+	})
+	if err != nil {
+		t.Fatalf("OnStopTransaction: %v", err)
+	}
+
+	if !logger.has("late StopTransaction for transaction #1") {
+		t.Errorf("expected a late-stop trace, got warns %v", logger.warns)
+	}
+	if logger.has("is already finished") {
+		t.Errorf("a stop landing on a system close is not a duplicate, got warns %v", logger.warns)
+	}
+	if db.transaction.Reason != string(core.ReasonPowerLoss) {
+		t.Errorf("reason = %q, want %q: the charger's reason must replace the system one",
+			db.transaction.Reason, core.ReasonPowerLoss)
+	}
+	if !db.transaction.TimeStop.Equal(stoppedAt) {
+		t.Errorf("time stop = %v, want %v: the charger's stop time must replace the last sample time",
+			db.transaction.TimeStop, stoppedAt)
+	}
+}
+
+/*
+TestOnStopTransactionAfterSystemCloseCountsEnergyOnce pins the consumed-energy counter across the
+two closes of the same session. The sweep counts what it closed on, so the late stop may only add
+the difference the charger reports on top of it; adding the whole session again doubled every
+sweep-then-stop session in ocpp_consumed_today.
+*/
+func TestOnStopTransactionAfterSystemCloseCountsEnergyOnce(t *testing.T) {
+	labels := map[string]string{"location": "loc-late-stop", "charge_point_id": "CP1"}
+	db := &stopStubDB{
+		transaction: &entity.Transaction{
+			Id: 1, ConnectorId: 1, ChargePointId: "CP1",
+			MeterStart: 20000, MeterStop: 30000, IsFinished: true,
+			Reason:    reasonStoppedBySystem,
+			TimeStart: time.Now().UTC().Add(-time.Hour),
+			TimeStop:  time.Now().UTC().Add(-25 * time.Minute),
+		},
+	}
+	h := newStopHandler(t, db, 1)
+	h.chargePoints["CP1"].model.LocationId = "loc-late-stop"
+
+	// what the sweep already added when it closed the transaction on the last sample
+	counters.CountConsumedPower("loc-late-stop", "CP1", 10000)
+	before := counterValue(t, "ocpp_consumed_today", labels)
+
+	_, err := h.OnStopTransaction("CP1", &core.StopTransactionRequest{
+		TransactionId: 1,
+		MeterStop:     30500,
+		Timestamp:     types.NewDateTime(time.Now().UTC()),
+		Reason:        core.ReasonPowerLoss,
+	})
+	if err != nil {
+		t.Fatalf("OnStopTransaction: %v", err)
+	}
+
+	// the counter is written from a goroutine started by the handler
+	var grew float64
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		grew = counterValue(t, "ocpp_consumed_today", labels) - before
+		if grew != 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if grew != 500 {
+		t.Errorf("consumed energy should grow by the 500 the charger reports on top of the close, grew by %v", grew)
 	}
 }
