@@ -26,6 +26,11 @@ const (
 	MigrationOCPPMultiVersion  = 1 // OCPP multi-version support (Phase 2, Task 2.7)
 	MigrationTriggerMessage    = 2 // Enable meter value triggering on existing charge points
 	MigrationStuckTransactions = 3 // Close transactions abandoned before the sweeper was fixed
+	MigrationWebhooks          = 4 // Indexes for webhook subscribers and outbox
+
+	// webhookDeliveredTTL is how long delivered outbox documents are kept before Mongo
+	// removes them. Failed documents have no delivered_at and are kept for inspection.
+	webhookDeliveredTTL = 7 * 24 * time.Hour
 
 	// stuckTransactionCutoff is how far back a transaction must have been idle to count as
 	// backlog. The runtime sweeper handles anything more recent, so this only has to be long
@@ -64,6 +69,12 @@ func GetMigrations() []Migration {
 			Description: "Close transactions abandoned while the sweeper could not reach them",
 			Up:          migrationStuckTransactionsUp,
 			Down:        migrationStuckTransactionsDown,
+		},
+		{
+			Version:     MigrationWebhooks,
+			Description: "Create indexes for webhook subscribers and outbox",
+			Up:          migrationWebhooksUp,
+			Down:        migrationWebhooksDown,
 		},
 	}
 }
@@ -479,5 +490,68 @@ func migrationTriggerMessageDown(ctx context.Context, db *mongo.Database) error 
 	}
 	log.Printf("Removed trigger_message from %d charge points", result.ModifiedCount)
 
+	return nil
+}
+
+// migrationWebhooksUp creates the indexes the webhook subsystem relies on: a unique
+// subscriber name (the outbox references subscribers by name), the dispatcher's
+// head-of-queue lookup, and a TTL that removes delivered outbox documents.
+func migrationWebhooksUp(ctx context.Context, db *mongo.Database) error {
+	log.Println("Running migration: Create webhook indexes")
+
+	_, err := db.Collection("webhook_subscribers").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys:    bson.D{{Key: "name", Value: 1}},
+			Options: options.Index().SetName("name_unique").SetUnique(true),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create webhook_subscribers name index: %w", err)
+	}
+
+	outbox := db.Collection("webhook_outbox")
+	_, err = outbox.Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{
+				{Key: "subscriber", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "sequence", Value: 1},
+			},
+			Options: options.Index().SetName("subscriber_status_sequence"),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create webhook_outbox dispatch index: %w", err)
+	}
+
+	_, err = outbox.Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{{Key: "delivered_at", Value: 1}},
+			Options: options.Index().SetName("delivered_at_ttl").
+				SetExpireAfterSeconds(int32(webhookDeliveredTTL.Seconds())),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create webhook_outbox ttl index: %w", err)
+	}
+
+	log.Println("Migration completed successfully")
+	return nil
+}
+
+// migrationWebhooksDown drops the webhook indexes. The collections and their data are
+// left in place: subscribers are operator configuration, and outbox history may still
+// be wanted for inspection.
+func migrationWebhooksDown(ctx context.Context, db *mongo.Database) error {
+	log.Println("Rolling back migration: Drop webhook indexes")
+
+	_, _ = db.Collection("webhook_subscribers").Indexes().DropOne(ctx, "name_unique")
+	_, _ = db.Collection("webhook_outbox").Indexes().DropOne(ctx, "subscriber_status_sequence")
+	_, _ = db.Collection("webhook_outbox").Indexes().DropOne(ctx, "delivered_at_ttl")
+
+	log.Println("Rollback completed successfully")
 	return nil
 }

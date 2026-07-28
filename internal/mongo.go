@@ -30,6 +30,9 @@ const (
 	collectionPaymentPlans    = "payment_plans"
 	collectionStopTransaction = "ocpp_stop_transaction"
 	collectionErrors          = "errors_log"
+
+	collectionWebhookSubscribers = "webhook_subscribers"
+	collectionWebhookOutbox      = "webhook_outbox"
 )
 
 type MongoDB struct {
@@ -1533,4 +1536,153 @@ func (m *MongoDB) UpdateConnectorProfileVerdict(chargePointId string, connectorI
 	collection := connection.Database(m.database).Collection(collectionConnectors)
 	_, err = collection.UpdateOne(m.ctx, filter, update)
 	return err
+}
+
+// GetWebhookSubscribers returns all enabled webhook subscribers.
+func (m *MongoDB) GetWebhookSubscribers() ([]entity.WebhookSubscriber, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionWebhookSubscribers)
+	cursor, err := collection.Find(m.ctx, bson.M{"is_enabled": true})
+	if err != nil {
+		return nil, err
+	}
+	var subscribers []entity.WebhookSubscriber
+	if err = cursor.All(m.ctx, &subscribers); err != nil {
+		return nil, err
+	}
+	return subscribers, nil
+}
+
+// AddWebhookDeliveries inserts outbox documents, one per subscriber of an event.
+func (m *MongoDB) AddWebhookDeliveries(deliveries []entity.WebhookDelivery) error {
+	if len(deliveries) == 0 {
+		return nil
+	}
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	documents := make([]interface{}, len(deliveries))
+	for i := range deliveries {
+		documents[i] = deliveries[i]
+	}
+	collection := connection.Database(m.database).Collection(collectionWebhookOutbox)
+	_, err = collection.InsertMany(m.ctx, documents)
+	return err
+}
+
+// GetPendingWebhookDelivery returns the oldest pending delivery for a subscriber, or nil
+// when there is none due. It looks only at the head of the queue: if the oldest pending
+// delivery is not yet due for a retry, nothing is returned, so a newer event can never
+// overtake an older one that is still being retried.
+func (m *MongoDB) GetPendingWebhookDelivery(subscriber string, now time.Time) (*entity.WebhookDelivery, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionWebhookOutbox)
+	filter := bson.M{"subscriber": subscriber, "status": entity.WebhookPending}
+	opts := options.FindOne().SetSort(bson.D{{Key: "sequence", Value: 1}})
+
+	var delivery entity.WebhookDelivery
+	err = collection.FindOne(m.ctx, filter, opts).Decode(&delivery)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if delivery.NextAttempt.After(now) {
+		return nil, nil
+	}
+	return &delivery, nil
+}
+
+// MarkWebhookDelivered closes an outbox document after a successful post.
+func (m *MongoDB) MarkWebhookDelivered(eventId, subscriber string) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionWebhookOutbox)
+	filter := bson.M{"event_id": eventId, "subscriber": subscriber}
+	update := bson.M{"$set": bson.M{
+		"status":       entity.WebhookDelivered,
+		"delivered_at": time.Now(),
+	}}
+	result, err := collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("delivery %s for %s not found", eventId, subscriber)
+	}
+	return nil
+}
+
+// MarkWebhookFailed records a failed attempt. With terminal false the delivery stays
+// pending and becomes due again at nextAttempt; with terminal true it is abandoned.
+func (m *MongoDB) MarkWebhookFailed(eventId, subscriber, lastError string, nextAttempt time.Time, terminal bool) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	status := entity.WebhookPending
+	if terminal {
+		status = entity.WebhookFailed
+	}
+	collection := connection.Database(m.database).Collection(collectionWebhookOutbox)
+	filter := bson.M{"event_id": eventId, "subscriber": subscriber}
+	update := bson.M{
+		"$set": bson.M{
+			"status":       status,
+			"last_error":   lastError,
+			"next_attempt": nextAttempt,
+		},
+		"$inc": bson.M{"attempts": 1},
+	}
+	result, err := collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("delivery %s for %s not found", eventId, subscriber)
+	}
+	return nil
+}
+
+// GetMaxWebhookSequence returns the highest sequence number ever written to the outbox,
+// so the in-memory counter survives restarts without going backwards.
+func (m *MongoDB) GetMaxWebhookSequence() (int64, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return 0, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionWebhookOutbox)
+	opts := options.FindOne().SetSort(bson.D{{Key: "sequence", Value: -1}})
+
+	var delivery entity.WebhookDelivery
+	err = collection.FindOne(m.ctx, bson.M{}, opts).Decode(&delivery)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return delivery.Sequence, nil
 }

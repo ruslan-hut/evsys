@@ -56,6 +56,13 @@ type Database interface {
 	DeleteTransactionMeterValues(transactionId int) error
 	ReadLastMeterValues() ([]*entity.TransactionMeter, error)
 
+	GetWebhookSubscribers() ([]entity.WebhookSubscriber, error)
+	AddWebhookDeliveries(deliveries []entity.WebhookDelivery) error
+	GetPendingWebhookDelivery(subscriber string, now time.Time) (*entity.WebhookDelivery, error)
+	MarkWebhookDelivered(eventId, subscriber string) error
+	MarkWebhookFailed(eventId, subscriber, lastError string, nextAttempt time.Time, terminal bool) error
+	GetMaxWebhookSequence() (int64, error)
+
 	GetSubscriptions() ([]entity.UserSubscription, error)
 	AddSubscription(subscription *entity.UserSubscription) error
 	UpdateSubscription(subscription *entity.UserSubscription) error

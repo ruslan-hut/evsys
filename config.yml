@@ -43,6 +43,10 @@ ocpi:
   enabled: false
   url: 127.0.0.1:5002
   token: OCPI_TOKEN
+# event webhooks; recipients are configured in the webhook_subscribers collection,
+# so this requires mongo to be enabled
+webhooks:
+  enabled: false
 telegram:
   enabled: false
   telegram_api_key: YOUR_TELEGRAM_API_KEY

@@ -56,6 +56,11 @@ type Config struct {
 		Url     string `yaml:"url" env-default:""`
 		Token   string `yaml:"token" env-default:""`
 	}
+	// Webhooks gates the event webhook subsystem; recipients themselves live in the
+	// webhook_subscribers collection, so enabling this requires Mongo.
+	Webhooks struct {
+		Enabled bool `yaml:"enabled" env-default:"false"`
+	}
 	Telegram struct {
 		Enabled bool   `yaml:"enabled" env-default:"false"`
 		ApiKey  string `yaml:"telegram_api_key" env-default:""`

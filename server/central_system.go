@@ -24,6 +24,7 @@ import (
 	"evsys/telegram"
 	"evsys/types"
 	"evsys/utility"
+	"evsys/webhook"
 	"fmt"
 	"log"
 	"net/http"
@@ -54,6 +55,7 @@ type CentralSystem struct {
 	featureRegistry   common.FeatureRegistry // Registry for all OCPP features
 	routingEnabled    bool                   // Flag to enable new routing (default: false for backward compatibility)
 	telegramBot       *telegram.TgBot        // Optional telegram bot for notifications
+	webhookService    *webhook.Webhook       // Optional webhook event delivery
 }
 
 type CentralSystemCommand struct {
@@ -475,6 +477,11 @@ func (cs *CentralSystem) Stop() {
 		cs.telegramBot.Stop()
 	}
 
+	// Stop webhook dispatcher; pending deliveries stay in the outbox for the next start
+	if cs.webhookService != nil {
+		cs.webhookService.Stop()
+	}
+
 	// Stop API server
 	if err := cs.api.Stop(ctx); err != nil {
 		cs.logger.Error("api server shutdown error", err)
@@ -568,6 +575,20 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 		systemHandler.AddEventListener(ocpiClient)
 		systemHandler.SetAuthService(ocpiClient)
 		log.Println("ocpi client is configured and enabled")
+	}
+
+	if conf.Webhooks.Enabled {
+		if database != nil {
+			webhookService := webhook.New(database, logService)
+			if err = webhookService.Start(); err != nil {
+				return cs, fmt.Errorf("webhook service setup failed: %w", err)
+			}
+			systemHandler.AddEventListener(webhookService)
+			cs.webhookService = webhookService
+			log.Println("webhook service is configured and enabled")
+		} else {
+			log.Println("webhooks are enabled but the database is disabled; webhooks skipped")
+		}
 	}
 
 	// error listener for system handler

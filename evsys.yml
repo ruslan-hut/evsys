@@ -44,6 +44,10 @@ ocpi:
   enabled: true
   url: ${OCPI_URL}
   token: ${OCPI_TOKEN}
+# recipients are configured in the webhook_subscribers collection; with no
+# enabled subscribers the subsystem is idle
+webhooks:
+  enabled: true
 telegram:
   enabled: true
   telegram_api_key: ${TELEGRAM_API_KEY}
