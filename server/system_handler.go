@@ -1153,6 +1153,19 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 			counters.ObservePowerRate(state.model.LocationId, chargePointId, strconv.Itoa(connector.Id), 0)
 		}
 
+		// A connector reporting Faulted can no longer charge, so a transaction still open on it
+		// will never receive its StopTransaction through the normal charge path. Close it here so
+		// the session is billed on its last reading and the connector is released, instead of
+		// hanging until the abandoned-transaction sweep grace window elapses. Runs in its own
+		// goroutine because finishFaultedTransaction re-acquires h.mux, which this handler still
+		// holds; the id is captured by value first, as the connector is mutated once we return. A
+		// real StopTransaction arriving later is handled normally - OnStopTransaction overwrites a
+		// transaction the system has already closed.
+		if request.Status == core.ChargePointStatusFaulted && connector.CurrentTransactionId >= 0 {
+			faultedTransactionId := connector.CurrentTransactionId
+			go h.finishFaultedTransaction(faultedTransactionId, chargePointId)
+		}
+
 	} else {
 		state.status = request.Status
 		state.model.Status = string(request.Status)
@@ -1172,9 +1185,23 @@ func (h *SystemHandler) OnStatusNotification(chargePointId string, request *core
 	}
 
 	errorCode := ""
-	if request.ErrorCode != core.NoError {
-		errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
-		counters.ObserveError(state.model.LocationId, chargePointId, request.VendorErrorCode)
+	// A Faulted status is an operational fault even when the charge point reports
+	// errorCode=NoError. Some vendors (e.g. Circontrol) carry the detail only in the
+	// Info/vendorErrorCode fields and leave errorCode=NoError, so gating solely on
+	// ErrorCode would keep the fault out of errors_log and the error metric, leaving
+	// it invisible to alerting. Record it whenever the status is Faulted too.
+	if request.ErrorCode != core.NoError || request.Status == core.ChargePointStatusFaulted {
+		if request.ErrorCode != core.NoError {
+			errorCode = fmt.Sprintf(" (%v; %s)", request.ErrorCode, request.VendorErrorCode)
+		}
+
+		// ObserveError ignores empty codes; fall back to the status so a Faulted
+		// event with no vendorErrorCode (e.g. Circontrol) still increments the metric.
+		metricCode := request.VendorErrorCode
+		if metricCode == "" {
+			metricCode = string(request.Status)
+		}
+		counters.ObserveError(state.model.LocationId, chargePointId, metricCode)
 
 		data := &entity.ErrorData{
 			Location:        state.model.LocationId,
@@ -1759,6 +1786,43 @@ func (h *SystemHandler) finishAbandonedTransaction(transaction *entity.Transacti
 		Info:          info,
 	}
 	go h.notifyEventListeners(internal.Alert, eventMessage)
+}
+
+// finishFaultedTransaction closes the transaction left open on a connector that has reported
+// Faulted. It reuses the abandoned-transaction close path, so the session is billed on its last
+// meter value and the connector is released. It is a no-op if the transaction is already gone or
+// finished, so a duplicate Faulted notification (this fleet re-sends them) does not double-close.
+// The charge point may still send its own StopTransaction afterwards; that is handled normally,
+// since OnStopTransaction overwrites a transaction the system has closed itself.
+func (h *SystemHandler) finishFaultedTransaction(transactionId int, chargePointId string) {
+	if h.database == nil {
+		return
+	}
+	transaction, err := h.database.GetTransaction(transactionId)
+	if err != nil || transaction == nil {
+		return
+	}
+	if transaction.IsFinished {
+		return
+	}
+	// A connector can report Faulted while its session is still delivering energy and reporting
+	// meter values; closing such a live transaction would strand it - OnMeterValues keeps recording
+	// against the closed id and OnStopTransaction drops the real stop as already finished. Only close
+	// once the readings have gone quiet for the grace window, matching reconcileChargePointTransactions.
+	// A session that keeps reporting is left for the sweep, which applies the same guard and closes it
+	// once it goes quiet.
+	if meterValue, _ := h.database.ReadTransactionMeterValue(transactionId); meterValue != nil {
+		if meterValue.Time.After(h.getTime().Add(-transactionReleaseGrace)) {
+			h.logger.Warn(fmt.Sprintf("connector faulted on %s: transaction #%d still reporting, left open", chargePointId, transactionId))
+			return
+		}
+	}
+	h.logger.Warn(fmt.Sprintf("connector faulted on %s: closing open transaction #%d", chargePointId, transactionId))
+	h.finishAbandonedTransaction(transaction)
+	h.mux.Lock()
+	h.updateActiveTransactionsCounter()
+	h.mux.Unlock()
+	h.observeConsumedPower()
 }
 
 // isActiveChargingStatus reports whether a connector status means an EV is still in a charging

@@ -8,3 +8,4 @@
 /migrations/evsys-rehearsal/
 *.bson
 dump/
+log/
