@@ -22,6 +22,24 @@ import (
 const (
 	wsEndpoint           = "/ws/:id"
 	featureNameWebSocket = "WebSocket"
+
+	// wsWriteWait bounds a single write. Without it a charge point that has stopped reading - a
+	// NAT mapping dropped mid-write, a wedged firmware - blocks the write pump forever, and with
+	// it every later message queued for that charge point.
+	wsWriteWait = 10 * time.Second
+	// wsPingPeriod is how often an otherwise idle connection is pinged. Frequent enough to keep a
+	// NAT mapping from expiring on the operator networks this fleet sits behind, where idle
+	// connections were being dropped silently every few minutes.
+	wsPingPeriod = 30 * time.Second
+	// wsPongWait is how long a connection may stay silent before it is closed, once the charge
+	// point has proved it answers pings. Four missed pings: long enough to ride out a hiccup on a
+	// mobile link, short enough that is_online stops lying about a charger that is already gone.
+	wsPongWait = 2 * time.Minute
+	// wsSilenceWait is the same limit for a charge point that has never answered a ping. Not every
+	// OCPP stack implements pongs, and for one that does not, silence only becomes evidence once it
+	// outlasts the heartbeat interval we asked for in BootNotification - so this is derived from
+	// that interval rather than chosen, and must stay comfortably above it.
+	wsSilenceWait = 2 * defaultHeartbeatInterval * time.Second
 )
 
 // ErrResponseTimeout is returned when a charge point accepted a request but did
@@ -61,6 +79,12 @@ type Server struct {
 	// not be logged as unmatched. Guarded by pendingMutex.
 	fireAndForget map[string]struct{}
 	pendingMutex  sync.Mutex
+	// keepalive windows handed to every connection this server accepts. They default to the
+	// wsPingPeriod/wsPongWait/wsSilenceWait constants and are fields so a test can run the same
+	// liveness logic on a timescale it can wait for.
+	pingPeriod  time.Duration
+	pongWait    time.Duration
+	silenceWait time.Duration
 }
 
 // maxFireAndForget bounds the fire-and-forget set so a charge point that drops
@@ -79,6 +103,14 @@ type WebSocket struct {
 	isClosed       bool
 	watchdog       internal.StatusHandler
 	mutex          sync.Mutex
+	// pongSeen records that this charge point has answered a ping, which is what earns it the
+	// short silence window. Read and written only on the read goroutine: the pong handler runs
+	// inside ReadMessage, so no synchronisation is needed here.
+	pongSeen bool
+	// keepalive windows, copied from the server that accepted this connection
+	pingPeriod  time.Duration
+	pongWait    time.Duration
+	silenceWait time.Duration
 }
 
 type Pool struct {
@@ -211,6 +243,9 @@ func NewServer(conf *config.Config, logger internal.LogHandler) *Server {
 		logger:        logger,
 		pending:       make(map[string]chan string),
 		fireAndForget: make(map[string]struct{}),
+		pingPeriod:    wsPingPeriod,
+		pongWait:      wsPongWait,
+		silenceWait:   wsSilenceWait,
 	}
 
 	// register itself as a router for httpServer handler
@@ -303,6 +338,9 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 		isClosed:       false,
 		watchdog:       s.watchdog,
 		mutex:          sync.Mutex{},
+		pingPeriod:     s.pingPeriod,
+		pongWait:       s.pongWait,
+		silenceWait:    s.silenceWait,
 	}
 	s.pool.register <- &ws
 
@@ -310,20 +348,46 @@ func (s *Server) handleWsRequest(w http.ResponseWriter, r *http.Request, params 
 	go ws.writePump()
 }
 
+// readWindow is how long the connection may stay silent before the read deadline closes it. Any
+// frame pushes the deadline out again, data or pong alike, so this is the window for a charge point
+// that has stopped talking altogether rather than one that is merely idle between messages.
+func (ws *WebSocket) readWindow() time.Duration {
+	if ws.pongSeen {
+		return ws.pongWait
+	}
+	return ws.silenceWait
+}
+
 func (ws *WebSocket) readPump() {
 	defer func() {
 		ws.close()
 	}()
+	// Until this deadline exists, a connection whose peer vanishes without a FIN is only noticed
+	// when the kernel gives up retransmitting, which took upwards of twenty minutes on this fleet -
+	// all of it with the charge point recorded as online and its connectors offered to drivers.
+	_ = ws.conn.SetReadDeadline(time.Now().Add(ws.readWindow()))
+	ws.conn.SetPongHandler(func(string) error {
+		ws.pongSeen = true
+		return ws.conn.SetReadDeadline(time.Now().Add(ws.readWindow()))
+	})
 	for {
 		_, message, err := ws.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001) {
+			var netErr net.Error
+			switch {
+			case websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, 3001):
 				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
-			} else {
+			case errors.As(err, &netErr) && netErr.Timeout():
+				// worth telling apart from a transport failure: this one is our own deadline, so
+				// the question it raises is whether the window is too tight, not what the network did
+				ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf(
+					"silent for %s with no answer to keepalive pings: closing connection", ws.readWindow()))
+			default:
 				ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("read error: %s", err))
 			}
 			break
 		}
+		_ = ws.conn.SetReadDeadline(time.Now().Add(ws.readWindow()))
 		ws.pool.register <- ws
 		ws.logger.RawDataEvent("IN", string(message))
 		if ws.messageHandler != nil {
@@ -337,16 +401,25 @@ func (ws *WebSocket) readPump() {
 }
 
 func (ws *WebSocket) writePump() {
+	// the ping half of the keepalive: it gives an idle connection something to fail on, which is
+	// what turns the read deadline from a timer into a liveness check
+	ticker := time.NewTicker(ws.pingPeriod)
 	defer func() {
+		ticker.Stop()
+		// the pump reaching its end is the only evidence that it is not still spinning on a closed
+		// send channel, which is what it used to do; cheap to log, and it bounds the goroutine
+		ws.logger.Debug(fmt.Sprintf("%s: write pump stopped", ws.id))
 		ws.close()
 	}()
 	for {
+		// every exit here returns rather than breaking the select: the channel stays readable once
+		// closed and a failing socket keeps failing, so breaking only the select spins the pump
 		select {
 		case message, ok := <-ws.send:
 			if !ok {
 				//ws.logger.Debug(fmt.Sprintf("id %s leaving session", ws.id))
 				_ = ws.writeMessage(websocket.CloseMessage, []byte{})
-				break
+				return
 			}
 			ws.logger.RawDataEvent("OUT", string(message))
 
@@ -354,7 +427,14 @@ func (ws *WebSocket) writePump() {
 
 			if err != nil {
 				ws.logger.Warn(fmt.Sprintf("socket %s: %s", ws.id, err))
-				break
+				return
+			}
+		case <-ticker.C:
+			if err := ws.writeMessage(websocket.PingMessage, nil); err != nil {
+				// the write half noticing first is normal: a dead link fails a ping immediately,
+				// while the read half has to wait out its whole window
+				ws.logger.FeatureEvent(featureNameWebSocket, ws.id, fmt.Sprintf("keepalive ping failed: %s", err))
+				return
 			}
 		}
 	}
@@ -366,6 +446,9 @@ func (ws *WebSocket) writeMessage(messageType int, message []byte) error {
 	if ws.isClosed {
 		return fmt.Errorf("write cancelled, socket is closed")
 	}
+	// gorilla permits one writer at a time, which the mutex above provides; the deadline is what
+	// keeps a peer that has stopped reading from parking this goroutine indefinitely
+	_ = ws.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
 	return ws.conn.WriteMessage(messageType, message)
 }
 
