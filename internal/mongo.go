@@ -781,9 +781,20 @@ normal stop. The pointer on its own is not proof either: a stop that fails to wr
 still releases the connector, leaving a row that looks abandoned but may yet be finished properly.
 releasedBefore keeps the sweeper off those until the charge point has had a chance to report again.
 
+suspendedBefore is the same staleness test with a longer fuse, applied to a session the charge point
+describes as paused rather than dead: the connector still points at this transaction, it reports
+SuspendedEV or SuspendedEVSE, and the charge point is online. A car that has finished charging sits
+there for hours, and chargers in this fleet stop sampling while it does, so staleBefore alone reads
+a full battery as a dead charger and closes a session whose cable is still in the car. Anything less
+than all three signals falls back to staleBefore, which keeps the fuse short for the case the sweep
+exists for - a charge point that went silent mid-charge - and bounds the exemption: once the
+connection drops, is_online goes false and the long fuse no longer applies.
+
+OCPP 2.0.1 chargers report Occupied without saying who paused, so they never take the long fuse.
+
 Returns a slice of pointers to unfinished Transaction entities, or an error if the operation fails.
 */
-func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Time) ([]*entity.SweptTransaction, error) {
+func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore time.Time) ([]*entity.SweptTransaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -823,6 +834,28 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 			}},
 		},
 		{
+			// only is_online is wanted, and only to tell a paused session apart from a charge
+			// point that stopped talking; a missing charge point document must not exempt anything,
+			// so the projection leaves the field absent rather than defaulting it here
+			{"$lookup", bson.D{
+				{"from", collectionChargePoints},
+				{"let", bson.D{{"tp", "$charge_point_id"}}},
+				{"pipeline", bson.A{
+					bson.D{{"$match", bson.D{
+						{"$expr", bson.D{{"$eq", bson.A{"$charge_point_id", "$$tp"}}}},
+					}}},
+					bson.D{{"$project", bson.D{{"_id", 0}, {"is_online", 1}}}},
+				}},
+				{"as", "charge_point"},
+			}},
+		},
+		{
+			{"$unwind", bson.D{
+				{"path", "$charge_point"},
+				{"preserveNullAndEmptyArrays", true},
+			}},
+		},
+		{
 			{"$lookup", bson.D{
 				{"from", collectionMeterValues},
 				{"let", bson.D{{"tid", "$transaction_id"}}},
@@ -848,6 +881,28 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 						bson.D{{"$arrayElemAt", bson.A{"$meter.last", 0}}},
 					}},
 				}},
+				// whether the charge point is describing this session as paused rather than dead,
+				// which earns it the longer fuse. All three signals are required, and each defaults
+				// to the answer that denies the exemption when its document or field is absent
+				{"suspended", bson.D{
+					{"$and", bson.A{
+						bson.D{{"$eq", bson.A{
+							"$transaction_id",
+							bson.D{{"$ifNull", bson.A{"$connector.current_transaction_id", -1}}},
+						}}},
+						bson.D{{"$in", bson.A{
+							bson.D{{"$ifNull", bson.A{"$connector.status", ""}}},
+							bson.A{
+								string(core.ChargePointStatusSuspendedEV),
+								string(core.ChargePointStatusSuspendedEVSE),
+							},
+						}}},
+						bson.D{{"$eq", bson.A{
+							bson.D{{"$ifNull", bson.A{"$charge_point.is_online", false}}},
+							true,
+						}}},
+					}},
+				}},
 			}},
 		},
 		{
@@ -866,7 +921,10 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 							// UpdateTransaction lands, so give that write time to arrive
 							bson.D{{"$lte", bson.A{"$last_activity", releasedBefore}}},
 						}}},
-						bson.D{{"$lte", bson.A{"$last_activity", staleBefore}}},
+						bson.D{{"$lte", bson.A{
+							"$last_activity",
+							bson.D{{"$cond", bson.A{"$suspended", suspendedBefore, staleBefore}}},
+						}}},
 					}},
 				}},
 			}},
@@ -883,7 +941,13 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 							bson.D{{"$ifNull", bson.A{"$connector.current_transaction_id", "$transaction_id"}}},
 						}}},
 						"connector released without a stop",
-						"no activity from the charge point",
+						bson.D{{"$cond", bson.A{
+							// a row that outlasted the long fuse is a different story from a
+							// charger that went quiet mid-charge, and worth telling apart in the log
+							"$suspended",
+							"no activity from a suspended connector",
+							"no activity from the charge point",
+						}}},
 					}},
 				}},
 			}},
@@ -891,7 +955,7 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore time.Tim
 		{
 			// last_activity and sweep_cause survive for the caller to log; they are not
 			// stored, the caller writes back only the embedded transaction
-			{"$unset", bson.A{"connector", "meter"}},
+			{"$unset", bson.A{"connector", "charge_point", "meter", "suspended"}},
 		},
 	}
 

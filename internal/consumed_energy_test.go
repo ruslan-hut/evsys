@@ -5,25 +5,14 @@ import (
 	"time"
 
 	"evsys/entity"
-
-	"go.mongodb.org/mongo-driver/mongo"
 )
-
-func seedChargePoint(t *testing.T, db *MongoDB, id, locationId string) {
-	t.Helper()
-	withCollection(t, db, collectionChargePoints, func(c *mongo.Collection) {
-		if _, err := c.InsertOne(db.ctx, &entity.ChargePoint{Id: id, LocationId: locationId}); err != nil {
-			t.Fatalf("seed charge point: %v", err)
-		}
-	})
-}
 
 func TestGetTodayConsumedEnergy(t *testing.T) {
 	db := testClient(t)
 	now := time.Now().UTC()
 
-	seedChargePoint(t, db, "CP1", "loc1")
-	seedChargePoint(t, db, "CP2", "loc2")
+	seedChargePoint(t, db, &entity.ChargePoint{Id: "CP1", LocationId: "loc1"})
+	seedChargePoint(t, db, &entity.ChargePoint{Id: "CP2", LocationId: "loc2"})
 
 	// two sessions on CP1 today: 1000 + 500
 	seedTransaction(t, db, &entity.Transaction{

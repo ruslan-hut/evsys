@@ -40,6 +40,14 @@ const (
 	// sweeper treats it as abandoned. Meter values are triggered every 20s, so this leaves ample
 	// room for a charge point that is merely slow or briefly offline.
 	transactionStaleAfter = 20 * time.Minute
+	// transactionSuspendedStaleAfter is the same limit for a session the charge point reports as
+	// paused - SuspendedEV or SuspendedEVSE - while it is still online and its connector still
+	// points at the transaction. Chargers in this fleet stop sampling once the car stops drawing,
+	// so a full battery goes quiet exactly like a dead charger; at transactionStaleAfter the sweep
+	// closed live sessions and handed the connector to the next driver with the cable still in the
+	// car. Long enough for a car to sit full for the afternoon, short enough that nothing stays
+	// open indefinitely, and only in force while the charge point is connected.
+	transactionSuspendedStaleAfter = 6 * time.Hour
 	// transactionSweepInterval is how often abandoned transactions are looked for.
 	transactionSweepInterval = 5 * time.Minute
 	// transactionReleaseGrace is how long a transaction whose connector has moved on is left
@@ -1573,6 +1581,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 	transactions, err := h.database.GetUnfinishedTransactions(
 		now.Add(-transactionStaleAfter),
 		now.Add(-transactionReleaseGrace),
+		now.Add(-transactionSuspendedStaleAfter),
 	)
 	if err != nil {
 		h.logger.Error("get unfinished transactions", err)
