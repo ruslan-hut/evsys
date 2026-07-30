@@ -9,3 +9,4 @@
 *.bson
 dump/
 log/
+.log/

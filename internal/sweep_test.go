@@ -80,6 +80,15 @@ func seedConnector(t *testing.T, db *MongoDB, connector *entity.Connector) {
 	})
 }
 
+func seedChargePoint(t *testing.T, db *MongoDB, chargePoint *entity.ChargePoint) {
+	t.Helper()
+	withCollection(t, db, collectionChargePoints, func(c *mongo.Collection) {
+		if _, err := c.InsertOne(db.ctx, chargePoint); err != nil {
+			t.Fatalf("seed charge point: %v", err)
+		}
+	})
+}
+
 func seedMeterValue(t *testing.T, db *MongoDB, transactionId, value int, at time.Time) {
 	t.Helper()
 	withCollection(t, db, collectionMeterValues, func(c *mongo.Collection) {
@@ -113,6 +122,7 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	staleBefore := now.Add(-20 * time.Minute)
 	releasedBefore := now.Add(-2 * time.Minute)
+	suspendedBefore := now.Add(-6 * time.Hour)
 
 	tests := []struct {
 		name string
@@ -120,8 +130,14 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 		// connector document entirely
 		pointer     int
 		noConnector bool
-		finished    bool
-		startedAgo  time.Duration
+		// status is the connector's reported status; empty means the field is absent, as it is on
+		// a connector that has never reported. online seeds a charge_points document with that
+		// is_online; withoutChargePoint drops the document entirely
+		status             string
+		online             bool
+		withoutChargePoint bool
+		finished           bool
+		startedAgo         time.Duration
 		// meterAgo of 0 means no meter value at all
 		meterAgo time.Duration
 		swept    bool
@@ -188,6 +204,108 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			cause:       "no activity from the charge point",
 		},
 		{
+			// the regression this window was added for: a car that finished charging sits in
+			// SuspendedEV for hours and the charger stops sampling, which the plain staleness
+			// test read as a dead charge point - closing a session with the cable still in the car
+			name:       "suspended session on an online charge point is left alone",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     true,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      false,
+		},
+		{
+			name:       "suspended by the station is left alone just the same",
+			pointer:    1,
+			status:     "SuspendedEVSE",
+			online:     true,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      false,
+		},
+		{
+			// bounded, so nothing stays open forever
+			name:       "suspended session that outlasts the long window is swept",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     true,
+			startedAgo: 9 * time.Hour,
+			meterAgo:   7 * time.Hour,
+			swept:      true,
+			cause:      "no activity from a suspended connector",
+		},
+		{
+			// the exemption has to end when the charger stops being reachable, or a charge point
+			// that dropped while suspended would hold its connector for the whole long window
+			name:       "suspended session on an offline charge point is swept",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     false,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      true,
+			cause:      "no activity from the charge point",
+		},
+		{
+			// the short fuse still belongs to the case the sweep was written for: meter values
+			// that dry up while the connector claims to be charging mean something broke
+			name:       "charging session whose meter values dried up is still swept",
+			pointer:    1,
+			status:     "Charging",
+			online:     true,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      true,
+			cause:      "no activity from the charge point",
+		},
+		{
+			// occupied but not in a session, so not a pause the driver is waiting out
+			name:       "finishing connector gets no extra window",
+			pointer:    1,
+			status:     "Finishing",
+			online:     true,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      true,
+			cause:      "no activity from the charge point",
+		},
+		{
+			// OCPP 2.0.1 does not say who paused the session, so it cannot earn the long window
+			name:       "occupied connector gets no extra window",
+			pointer:    1,
+			status:     "Occupied",
+			online:     true,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      true,
+			cause:      "no activity from the charge point",
+		},
+		{
+			// a suspended connector whose charge point cannot be read is not proof of anything,
+			// and a missing document must not be worth six hours of exemption
+			name:               "suspended session with no charge point document is swept",
+			pointer:            1,
+			status:             "SuspendedEV",
+			withoutChargePoint: true,
+			startedAgo:         2 * time.Hour,
+			meterAgo:           30 * time.Minute,
+			swept:              true,
+			cause:              "no activity from the charge point",
+		},
+		{
+			// the release branch outranks the long window: the connector has moved on, so whatever
+			// status it now reports belongs to the next session, not to this one
+			name:       "suspended connector that moved on is still swept",
+			pointer:    99,
+			status:     "SuspendedEV",
+			online:     true,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   10 * time.Minute,
+			swept:      true,
+			cause:      "connector released without a stop",
+		},
+		{
 			name:       "finished transaction is never returned",
 			pointer:    1,
 			finished:   true,
@@ -211,14 +329,18 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 				seedConnector(t, db, &entity.Connector{
 					Id:                   1,
 					ChargePointId:        "CP1",
+					Status:               test.status,
 					CurrentTransactionId: test.pointer,
 				})
+			}
+			if !test.withoutChargePoint {
+				seedChargePoint(t, db, &entity.ChargePoint{Id: "CP1", IsOnline: test.online})
 			}
 			if test.meterAgo != 0 {
 				seedMeterValue(t, db, 1, 500, now.Add(-test.meterAgo))
 			}
 
-			got, err := db.GetUnfinishedTransactions(staleBefore, releasedBefore)
+			got, err := db.GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore)
 			if err != nil {
 				t.Fatalf("GetUnfinishedTransactions: %v", err)
 			}
@@ -255,9 +377,12 @@ func TestGetUnfinishedTransactionsStripsJoinFields(t *testing.T) {
 		MeterStart:    10,
 	})
 	seedConnector(t, db, &entity.Connector{Id: 1, ChargePointId: "CP1", CurrentTransactionId: 7})
+	// seeded so the charge point join actually produces a field for the $unset to strip
+	seedChargePoint(t, db, &entity.ChargePoint{Id: "CP1", IsOnline: true})
 	seedMeterValue(t, db, 7, 900, now.Add(-40*time.Minute))
 
-	got, err := db.GetUnfinishedTransactions(now.Add(-20*time.Minute), now.Add(-2*time.Minute))
+	got, err := db.GetUnfinishedTransactions(
+		now.Add(-20*time.Minute), now.Add(-2*time.Minute), now.Add(-6*time.Hour))
 	if err != nil {
 		t.Fatalf("GetUnfinishedTransactions: %v", err)
 	}
@@ -280,7 +405,7 @@ func TestGetUnfinishedTransactionsStripsJoinFields(t *testing.T) {
 			t.Fatalf("read back: %v", err)
 		}
 	})
-	for _, field := range []string{"connector", "meter", "last_activity", "sweep_cause"} {
+	for _, field := range []string{"connector", "charge_point", "meter", "suspended", "last_activity", "sweep_cause"} {
 		if _, ok := raw[field]; ok {
 			t.Errorf("pipeline field %q leaked into the stored document", field)
 		}

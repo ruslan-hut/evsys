@@ -44,7 +44,7 @@ type Database interface {
 	GetTransaction(id int) (*entity.Transaction, error)
 	AddTransaction(transaction *entity.Transaction) error
 	UpdateTransaction(transaction *entity.Transaction) error
-	GetUnfinishedTransactions(staleBefore, releasedBefore time.Time) ([]*entity.SweptTransaction, error)
+	GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore time.Time) ([]*entity.SweptTransaction, error)
 	GetUnfinishedTransactionsForChargePoint(chargePointId string) ([]*entity.Transaction, error)
 	GetTodayConsumedEnergy() ([]*entity.ConsumedEnergy, error)
 	SaveStopTransactionRequest(stopTransaction *core.StopTransactionRequest) error
