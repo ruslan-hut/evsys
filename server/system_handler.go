@@ -499,7 +499,7 @@ func (h *SystemHandler) OnBootNotification(chargePointId string, request *core.B
 				}
 			}
 		}
-		go h.reconcileAfterBoot(chargePointId)
+		go h.reconcileAfterBoot(chargePointId, newTransactionId)
 		go h.enforceMeterValueInterval(chargePointId, state.triggerMessage)
 		go h.enforceMeterMeasurands(chargePointId)
 	} else {
@@ -1653,14 +1653,24 @@ handled normally, since OnStopTransaction overwrites a transaction the system ha
 // already finished transaction. Waiting costs nothing: a session that is genuinely dead stays dead,
 // and the reconcile re-reads the open transactions when the delay elapses, so one closed in the
 // meantime is simply no longer in the list.
-func (h *SystemHandler) reconcileAfterBoot(chargePointId string) {
+// reconcileAfterBoot must be called with h.mux held, so the id watermark it captures cannot move
+// between the read and the boot it belongs to.
+func (h *SystemHandler) reconcileAfterBoot(chargePointId string, idWatermark int) {
 	if h.bootReconcileDelay > 0 {
 		time.Sleep(h.bootReconcileDelay)
 	}
-	h.reconcileChargePointTransactions(chargePointId)
+	h.reconcileChargePointTransactions(chargePointId, idWatermark)
 }
 
-func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string) {
+/*
+reconcileChargePointTransactions closes the transactions the charge point left open across the
+boot. idWatermark is the next transaction id at the moment the BootNotification arrived: ids are
+handed out in order, so every id at or above it belongs to a session that started after the boot
+and cannot be a leftover of it. The watermark is used rather than the transaction's TimeStart,
+because TimeStart carries the charge point's own clock and a charger running minutes behind the
+server would place a brand new session before the boot.
+*/
+func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string, idWatermark int) {
 	if h.database == nil {
 		return
 	}
@@ -1672,6 +1682,13 @@ func (h *SystemHandler) reconcileChargePointTransactions(chargePointId string) {
 	}
 	cutoff := h.getTime().Add(-transactionReleaseGrace)
 	for _, transaction := range transactions {
+		// a session started after the boot is a driver who plugged in while the reconcile was
+		// waiting out its delay; it has had no time to report a meter value yet, so the check
+		// below would close it as one that never charged, seconds into a live charge
+		if idWatermark > 0 && transaction.Id >= idWatermark {
+			h.logger.Warn(fmt.Sprintf("transaction #%v on %s started after the boot, left open", transaction.Id, chargePointId))
+			continue
+		}
 		if meterValue, _ := h.database.ReadTransactionMeterValue(transaction.Id); meterValue != nil {
 			if meterValue.Time.After(cutoff) {
 				h.logger.Warn(fmt.Sprintf("transaction #%v is still reporting on %s, left open", transaction.Id, chargePointId))

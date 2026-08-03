@@ -229,7 +229,7 @@ func TestReconcileAfterBootWaitsForQueuedStop(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		h.reconcileAfterBoot("CP1")
+		h.reconcileAfterBoot("CP1", 2)
 		close(done)
 	}()
 
@@ -251,6 +251,84 @@ func TestReconcileAfterBootWaitsForQueuedStop(t *testing.T) {
 	}
 	if updated {
 		t.Error("a transaction closed by the charger's own stop during the delay must not be closed again by the reconcile")
+	}
+}
+
+/*
+TestReconcileAfterBootLeavesSessionsStartedAfterTheBoot covers the other half of that race, seen in
+production on Wallbox3: the charger rebooted, a driver started a new session 49s later, and the
+reconcile - still waiting out its delay - read that session as one of the charge point's open
+transactions and closed it as "aborted by system" 11s into the charge. A session started after the
+boot has no meter value yet, so the still-reporting check cannot save it; it has to be recognised by
+its id being at or above the watermark taken when the BootNotification arrived.
+*/
+func TestReconcileAfterBootLeavesSessionsStartedAfterTheBoot(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := &bootReconcileStubDB{}
+	h := newStopHandler(t, db, 1)
+	h.bootReconcileDelay = 200 * time.Millisecond
+	logger := &capturingLogger{}
+	h.logger = logger
+
+	// the boot happens with nothing open; the watermark is the next id the server will hand out
+	watermark := 4652
+
+	done := make(chan struct{})
+	go func() {
+		h.reconcileAfterBoot("CP1", watermark)
+		close(done)
+	}()
+
+	// a driver starts a new session while the reconcile is still waiting. Its TimeStart is ahead
+	// of the boot, but the charger's clock is behind the server's, so the timestamp alone would
+	// place it before the boot - only the id watermark identifies it correctly.
+	db.mu.Lock()
+	db.open = []*entity.Transaction{{
+		Id: watermark, ConnectorId: 1, ChargePointId: "CP1",
+		MeterStart: 270000, TimeStart: now.Add(-5 * time.Minute),
+	}}
+	db.mu.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile did not run")
+	}
+
+	if _, updated := db.state(); updated {
+		t.Error("the reconcile closed a session that started after the boot")
+	}
+	if logger.has("was left open by a reboot") {
+		t.Error("a session started after the boot must not be reported as left open by the reboot")
+	}
+	if !logger.has("started after the boot, left open") {
+		t.Error("the reconcile should record why it skipped the session")
+	}
+}
+
+// TestReconcileAfterBootClosesSessionsFromBeforeTheBoot is the counterpart: an id below the
+// watermark predates the boot and must still be closed, or the watermark would disable the
+// reconcile entirely.
+func TestReconcileAfterBootClosesSessionsFromBeforeTheBoot(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	db := &bootReconcileStubDB{
+		open: []*entity.Transaction{{
+			Id: 4651, ConnectorId: 1, ChargePointId: "CP1",
+			MeterStart: 20000, TimeStart: now.Add(-time.Hour),
+		}},
+	}
+	h := newStopHandler(t, db, 1)
+	h.bootReconcileDelay = 0
+	logger := &capturingLogger{}
+	h.logger = logger
+
+	h.reconcileAfterBoot("CP1", 4652)
+
+	if _, updated := db.state(); !updated {
+		t.Error("a session open from before the boot should have been closed")
+	}
+	if !logger.has("was left open by a reboot") {
+		t.Error("closing a pre-boot session should be reported")
 	}
 }
 
