@@ -37,7 +37,7 @@ const profileAccepted = "Accepted"
 
 // powerSlots are assigned highest-first, one connector per slot;
 // when all slots are taken, further connectors get baseLimit
-var powerSlots = []int{330, 195, 145, 115}
+var powerSlots = []int{150, 115, 85}
 
 type LoadBalancer struct {
 	database     Repository
