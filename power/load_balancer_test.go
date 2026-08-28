@@ -93,6 +93,10 @@ type stubServer struct {
 	// silent makes the stub accept profile requests and never answer them, so
 	// the balancer falls through to its response timeout.
 	silent bool
+	// stackLevelCeiling, when set, makes the stub behave like a charge point with
+	// a real ceiling: it accepts profiles at or below the level and refuses the
+	// rest. It overrides payload for profile requests.
+	stackLevelCeiling *int
 	// configCalls counts how many times its configuration was read.
 	configCalls int
 	// profiles records the charging profiles the balancer installed, in order.
@@ -130,6 +134,12 @@ func (s *stubServer) SendRequestWithResponse(_ string, request ocpp.Request) (<-
 	silent := s.silent
 	if profile, ok := request.(*smartcharging.SetChargingProfileRequest); ok {
 		s.profiles = append(s.profiles, profile.ChargingProfile)
+		if s.stackLevelCeiling != nil {
+			payload = `{"status":"Rejected"}`
+			if profile.ChargingProfile.StackLevel <= *s.stackLevelCeiling {
+				payload = `{"status":"Accepted"}`
+			}
+		}
 	}
 	s.mutex.Unlock()
 
@@ -156,6 +166,42 @@ func (s *stubServer) installedProfiles() []*types.ChargingProfile {
 // stubLog records feature events so a test can assert on what the load balancer
 // reported. The verdict goroutine writes concurrently with the test, hence the
 // mutex.
+// waitForAcceptedStackLevel blocks until the store has recorded a level the
+// charge point honoured. That happens on the verdict goroutine, after the
+// verdict itself is stored, so waiting on the verdict is not enough.
+func waitForAcceptedStackLevel(t *testing.T, lb *LoadBalancer, chargePointId string) int {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if limits := lb.capabilities.get(chargePointId); limits.acceptedKnown {
+			return limits.acceptedStackLevel
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s recorded no accepted stack level", chargePointId)
+	return 0
+}
+
+// startSession runs one session on a connector that may already have held a
+// limit, so a test can drive several rounds of stack level negotiation.
+func startSession(lb *LoadBalancer, connector *entity.Connector, transactionId int) {
+	connector.CurrentTransactionId = transactionId
+	connector.CurrentPowerLimit = 0
+	lb.CheckPowerLimit(connector.ChargePointId)
+}
+
+// txStackLevels returns the stack levels of the transaction profiles installed
+// so far, in order.
+func txStackLevels(server *stubServer) []int {
+	var levels []int
+	for _, profile := range server.installedProfiles() {
+		if profile.ChargingProfilePurpose == types.ChargingProfilePurposeTxProfile {
+			levels = append(levels, profile.StackLevel)
+		}
+	}
+	return levels
+}
+
 type stubLog struct {
 	mutex  sync.Mutex
 	events []string
@@ -582,6 +628,50 @@ func TestCapabilityStoreLearnsCeilingWithoutBlockingDiscovery(t *testing.T) {
 		}
 	})
 
+	t.Run("a level the charge point has honoured is not demoted", func(t *testing.T) {
+		store := newCapabilityStore()
+		store.recordAccepted("chp1", 9)
+
+		if store.lowerStackLevel("chp1", 8) {
+			t.Fatal("a refusal at level 9 demoted a charge point that has installed " +
+				"profiles at level 9; nothing ever raises the ceiling back")
+		}
+		if got := store.get("chp1").stackLevelFor(smartcharging.TxProfileStackLevel); got != 10 {
+			t.Fatalf("stack level %d, want 10 left untouched", got)
+		}
+	})
+
+	t.Run("an accepted level survives a configuration read", func(t *testing.T) {
+		// PE00001 sends a BootNotification roughly twice a day, and each one
+		// re-reads the configuration. Forgetting there what the hardware has
+		// already honoured would hand the ratchet back its two demotions a day.
+		store := newCapabilityStore()
+		store.recordAccepted("chp1", 9)
+
+		reported, err := parseCapabilities(configResponse("10", "Current"))
+		if err != nil {
+			t.Fatalf("parseCapabilities: %v", err)
+		}
+		store.record("chp1", reported)
+
+		if store.lowerStackLevel("chp1", 8) {
+			t.Fatal("the configuration read cleared the accepted level")
+		}
+	})
+
+	t.Run("a charge point below its accepted level is still demoted", func(t *testing.T) {
+		// the guard is about levels that worked, not a floor on demotion itself
+		store := newCapabilityStore()
+		store.recordAccepted("chp1", 3)
+
+		if !store.lowerStackLevel("chp1", 9) {
+			t.Fatal("a refusal at level 10 was not recorded")
+		}
+		if got := store.get("chp1").maxStackLevel; got != 9 {
+			t.Fatalf("ceiling %d, want 9", got)
+		}
+	})
+
 	t.Run("a higher learned ceiling does not override a lower report", func(t *testing.T) {
 		store := newCapabilityStore()
 		store.lowerStackLevel("chp1", 9)
@@ -651,5 +741,109 @@ func TestBalancingDisabledWithoutLocationLimit(t *testing.T) {
 	lb.CheckPowerLimit("chp1")
 	if connectors[0].CurrentPowerLimit != 0 {
 		t.Fatalf("got %dA, want no limit when location power limit is 0", connectors[0].CurrentPowerLimit)
+	}
+}
+
+// The ratchet this guards against: a charge point refuses a profile at a level
+// it has installed profiles at many times before, and the balancer writes that
+// down as a ceiling. Nothing ever raises it back, so every such refusal costs a
+// level permanently - PE00001 in this fleet walked 9 -> 8 -> 7 -> 6 over six
+// days, on levels that had each worked dozens of times, and only a restart of
+// the central system would have reset it.
+func TestAcceptedStackLevelIsNotDemotedByLaterRefusal(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	log := lb.log.(*stubLog)
+	repo := lb.database.(*stubRepo)
+
+	lb.onChargePointBoot("chp1")
+	log.waitForEvent(t, "ChargeProfileMaxStackLevel=10")
+
+	// the charge point honours level 10
+	startSession(lb, connectors[0], 7)
+	if got := waitForAcceptedStackLevel(t, lb, "chp1"); got != 10 {
+		t.Fatalf("accepted stack level %d, want 10", got)
+	}
+
+	// and now refuses at that same level
+	server.mutex.Lock()
+	server.payload = `{"status":"Rejected"}`
+	server.mutex.Unlock()
+
+	startSession(lb, connectors[0], 8)
+	// one accepted verdict, then the refusal and its retry
+	repo.waitForVerdicts(t, "chp1", 1, 3)
+
+	if got := lb.capabilities.get("chp1").maxStackLevel; got != 10 {
+		t.Fatalf("ceiling ratcheted to %d: a refusal at a level the charge point "+
+			"has already honoured was recorded as a capability", got)
+	}
+	log.waitForEvent(t, "is not a new ceiling")
+
+	// the session itself is still retried a level lower - a session that takes no
+	// limit charges at whatever the hardware allows
+	levels := txStackLevels(server)
+	if len(levels) != 3 || levels[1] != 10 || levels[2] != 9 {
+		t.Fatalf("installed stack levels %v, want the refusal at 10 retried at 9", levels)
+	}
+}
+
+// The demotion still has to work where it was meant to: a charge point whose
+// real ceiling is below what it reports must be found, and then left alone.
+func TestStackLevelConvergesToRealCeilingAndStops(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	ceiling := 8
+	server.stackLevelCeiling = &ceiling
+	repo := lb.database.(*stubRepo)
+
+	lb.onChargePointBoot("chp1")
+	lb.log.(*stubLog).waitForEvent(t, "ChargeProfileMaxStackLevel=10")
+
+	// One level per session, since a session only retries once: the first is
+	// refused at 10 and 9, the second at 9 before 8 lands, the third goes
+	// straight to 8. The verdict counts are what each session leaves behind, and
+	// waiting on them keeps the next session from starting mid-retry.
+	for session, verdicts := range []int{2, 4, 5} {
+		startSession(lb, connectors[0], session+1)
+		repo.waitForVerdicts(t, "chp1", 1, verdicts)
+	}
+
+	if got := waitForAcceptedStackLevel(t, lb, "chp1"); got != 8 {
+		t.Fatalf("accepted stack level %d, want the real ceiling 8", got)
+	}
+	if got := lb.capabilities.get("chp1").maxStackLevel; got != 8 {
+		t.Fatalf("ceiling %d, want 8", got)
+	}
+
+	// having found 8, it stays there: the last session is a single attempt
+	levels := txStackLevels(server)
+	if got := levels[len(levels)-1]; got != 8 {
+		t.Fatalf("last attempt at stack level %d, want 8", got)
+	}
+	for _, level := range levels {
+		if level < 8 {
+			t.Fatalf("walked below the working level: %v", levels)
+		}
+	}
+}
+
+// A charge point refusing at every level is not a stack level problem, and the
+// connector has no limit in force. Saying nothing makes that indistinguishable
+// from a limit correctly applied.
+func TestRefusalAtEveryStackLevelIsReported(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.payload = `{"status":"Rejected"}`
+	log := lb.log.(*stubLog)
+
+	lb.capabilities.lowerStackLevel("chp1", 0)
+	startSession(lb, connectors[0], 7)
+
+	log.waitForEvent(t, "was refused at every stack level down to 0")
+	if levels := txStackLevels(server); len(levels) != 1 || levels[0] != 0 {
+		t.Fatalf("installed stack levels %v, want a single attempt at 0", levels)
 	}
 }

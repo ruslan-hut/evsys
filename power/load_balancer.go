@@ -203,19 +203,32 @@ func (lb *LoadBalancer) recordVerdict(connector *entity.Connector, status string
 	}
 }
 
-// sendTransactionProfile installs a session's power limit, stepping the stack
-// level down and retrying if the charge point refuses. OCPP 1.6 defines
-// ChargeProfileMaxStackLevel both as the highest usable level and as the number
-// of levels available, so a charge point reporting 10 may accept only 0..9. The
-// retry settles that against the hardware instead of guessing, and the working
-// level is remembered for later profiles.
-func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powerLimit int, connectorInfo string, retriesLeft int) error {
-	chargePointId := connector.ChargePointId
-	limits := lb.capabilities.get(chargePointId)
+// sendTransactionProfile installs a session's power limit at the stack level the
+// charge point is currently believed to accept.
+func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powerLimit int, connectorInfo string) error {
+	limits := lb.capabilities.get(connector.ChargePointId)
 	if limits.known && !limits.allowsCurrent {
 		return fmt.Errorf("charge point accepts %s schedules only", limits.allowedUnits)
 	}
-	stackLevel := limits.stackLevelFor(smartcharging.TxProfileStackLevel)
+	return lb.sendTransactionProfileAt(connector, powerLimit, connectorInfo,
+		limits.stackLevelFor(smartcharging.TxProfileStackLevel), stackLevelRetries)
+}
+
+// sendTransactionProfileAt installs the limit at an explicit stack level, stepping
+// down and retrying if the charge point refuses. OCPP 1.6 defines
+// ChargeProfileMaxStackLevel both as the highest usable level and as the number
+// of levels available, so a charge point reporting 10 may accept only 0..9. The
+// retry settles that against the hardware instead of guessing.
+//
+// The retry and the remembered ceiling are deliberately separate. Retrying is
+// this session's business and always worth one step - a session that takes no
+// limit charges at whatever the hardware allows. Lowering the ceiling is a claim
+// about the charge point that outlives the session, and a refusal at a level
+// that has worked before is no evidence for it; the store decides that, not the
+// retry. The level is passed in rather than re-read for exactly that reason: the
+// store is entitled to refuse the demotion the retry is about to act on.
+func (lb *LoadBalancer) sendTransactionProfileAt(connector *entity.Connector, powerLimit int, connectorInfo string, stackLevel, retriesLeft int) error {
+	chargePointId := connector.ChargePointId
 	transactionId := connector.CurrentTransactionId
 
 	description := fmt.Sprintf("power limit %dA for %s at stack level %d", powerLimit, connectorInfo, stackLevel)
@@ -228,9 +241,7 @@ func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powe
 	return lb.sendProfile(chargePointId, description, request, func(status string) {
 		lb.recordVerdict(connector, status, powerLimit, stackLevel)
 		if status == entity.ProfileStatusAccepted {
-			return
-		}
-		if retriesLeft <= 0 || stackLevel <= 0 {
+			lb.capabilities.recordAccepted(chargePointId, stackLevel)
 			return
 		}
 		// Only an outright refusal is worth stepping down for. Silence means the
@@ -239,8 +250,24 @@ func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powe
 		if status != entity.ProfileStatusRejected && status != entity.ProfileStatusNotSupported {
 			return
 		}
-		if !lb.capabilities.lowerStackLevel(chargePointId, stackLevel-1) {
+		if stackLevel <= 0 {
+			// every level has been tried and refused, so the refusals were never
+			// about the stack level and this connector has no limit in force
+			lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf(
+				"CANNOT ENFORCE POWER LIMITS: the profile for %s was refused at every stack level down to 0",
+				connectorInfo))
 			return
+		}
+		if retriesLeft <= 0 {
+			return
+		}
+		if lb.capabilities.lowerStackLevel(chargePointId, stackLevel-1) {
+			lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf(
+				"stack level ceiling lowered to %d after refusal at %d", stackLevel-1, stackLevel))
+		} else {
+			lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf(
+				"refusal at stack level %d is not a new ceiling; keeping %d for later sessions",
+				stackLevel, lb.capabilities.get(chargePointId).stackLevelFor(smartcharging.TxProfileStackLevel)))
 		}
 		// The connector is read again rather than captured: retrying a limit for
 		// a session that has since stopped would install a profile for a
@@ -248,7 +275,7 @@ func (lb *LoadBalancer) sendTransactionProfile(connector *entity.Connector, powe
 		if connector.CurrentTransactionId != transactionId {
 			return
 		}
-		if err := lb.sendTransactionProfile(connector, powerLimit, connectorInfo, retriesLeft-1); err != nil {
+		if err := lb.sendTransactionProfileAt(connector, powerLimit, connectorInfo, stackLevel-1, retriesLeft-1); err != nil {
 			lb.log.FeatureEvent(featureName, chargePointId,
 				fmt.Sprintf("retry at stack level %d failed: %s", stackLevel-1, err))
 		}
@@ -388,7 +415,7 @@ func (lb *LoadBalancer) updateConnectorPower(powerLimit int, connector *entity.C
 		if connector.EvseId != nil {
 			connectorInfo = fmt.Sprintf("EVSE %d / connector %d", *connector.EvseId, connector.Id)
 		}
-		if err := lb.sendTransactionProfile(connector, powerLimit, connectorInfo, stackLevelRetries); err != nil {
+		if err := lb.sendTransactionProfile(connector, powerLimit, connectorInfo); err != nil {
 			return fmt.Errorf("sending profile update request: %s", err)
 		}
 		connector.CurrentPowerLimit = powerLimit

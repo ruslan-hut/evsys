@@ -54,6 +54,13 @@ type capabilities struct {
 	allowsCurrent bool
 	// allowedUnits is the raw reported list, kept for logging.
 	allowedUnits string
+	// acceptedKnown reports whether acceptedStackLevel means anything.
+	acceptedKnown bool
+	// acceptedStackLevel is the highest level at which this charge point has
+	// actually installed a profile. It is the only evidence that separates a
+	// ceiling from a refusal for some unrelated reason, and it is what keeps the
+	// learned ceiling from ratcheting down forever.
+	acceptedStackLevel int
 	// lastAttempt is when we last asked. Zero means never; it is only consulted
 	// while known is false, to keep a charge point that does not answer from
 	// being asked on every session event.
@@ -100,6 +107,11 @@ func (s *capabilityStore) record(chargePointId string, reported capabilities) ca
 	if previous.stackLevelKnown && previous.maxStackLevel < reported.maxStackLevel {
 		reported.maxStackLevel = previous.maxStackLevel
 	}
+	// What the charge point has already honoured is a fact about the hardware and
+	// survives it answering the configuration read again - a charge point that
+	// reboots hourly would otherwise forget it every time.
+	reported.acceptedKnown = previous.acceptedKnown
+	reported.acceptedStackLevel = previous.acceptedStackLevel
 	s.entries[chargePointId] = reported
 	return reported
 }
@@ -133,6 +145,16 @@ func (s *capabilityStore) lowerStackLevel(chargePointId string, level int) bool 
 	if entry.stackLevelKnown && entry.maxStackLevel <= level {
 		return false
 	}
+	// A level the charge point has already installed a profile at is not a
+	// ceiling it just revealed, so whatever the refusal was about, it was not
+	// that. Writing it down anyway is a one-way ratchet with nothing to raise it
+	// back: one charge point in this fleet walked 9 -> 8 -> 7 -> 6 over six days
+	// on refusals at levels that had each worked dozens of times, and would have
+	// reached 0 in a fortnight. The session still retries a level lower - it is
+	// only the memory of it that compounds.
+	if entry.acceptedKnown && level < entry.acceptedStackLevel {
+		return false
+	}
 	// Only the ceiling is learned here. A rejection does not say why, so it must
 	// not be read as the charge point having reported its configuration -
 	// otherwise a charge point that refuses every profile would never be asked
@@ -141,6 +163,20 @@ func (s *capabilityStore) lowerStackLevel(chargePointId string, level int) bool 
 	entry.maxStackLevel = level
 	s.entries[chargePointId] = entry
 	return true
+}
+
+// recordAccepted remembers the highest stack level this charge point has
+// actually honoured, which is what later refusals are weighed against.
+func (s *capabilityStore) recordAccepted(chargePointId string, level int) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	entry := s.entries[chargePointId]
+	if entry.acceptedKnown && entry.acceptedStackLevel >= level {
+		return
+	}
+	entry.acceptedKnown = true
+	entry.acceptedStackLevel = level
+	s.entries[chargePointId] = entry
 }
 
 // parseCapabilities reads a GetConfiguration response. Keys the charge point
