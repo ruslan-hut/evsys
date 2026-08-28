@@ -364,15 +364,36 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 
 	// send set charging profile request to each active connector
 	for _, chp := range location.Evses {
-		if chp.SmartCharging {
-			for _, connector := range chp.Connectors {
-				if connector.CurrentTransactionId >= 0 && connector.CurrentPowerLimit > 0 {
+		if !chp.SmartCharging {
+			continue
+		}
+		for _, connector := range chp.Connectors {
+			assigned := powerLimit
+			if connector.CurrentTransactionId >= 0 && connector.CurrentPowerLimit > 0 {
+				if !connector.LimitRefused() {
 					continue
 				}
-				err := lb.updateConnectorPower(powerLimit, connector)
-				if err != nil {
-					lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error updating connector: %s", err))
-				}
+				// CurrentPowerLimit is written when the profile is queued, so a
+				// connector whose profile was refused looks identical to one
+				// charging under a limit - and the slot it books is counted
+				// above either way. Reinstalling is what makes the record true
+				// again; until it lands this connector is a hole in the budget
+				// that no amount of restraint elsewhere closes.
+				//
+				// The slot is already this session's, so the reattempt asks for
+				// that limit rather than the one computed for new sessions. A
+				// refusal is often transient - a charge point busy with its own
+				// profile store, a link that dropped mid-request - so the next
+				// session event at this location is the natural moment to try
+				// again, and the verdict recorded for the new attempt decides
+				// whether there is a next one.
+				assigned = connector.CurrentPowerLimit
+				lb.log.FeatureEvent(featureName, connector.ChargePointId, fmt.Sprintf(
+					"connector %d has no limit in force: %dA answered with %s; reinstalling",
+					connector.Id, connector.CurrentPowerLimit, connector.LastProfile.Answer()))
+			}
+			if err := lb.updateConnectorPower(assigned, connector); err != nil {
+				lb.log.FeatureEvent(featureName, chargePointId, fmt.Sprintf("error updating connector: %s", err))
 			}
 		}
 	}

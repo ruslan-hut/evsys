@@ -56,6 +56,32 @@ func (v *ProfileVerdict) Accepted() bool {
 	return v != nil && v.Status == ProfileStatusAccepted
 }
 
+// Answer reports what the charge point said about the profile, or that nothing
+// was recorded. Nil-safe, so a caller logging the reason a limit is not in force
+// does not have to know whether an answer ever arrived.
+func (v *ProfileVerdict) Answer() string {
+	if v == nil {
+		return "no answer recorded"
+	}
+	return v.Status
+}
+
+// LimitRefused reports whether the charge point answered the limit this
+// connector currently records with anything other than an acceptance. A refusal
+// and silence are the same thing here: neither leaves a limit in force, and the
+// session charges at whatever the hardware allows while CurrentPowerLimit says
+// otherwise.
+//
+// Two cases deliberately read as false. A verdict for some other limit is a
+// leftover from an earlier profile and says nothing about this one; no verdict
+// at all means the answer has not arrived yet. Treating either as a refusal
+// would reinstall the same profile on every session event at the location.
+func (c *Connector) LimitRefused() bool {
+	return c.LastProfile != nil &&
+		c.LastProfile.Limit == c.CurrentPowerLimit &&
+		!c.LastProfile.Accepted()
+}
+
 func (c *Connector) Lock() {
 	c.mutex.Lock()
 }

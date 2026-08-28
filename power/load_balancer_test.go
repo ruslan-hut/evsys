@@ -190,6 +190,22 @@ func startSession(lb *LoadBalancer, connector *entity.Connector, transactionId i
 	lb.CheckPowerLimit(connector.ChargePointId)
 }
 
+// txProfileLimits returns the amperage of every transaction profile installed for
+// a transaction, in order.
+func txProfileLimits(server *stubServer, transactionId int) []int {
+	var limits []int
+	for _, profile := range server.installedProfiles() {
+		if profile.ChargingProfilePurpose != types.ChargingProfilePurposeTxProfile {
+			continue
+		}
+		if profile.TransactionId != transactionId {
+			continue
+		}
+		limits = append(limits, int(profile.ChargingSchedule.ChargingSchedulePeriod[0].Limit))
+	}
+	return limits
+}
+
 // txStackLevels returns the stack levels of the transaction profiles installed
 // so far, in order.
 func txStackLevels(server *stubServer) []int {
@@ -407,6 +423,16 @@ func TestVerdictAcceptedHelper(t *testing.T) {
 	}
 	if !(&entity.ProfileVerdict{Status: entity.ProfileStatusAccepted}).Accepted() {
 		t.Error("an accepted profile does not read as enforced")
+	}
+
+	// Answer is logged on the path that reinstalls a refused limit, where the
+	// verdict is non-nil only by an invariant held elsewhere. Dereferencing it
+	// directly panicked the balancer under its own lock.
+	if got := missing.Answer(); got == "" {
+		t.Error("a connector that was never sent a profile has no answer to log")
+	}
+	if got := (&entity.ProfileVerdict{Status: entity.ProfileStatusRejected}).Answer(); got != entity.ProfileStatusRejected {
+		t.Errorf("Answer() = %q, want %q", got, entity.ProfileStatusRejected)
 	}
 }
 
@@ -845,5 +871,155 @@ func TestRefusalAtEveryStackLevelIsReported(t *testing.T) {
 	log.waitForEvent(t, "was refused at every stack level down to 0")
 	if levels := txStackLevels(server); len(levels) != 1 || levels[0] != 0 {
 		t.Fatalf("installed stack levels %v, want a single attempt at 0", levels)
+	}
+}
+
+// current_power_limit is written when the profile is queued, so a connector whose
+// profile was refused is indistinguishable from one charging under a limit. The
+// verdict was recorded and then never read: the refused session kept charging at
+// whatever its hardware allowed, its slot stayed booked, and the balancer handed
+// the next session the slot below it - a hole in the budget that no restraint
+// elsewhere closes.
+func TestRefusedLimitIsReinstalled(t *testing.T) {
+	lb, connectors := newTestBalancer(2)
+	server := lb.server.(*stubServer)
+	log := lb.log.(*stubLog)
+
+	// connector 1 holds the top slot, but the charge point refused the profile
+	connectors[0].CurrentTransactionId = 7
+	connectors[0].CurrentPowerLimit = powerSlots[0]
+	connectors[0].LastProfile = &entity.ProfileVerdict{
+		Status:     entity.ProfileStatusRejected,
+		Limit:      powerSlots[0],
+		StackLevel: smartcharging.TxProfileStackLevel,
+	}
+
+	// a second session starting is what brings the balancer back round
+	connectors[1].CurrentTransactionId = 8
+	lb.CheckPowerLimit("chp1")
+
+	log.waitForEvent(t, "has no limit in force")
+
+	// reinstalled at the slot it already holds, not the one computed for the new
+	// session - that slot is this session's and was counted as taken
+	limits := txProfileLimits(server, 7)
+	if len(limits) != 1 || limits[0] != powerSlots[0] {
+		t.Fatalf("profiles installed for the refused session: %v, want one at %dA",
+			limits, powerSlots[0])
+	}
+
+	// and its slot is still booked: the new session takes the one below
+	if got := connectors[1].CurrentPowerLimit; got != powerSlots[1] {
+		t.Fatalf("new session got %dA, want %dA: the reinstall freed a slot that is still held",
+			got, powerSlots[1])
+	}
+}
+
+// Which answers count as "no limit in force". Reinstalling on anything less than
+// evidence of refusal would resend the same profile on every session event at the
+// location, so absence of an answer is not refusal.
+func TestLimitReinstalledOnlyOnRefusalOfTheCurrentLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		verdict   *entity.ProfileVerdict
+		reinstall bool
+	}{
+		{
+			name:      "accepted",
+			verdict:   &entity.ProfileVerdict{Status: entity.ProfileStatusAccepted, Limit: powerSlots[0]},
+			reinstall: false,
+		},
+		{
+			name:      "rejected",
+			verdict:   &entity.ProfileVerdict{Status: entity.ProfileStatusRejected, Limit: powerSlots[0]},
+			reinstall: true,
+		},
+		{
+			name:      "not supported",
+			verdict:   &entity.ProfileVerdict{Status: entity.ProfileStatusNotSupported, Limit: powerSlots[0]},
+			reinstall: true,
+		},
+		{
+			// silence leaves a session unlimited exactly as a refusal does
+			name:      "no response",
+			verdict:   &entity.ProfileVerdict{Status: entity.ProfileStatusNoResponse, Limit: powerSlots[0]},
+			reinstall: true,
+		},
+		{
+			name:      "unreadable answer",
+			verdict:   &entity.ProfileVerdict{Status: entity.ProfileStatusUnreadable, Limit: powerSlots[0]},
+			reinstall: true,
+		},
+		{
+			// the answer is still in flight; resending on its absence would
+			// install every profile twice
+			name:      "no verdict yet",
+			verdict:   nil,
+			reinstall: false,
+		},
+		{
+			// a leftover from an earlier profile on this connector, which says
+			// nothing about the limit it holds now
+			name:      "refusal of some other limit",
+			verdict:   &entity.ProfileVerdict{Status: entity.ProfileStatusRejected, Limit: powerSlots[1]},
+			reinstall: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lb, connectors := newTestBalancer(2)
+			server := lb.server.(*stubServer)
+
+			connectors[0].CurrentTransactionId = 7
+			connectors[0].CurrentPowerLimit = powerSlots[0]
+			connectors[0].LastProfile = test.verdict
+
+			connectors[1].CurrentTransactionId = 8
+			lb.CheckPowerLimit("chp1")
+
+			limits := txProfileLimits(server, 7)
+			if test.reinstall && len(limits) == 0 {
+				t.Fatalf("no profile reinstalled for a session with no limit in force")
+			}
+			if !test.reinstall && len(limits) != 0 {
+				t.Fatalf("reinstalled %v for a session whose limit was never refused", limits)
+			}
+		})
+	}
+}
+
+// The reattempt is a normal profile install, so its answer is recorded like any
+// other: a charge point that accepts on the second go leaves a verdict saying so,
+// and the connector stops being reinstalled.
+func TestReinstalledLimitStopsOnceAccepted(t *testing.T) {
+	lb, connectors := newTestBalancer(2)
+	server := lb.server.(*stubServer)
+	repo := lb.database.(*stubRepo)
+
+	connectors[0].CurrentTransactionId = 7
+	connectors[0].CurrentPowerLimit = powerSlots[0]
+	connectors[0].LastProfile = &entity.ProfileVerdict{
+		Status: entity.ProfileStatusRejected, Limit: powerSlots[0],
+	}
+
+	connectors[1].CurrentTransactionId = 8
+	lb.CheckPowerLimit("chp1")
+
+	// the stub accepts, so the reattempt lands and is recorded
+	verdicts := repo.waitForVerdicts(t, "chp1", 1, 1)
+	last := verdicts[len(verdicts)-1]
+	if last.Status != entity.ProfileStatusAccepted || last.Limit != powerSlots[0] {
+		t.Fatalf("recorded %s at %dA, want %s at %dA",
+			last.Status, last.Limit, entity.ProfileStatusAccepted, powerSlots[0])
+	}
+
+	// the next pass reads the connector back from the database, where that
+	// verdict now lives; nothing is reinstalled a second time
+	connectors[0].LastProfile = last
+	before := len(txProfileLimits(server, 7))
+	lb.CheckPowerLimit("chp1")
+	if got := len(txProfileLimits(server, 7)); got != before {
+		t.Fatalf("installed %d profiles, want %d: an accepted limit was reinstalled", got, before)
 	}
 }
