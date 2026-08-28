@@ -314,16 +314,47 @@ func (lb *LoadBalancer) OnSystemStart() {
 	}
 }
 
+// isBalanced reports whether the balancer may install profiles on this charge
+// point. It reads only configuration, never session state, which is what makes it
+// safe to call before the balancer lock.
+//
+// A charge point that cannot be read reports true. The answer is unknown, and
+// getLocation under the lock is where that is logged and decided; answering false
+// here would swallow the diagnostic.
+func (lb *LoadBalancer) isBalanced(chargePointId string) bool {
+	if lb.database == nil {
+		return false
+	}
+	chp, err := lb.database.GetChargePoint(chargePointId)
+	if err != nil || chp == nil {
+		return true
+	}
+	return chp.SmartCharging
+}
+
 func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
-	// Before the lock: capabilities are read over the network, and a charge
-	// point that boots while the central system is down never sends the
-	// BootNotification that would otherwise have supplied them. Discovering
-	// here means every charge point learns its own limits on its first session
-	// after a restart, whether or not it announced itself.
+	// Capabilities are read over the network, and a charge point that boots while
+	// the central system is down never sends the BootNotification that would
+	// otherwise have supplied them. Discovering here means every charge point
+	// learns its own limits on its first session after a restart, whether or not
+	// it announced itself - and before the lock, so the wait blocks nobody.
+	//
+	// Only for a charge point that will actually be sent profiles, though. Asking
+	// one that is not smart charging buys a round trip it can never benefit from,
+	// and a full capabilityTimeout every discoveryRetryInterval when it does not
+	// answer. Every start and stop on the unbalanced half of this fleet was paying
+	// for a configuration read of a charge point the balancer never touches.
+	if !lb.isBalanced(chargePointId) {
+		return
+	}
 	lb.ensureCapabilities(chargePointId)
 
 	lb.mutex.Lock()
 	defer lb.mutex.Unlock()
+	// The location is read under the lock rather than alongside the charge point
+	// above: its connectors carry the session state the slot assignment is
+	// computed from, and reading them outside would let two sessions starting at
+	// once both see the same slot free and take it.
 	location, _ := lb.getLocation(chargePointId)
 	if location == nil {
 		return

@@ -20,6 +20,9 @@ type stubRepo struct {
 	location    *entity.Location
 	txLimits    map[int]int                         // transactionId -> last recorded power limit
 	verdicts    map[string][]*entity.ProfileVerdict // "chargePointId/connectorId" -> verdicts, in order
+	// onGetLocation runs inside GetLocation, so a test can observe what the
+	// balancer holds while it reads the location.
+	onGetLocation func()
 }
 
 func (s *stubRepo) GetChargePoint(_ string) (*entity.ChargePoint, error) {
@@ -27,6 +30,9 @@ func (s *stubRepo) GetChargePoint(_ string) (*entity.ChargePoint, error) {
 }
 
 func (s *stubRepo) GetLocation(_ string) (*entity.Location, error) {
+	if s.onGetLocation != nil {
+		s.onGetLocation()
+	}
 	return s.location, nil
 }
 
@@ -1040,5 +1046,72 @@ func TestReinstalledLimitStopsOnceAccepted(t *testing.T) {
 	lb.CheckPowerLimit("chp1")
 	if got := len(txProfileLimits(server, 7)); got != before {
 		t.Fatalf("installed %d profiles, want %d: an accepted limit was reinstalled", got, before)
+	}
+}
+
+// Capability discovery is a GetConfiguration round trip, and a full
+// capabilityTimeout when the charge point does not answer. A charge point the
+// balancer will never send a profile to must not pay it: on this fleet the
+// unbalanced chargers were being asked on every start and stop, which is how
+// Wallbox3 came to have a smart charging configuration line and nothing else.
+func TestCapabilitiesNotReadForUnbalancedChargePoint(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	server := lb.server.(*stubServer)
+	server.configPayload = configResponse("10", "Current")
+	repo := lb.database.(*stubRepo)
+	repo.chargePoint.SmartCharging = false
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	if got := server.configurationReads(); got != 0 {
+		t.Fatalf("read the configuration %d times of a charge point that is not smart charging, want 0", got)
+	}
+}
+
+// A charge point that cannot be read is not the same as one that opted out. The
+// answer is unknown, and getLocation under the lock is where that is reported;
+// treating it as unbalanced here would lose the only sign anything is wrong.
+func TestUnreadableChargePointStillReported(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	repo := lb.database.(*stubRepo)
+	repo.chargePoint = nil
+	log := lb.log.(*stubLog)
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	log.waitForEvent(t, "charge point not found in database")
+}
+
+// The location read has to happen under the balancer lock. Its connectors carry
+// the session state the slot assignment is computed from, so reading them
+// outside would let two sessions starting at once both see the same slot free
+// and take it - the location is re-read per call precisely so the second one
+// sees what the first wrote.
+//
+// This asserts the ordering rather than provoking the race: the stub hands back
+// the same connectors the test holds, so it cannot model a database snapshot,
+// and a hoisted read looks harmless through it.
+func TestLocationIsReadUnderTheBalancerLock(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	repo := lb.database.(*stubRepo)
+
+	var readWithoutLock bool
+	repo.onGetLocation = func() {
+		// a mutex is not reentrant, so this succeeds only if CheckPowerLimit is
+		// not holding it - the call is on that same goroutine
+		if lb.mutex.TryLock() {
+			lb.mutex.Unlock()
+			readWithoutLock = true
+		}
+	}
+
+	connectors[0].CurrentTransactionId = 7
+	lb.CheckPowerLimit("chp1")
+
+	if readWithoutLock {
+		t.Fatal("the location was read outside the balancer lock: two sessions starting " +
+			"at once would both see the same slot free")
 	}
 }
