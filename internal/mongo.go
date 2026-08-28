@@ -783,18 +783,28 @@ releasedBefore keeps the sweeper off those until the charge point has had a chan
 
 suspendedBefore is the same staleness test with a longer fuse, applied to a session the charge point
 describes as paused rather than dead: the connector still points at this transaction, it reports
-SuspendedEV or SuspendedEVSE, and the charge point is online. A car that has finished charging sits
-there for hours, and chargers in this fleet stop sampling while it does, so staleBefore alone reads
-a full battery as a dead charger and closes a session whose cable is still in the car. Anything less
-than all three signals falls back to staleBefore, which keeps the fuse short for the case the sweep
-exists for - a charge point that went silent mid-charge - and bounds the exemption: once the
-connection drops, is_online goes false and the long fuse no longer applies.
+SuspendedEV or SuspendedEVSE, and the charge point has been reachable recently. A car that has
+finished charging sits there for hours, and chargers in this fleet stop sampling while it does, so
+staleBefore alone reads a full battery as a dead charger and closes a session whose cable is still
+in the car. Anything less than all three signals falls back to staleBefore, which keeps the fuse
+short for the case the sweep exists for - a charge point that went silent mid-charge.
+
+offlineBefore is what "reachable recently" means, and it exists because instantaneous reachability
+is not a fact about the charge point on this fleet. Several chargers here answer keepalives and then
+lose the link every couple of minutes; is_online is false for thirty seconds at a time, and the
+sweep runs every five. Reading it as a bare flag closed two live sessions in six days - one of them
+three seconds after the socket dropped and twenty-one after the last message arrived - and the
+drivers were billed on a meter reading hours short of the real one. event_time is refreshed on
+every message from an online charge point and pinned at the moment the drop was noticed, so it is
+the time of last contact either way: a charge point online now, or gone more recently than
+offlineBefore, keeps the long fuse. The exemption is still bounded, just by how long the charge
+point has been unreachable rather than by whether it is unreachable this instant.
 
 OCPP 2.0.1 chargers report Occupied without saying who paused, so they never take the long fuse.
 
 Returns a slice of pointers to unfinished Transaction entities, or an error if the operation fails.
 */
-func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore time.Time) ([]*entity.SweptTransaction, error) {
+func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore, offlineBefore time.Time) ([]*entity.SweptTransaction, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -834,9 +844,9 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore, suspend
 			}},
 		},
 		{
-			// only is_online is wanted, and only to tell a paused session apart from a charge
-			// point that stopped talking; a missing charge point document must not exempt anything,
-			// so the projection leaves the field absent rather than defaulting it here
+			// is_online and event_time are wanted, and only to tell a paused session apart from a
+			// charge point that stopped talking; a missing charge point document must not exempt
+			// anything, so the projection leaves the fields absent rather than defaulting them here
 			{"$lookup", bson.D{
 				{"from", collectionChargePoints},
 				{"let", bson.D{{"tp", "$charge_point_id"}}},
@@ -844,7 +854,7 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore, suspend
 					bson.D{{"$match", bson.D{
 						{"$expr", bson.D{{"$eq", bson.A{"$charge_point_id", "$$tp"}}}},
 					}}},
-					bson.D{{"$project", bson.D{{"_id", 0}, {"is_online", 1}}}},
+					bson.D{{"$project", bson.D{{"_id", 0}, {"is_online", 1}, {"event_time", 1}}}},
 				}},
 				{"as", "charge_point"},
 			}},
@@ -897,9 +907,19 @@ func (m *MongoDB) GetUnfinishedTransactions(staleBefore, releasedBefore, suspend
 								string(core.ChargePointStatusSuspendedEVSE),
 							},
 						}}},
-						bson.D{{"$eq", bson.A{
-							bson.D{{"$ifNull", bson.A{"$charge_point.is_online", false}}},
-							true,
+						// reachable now, or unreachable for less time than the flapping on this
+						// fleet routinely accounts for. A missing event_time is the zero time,
+						// which is older than any cutoff, so an absent field denies the exemption
+						// exactly as an absent charge point document does
+						bson.D{{"$or", bson.A{
+							bson.D{{"$eq", bson.A{
+								bson.D{{"$ifNull", bson.A{"$charge_point.is_online", false}}},
+								true,
+							}}},
+							bson.D{{"$gt", bson.A{
+								bson.D{{"$ifNull", bson.A{"$charge_point.event_time", time.Time{}}}},
+								offlineBefore,
+							}}},
 						}}},
 					}},
 				}},

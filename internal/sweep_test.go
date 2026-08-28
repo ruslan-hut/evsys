@@ -123,6 +123,7 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 	staleBefore := now.Add(-20 * time.Minute)
 	releasedBefore := now.Add(-2 * time.Minute)
 	suspendedBefore := now.Add(-6 * time.Hour)
+	offlineBefore := now.Add(-15 * time.Minute)
 
 	tests := []struct {
 		name string
@@ -132,9 +133,12 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 		noConnector bool
 		// status is the connector's reported status; empty means the field is absent, as it is on
 		// a connector that has never reported. online seeds a charge_points document with that
-		// is_online; withoutChargePoint drops the document entirely
+		// is_online; offlineAgo is how long ago its event_time says contact was last had, and only
+		// means anything while online is false; withoutChargePoint drops the document entirely
 		status             string
 		online             bool
+		offlineAgo         time.Duration
+		noEventTime        bool
 		withoutChargePoint bool
 		finished           bool
 		startedAgo         time.Duration
@@ -238,7 +242,60 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 		{
 			// the exemption has to end when the charger stops being reachable, or a charge point
 			// that dropped while suspended would hold its connector for the whole long window
-			name:       "suspended session on an offline charge point is swept",
+			name:       "suspended session on a charge point long gone is swept",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     false,
+			offlineAgo: time.Hour,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      true,
+			cause:      "no activity from the charge point",
+		},
+		{
+			// the regression: Wallbox1 drops 39 times a day for a median of two minutes and the
+			// sweep runs every five, so a tick landing inside a flap read a live suspended session
+			// as a dead charge point. #4824 was closed three seconds after the socket dropped and
+			// twenty-one after the last message; the charger reported the real stop hours later,
+			// on a meter reading far above what the driver was billed
+			name:       "suspended session on a charge point that just flapped is left alone",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     false,
+			offlineAgo: 30 * time.Second,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      false,
+		},
+		{
+			// the grace is a window, not an amnesty: past it the session is claimed as before
+			name:       "suspended session on a charge point offline past the grace is swept",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     false,
+			offlineAgo: 16 * time.Minute,
+			startedAgo: 2 * time.Hour,
+			meterAgo:   30 * time.Minute,
+			swept:      true,
+			cause:      "no activity from the charge point",
+		},
+		{
+			// the grace covers the gap in reachability, not the staleness test itself: a session
+			// that outlasted the long window is swept whether or not the charger is flapping
+			name:       "flapping charge point does not extend the long window",
+			pointer:    1,
+			status:     "SuspendedEV",
+			online:     false,
+			offlineAgo: 30 * time.Second,
+			startedAgo: 9 * time.Hour,
+			meterAgo:   7 * time.Hour,
+			swept:      true,
+			cause:      "no activity from a suspended connector",
+		},
+		{
+			// a charge point document written but never connected carries the zero event_time,
+			// which is older than any cutoff and must not read as recent contact
+			name:       "suspended session on a charge point with a zero event time is swept",
 			pointer:    1,
 			status:     "SuspendedEV",
 			online:     false,
@@ -246,6 +303,19 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 			meterAgo:   30 * time.Minute,
 			swept:      true,
 			cause:      "no activity from the charge point",
+		},
+		{
+			// and a document with no event_time field at all - nothing here writes one, but a
+			// document that reached the collection another way must not be worth an exemption
+			name:        "suspended session on a charge point with no event time field is swept",
+			pointer:     1,
+			status:      "SuspendedEV",
+			online:      false,
+			noEventTime: true,
+			startedAgo:  2 * time.Hour,
+			meterAgo:    30 * time.Minute,
+			swept:       true,
+			cause:       "no activity from the charge point",
 		},
 		{
 			// the short fuse still belongs to the case the sweep was written for: meter values
@@ -333,14 +403,28 @@ func TestGetUnfinishedTransactions(t *testing.T) {
 					CurrentTransactionId: test.pointer,
 				})
 			}
-			if !test.withoutChargePoint {
-				seedChargePoint(t, db, &entity.ChargePoint{Id: "CP1", IsOnline: test.online})
+			switch {
+			case test.withoutChargePoint:
+			case test.noEventTime:
+				// the entity always marshals event_time, so an absent field has to be written raw
+				withCollection(t, db, collectionChargePoints, func(c *mongo.Collection) {
+					doc := bson.M{"charge_point_id": "CP1", "is_online": test.online}
+					if _, err := c.InsertOne(db.ctx, doc); err != nil {
+						t.Fatalf("seed charge point: %v", err)
+					}
+				})
+			default:
+				chargePoint := &entity.ChargePoint{Id: "CP1", IsOnline: test.online}
+				if test.offlineAgo != 0 {
+					chargePoint.EventTime = now.Add(-test.offlineAgo)
+				}
+				seedChargePoint(t, db, chargePoint)
 			}
 			if test.meterAgo != 0 {
 				seedMeterValue(t, db, 1, 500, now.Add(-test.meterAgo))
 			}
 
-			got, err := db.GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore)
+			got, err := db.GetUnfinishedTransactions(staleBefore, releasedBefore, suspendedBefore, offlineBefore)
 			if err != nil {
 				t.Fatalf("GetUnfinishedTransactions: %v", err)
 			}
@@ -382,7 +466,7 @@ func TestGetUnfinishedTransactionsStripsJoinFields(t *testing.T) {
 	seedMeterValue(t, db, 7, 900, now.Add(-40*time.Minute))
 
 	got, err := db.GetUnfinishedTransactions(
-		now.Add(-20*time.Minute), now.Add(-2*time.Minute), now.Add(-6*time.Hour))
+		now.Add(-20*time.Minute), now.Add(-2*time.Minute), now.Add(-6*time.Hour), now.Add(-15*time.Minute))
 	if err != nil {
 		t.Fatalf("GetUnfinishedTransactions: %v", err)
 	}

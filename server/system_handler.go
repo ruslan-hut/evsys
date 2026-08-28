@@ -46,8 +46,17 @@ const (
 	// so a full battery goes quiet exactly like a dead charger; at transactionStaleAfter the sweep
 	// closed live sessions and handed the connector to the next driver with the cable still in the
 	// car. Long enough for a car to sit full for the afternoon, short enough that nothing stays
-	// open indefinitely, and only in force while the charge point is connected.
+	// open indefinitely, and only in force while the charge point is still reachable - see
+	// transactionOfflineGrace for what that means on a fleet whose chargers flap.
 	transactionSuspendedStaleAfter = 6 * time.Hour
+	// transactionOfflineGrace is how long a charge point that has dropped still counts as
+	// reachable for the purpose of transactionSuspendedStaleAfter. Chargers on this fleet answer
+	// keepalives and then lose the link every couple of minutes - the worst of them 39 times a day,
+	// offline for a median of two minutes and at most ten - so is_online read as a bare flag says
+	// more about which second the sweep ticked on than about the charge point. Comfortably past the
+	// longest observed flap, and short enough that a charge point genuinely gone loses the long
+	// fuse before transactionStaleAfter would have closed the session anyway.
+	transactionOfflineGrace = 15 * time.Minute
 	// transactionSweepInterval is how often abandoned transactions are looked for.
 	transactionSweepInterval = 5 * time.Minute
 	// transactionReleaseGrace is how long a transaction whose connector has moved on is left
@@ -1582,6 +1591,7 @@ func (h *SystemHandler) checkAndFinishTransactions() {
 		now.Add(-transactionStaleAfter),
 		now.Add(-transactionReleaseGrace),
 		now.Add(-transactionSuspendedStaleAfter),
+		now.Add(-transactionOfflineGrace),
 	)
 	if err != nil {
 		h.logger.Error("get unfinished transactions", err)
