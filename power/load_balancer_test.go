@@ -758,15 +758,34 @@ func TestFreedSlotGoesToNextSession(t *testing.T) {
 	}
 }
 
-func TestBalancingDisabledWithoutLocationLimit(t *testing.T) {
+// power_limit is the site's rated capacity, recorded for operators to read. It
+// used to double as the balancer's on/off switch, so a location that had simply
+// never had the figure filled in ran every charge point unlimited - an unset
+// informative field silently disabling the control that keeps the site inside
+// its supply.
+func TestZeroLocationPowerLimitDoesNotDisableBalancing(t *testing.T) {
 	lb, connectors := newTestBalancer(1)
 	repo := lb.database.(*stubRepo)
 	repo.location.PowerLimit = 0
 
 	connectors[0].CurrentTransactionId = 0
 	lb.CheckPowerLimit("chp1")
-	if connectors[0].CurrentPowerLimit != 0 {
-		t.Fatalf("got %dA, want no limit when location power limit is 0", connectors[0].CurrentPowerLimit)
+	if got := connectors[0].CurrentPowerLimit; got != powerSlots[0] {
+		t.Fatalf("got %dA, want %dA: an unfilled power_limit switched the balancer off", got, powerSlots[0])
+	}
+}
+
+// Whether a charge point is balanced at all is its own SmartCharging flag, which
+// is the only thing that should turn the balancer off for it.
+func TestBalancingDisabledWithoutSmartCharging(t *testing.T) {
+	lb, connectors := newTestBalancer(1)
+	repo := lb.database.(*stubRepo)
+	repo.chargePoint.SmartCharging = false
+
+	connectors[0].CurrentTransactionId = 0
+	lb.CheckPowerLimit("chp1")
+	if got := connectors[0].CurrentPowerLimit; got != 0 {
+		t.Fatalf("got %dA, want no limit on a charge point that is not smart charging", got)
 	}
 }
 

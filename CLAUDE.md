@@ -192,7 +192,7 @@ Tariff (OCPI standard)
 ```
 
 **Key Relationships:**
-- ChargePoint belongs to Location (for power limit management)
+- ChargePoint belongs to Location (load balancing is scoped to a location)
 - Connector belongs to ChargePoint (tracks current transaction)
 - Transaction links User, ChargePoint, Connector, and billing entities
 - PaymentPlan can be user-specific or location-specific with time range validation
@@ -240,7 +240,7 @@ Multiple concurrent goroutines run throughout application lifecycle:
 3. **Metrics Server** - Prometheus endpoint (optional)
 4. **Telegram Bot** - Three goroutines: updates pump, send pump, event pump
 5. **Payment Worker** - 3-minute ticker checking for unbilled transactions, calls external payment API
-6. **Power Manager** - Triggered on transaction events to enforce location power limits
+6. **Power Manager** - Triggered on transaction events to assign per-session power slots
 7. **Pool Manager** - Handles WebSocket connection registration/unregistration
 8. **Read/Write Pumps** - Dedicated goroutines per WebSocket connection
 
@@ -290,7 +290,7 @@ Multiple concurrent goroutines run throughout application lifecycle:
 1. **In-Memory State with DB Persistence**: Fast access with optional durability
 2. **Optional Components**: System runs standalone; DB, payment, notifications are optional
 3. **Time-Based Pricing**: PaymentPlan supports dynamic pricing by time of day (StartTime/EndTime fields)
-4. **Load Balancing**: Power manager enforces location-level power limits across all charge points
+4. **Load Balancing**: Power manager assigns fixed power slots across a location's smart-charging connectors
 5. **Dual Pricing Models**: Legacy PaymentPlan (simple kWh/hour) + OCPI Tariff (complex) coexist for backward compatibility
 6. **Async Billing**: Payment processing decoupled from transaction stop to avoid blocking
 
@@ -347,9 +347,18 @@ When adding new OCPP features:
 
 - Power manager in `/power` package
 - Triggered on transaction start/stop and system initialization
-- Enforces `power_limit` at Location level
-- Algorithm: fixed power slots (`powerSlots` in `power/load_balancer.go`) assigned highest-first, one active connector per slot; connectors beyond the last slot get `baseLimit`. A session keeps its limit until it stops; freed slots go to new sessions only
+- Balanced or not is `ChargePoint.SmartCharging`, per charge point - that is the
+  only switch. Location `power_limit` is an **informative** field recording the
+  site's rated capacity; nothing branches on it, and nothing should. It was once
+  the balancer's on/off switch, which meant a location that had simply never had
+  the figure filled in ran its chargers unlimited. `default_power_limit` is the
+  exception that *is* acted on: it sets the TxDefaultProfile installed at boot
+- Algorithm: fixed power slots (`powerSlots` in `power/load_balancer.go`) assigned highest-first, one active connector per slot; connectors beyond the last slot get `baseLimit`. A session keeps its limit until it stops; freed slots go to new sessions only. The slots are constants, not derived from any configured limit
 - Updates sent via `SetChargingProfile` OCPP command
+- A limit is not in force until the charge point accepts it. `current_power_limit`
+  is written when the request is queued; the answer lands later in
+  `connectors.last_profile`, and `Connector.LimitRefused()` is how the balancer
+  reinstalls one that was refused
 
 ### Adding Event Handlers
 

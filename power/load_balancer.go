@@ -328,9 +328,6 @@ func (lb *LoadBalancer) CheckPowerLimit(chargePointId string) {
 	if location == nil {
 		return
 	}
-	if location.PowerLimit == 0 {
-		return
-	}
 	usedSlots := make(map[int]bool)
 	// all active connectors on smart charging points
 	activeConnectors := 0
