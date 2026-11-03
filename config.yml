@@ -50,3 +50,4 @@ webhooks:
 telegram:
   enabled: false
   telegram_api_key: YOUR_TELEGRAM_API_KEY
+  telegram_invite_code: ""

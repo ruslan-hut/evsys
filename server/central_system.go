@@ -556,7 +556,7 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	systemHandler.SetParameters(conf.IsDebug, conf.AcceptUnknownTag, conf.AcceptUnknownChp)
 
 	if conf.Telegram.Enabled {
-		telegramBot, e := telegram.NewBot(conf.Telegram.ApiKey)
+		telegramBot, e := telegram.NewBot(conf.Telegram.ApiKey, conf.Telegram.InviteCode)
 		if e != nil {
 			return cs, fmt.Errorf("telegram bot setup failed: %s", e)
 		} else {

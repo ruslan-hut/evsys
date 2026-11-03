@@ -64,6 +64,8 @@ type Config struct {
 	Telegram struct {
 		Enabled bool   `yaml:"enabled" env-default:"false"`
 		ApiKey  string `yaml:"telegram_api_key" env-default:""`
+		// InviteCode is what /start must carry to subscribe. Empty closes registration.
+		InviteCode string `yaml:"telegram_invite_code" env-default:""`
 	}
 }
 

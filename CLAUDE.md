@@ -261,7 +261,7 @@ Multiple concurrent goroutines run throughout application lifecycle:
 **Telegram Bot** (`telegram/bot.go`):
 - Implements `internal.EventHandler` interface
 - Event-driven notifications (transaction events, status changes, alerts)
-- User subscription via `/start` and `/stop` commands
+- Registration needs an invitation: `/start <telegram_invite_code>` in a private chat, or the link `https://t.me/<bot>?start=<code>`. An empty code closes registration. `/status`, `/test`, `/stop` are for subscribers; others get no reply. A user who blocks the bot is removed on the next failed send
 - Channel-based message queuing
 
 **OCPI Client** (`ocpi/`):

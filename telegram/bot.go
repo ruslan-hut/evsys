@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"crypto/subtle"
 	"errors"
 	"evsys/entity"
 	"evsys/internal"
@@ -50,6 +51,8 @@ type TgBot struct {
 	stop          chan struct{}
 	// slots hands out the delivery permits counted by deliverySlots.
 	slots chan struct{}
+	// inviteCode is what /start must carry to subscribe. Empty closes registration.
+	inviteCode string
 	// deliver performs one send. It is a field so tests can drive the pumps without the Telegram
 	// API; production always uses sendMessage.
 	deliver func(id int64, text string)
@@ -60,8 +63,9 @@ type MessageContent struct {
 	Text   string
 }
 
-func NewBot(apiKey string) (*TgBot, error) {
+func NewBot(apiKey, inviteCode string) (*TgBot, error) {
 	tgBot := &TgBot{
+		inviteCode:    inviteCode,
 		subscriptions: make(map[int]entity.UserSubscription),
 		event:         make(chan MessageContent, 100),
 		send:          make(chan MessageContent, 100),
@@ -109,6 +113,13 @@ func (b *TgBot) subscribers() []entity.UserSubscription {
 	return list
 }
 
+func (b *TgBot) isSubscriber(userID int) bool {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	_, ok := b.subscriptions[userID]
+	return ok
+}
+
 func (b *TgBot) subscriptionCount() int {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
@@ -148,46 +159,90 @@ func (b *TgBot) updatesPump() {
 		return
 	}
 	for update := range updates {
-		if update.Message == nil {
+		if update.Message == nil || !update.Message.IsCommand() {
 			continue
 		}
-		if !update.Message.IsCommand() {
-			continue
+		b.handleCommand(update.Message)
+	}
+}
+
+// handleCommand answers one command. Alerts carry user names, RFID tags and the state of the network,
+// so everything but /stop is for subscribers, and only an invitation makes a subscriber. Anyone else
+// gets no reply: the bot's name is public, and an answer only tells a scanner that it found a live bot.
+func (b *TgBot) handleCommand(message *tgbotapi.Message) {
+	if message.From == nil || message.From.IsBot || message.Chat == nil || !message.Chat.IsPrivate() {
+		return
+	}
+	userID := message.From.ID
+	chatID := message.Chat.ID
+	switch message.Command() {
+	case "start":
+		if b.isSubscriber(userID) {
+			b.send <- MessageContent{ChatID: chatID, Text: "You are already subscribed"}
+			return
 		}
-		switch update.Message.Command() {
-		case "start":
-			subscription := entity.UserSubscription{
-				UserID:           update.Message.From.ID,
-				User:             update.Message.From.UserName,
-				SubscriptionType: "status",
-			}
-			b.addSubscription(subscription)
-			msg := fmt.Sprintf("Hello *%v*, you are now subscribed to updates", update.Message.From.UserName)
-			if b.database != nil {
-				err := b.database.AddSubscription(&subscription)
-				if err != nil {
-					log.Printf("bot: error adding subscription: %v", err)
-					msg = fmt.Sprintf("Error adding subscription:\n `%v`", err)
-				}
-			}
-			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: msg}
-		case "stop":
-			b.removeSubscription(update.Message.From.ID)
-			if b.database != nil {
-				err := b.database.DeleteSubscription(&entity.UserSubscription{UserID: update.Message.From.ID})
-				if err != nil {
-					log.Printf("bot: error deleting subscription: %v", err)
-				}
-			}
-			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: "Your subscription has been removed"}
-		case "test":
-			msg := fmt.Sprintf("*%v*: Connector %v: `%v`", "ChargePointId", 1, "Status")
-			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: msg}
-		case "status":
-			msg := b.composeStatusMessage()
-			b.send <- MessageContent{ChatID: update.Message.Chat.ID, Text: msg}
+		if !b.validInvite(message.CommandArguments()) {
+			log.Printf("bot: registration refused for user %v", userID)
+			return
+		}
+		b.subscribe(message.From, chatID)
+	case "stop":
+		if !b.isSubscriber(userID) {
+			return
+		}
+		b.unsubscribe(userID)
+		b.send <- MessageContent{ChatID: chatID, Text: "Your subscription has been removed"}
+	case "test":
+		if !b.isSubscriber(userID) {
+			return
+		}
+		msg := fmt.Sprintf("*%v*: Connector %v: `%v`", "ChargePointId", 1, "Status")
+		b.send <- MessageContent{ChatID: chatID, Text: msg}
+	case "status":
+		if !b.isSubscriber(userID) {
+			return
+		}
+		b.send <- MessageContent{ChatID: chatID, Text: b.composeStatusMessage()}
+	}
+}
+
+// validInvite reports whether code opens registration. An empty invite code closes it.
+func (b *TgBot) validInvite(code string) bool {
+	if b.inviteCode == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(code), []byte(b.inviteCode)) == 1
+}
+
+// subscribe saves the subscription first, so a failed save cannot leave a user receiving alerts until
+// the next restart without being recorded anywhere.
+func (b *TgBot) subscribe(user *tgbotapi.User, chatID int64) {
+	// the store refuses an empty name, and a Telegram username is optional
+	name := user.UserName
+	if name == "" {
+		name = fmt.Sprintf("id%d", user.ID)
+	}
+	subscription := entity.UserSubscription{UserID: user.ID, User: name, SubscriptionType: "status"}
+	if b.database != nil {
+		if err := b.database.AddSubscription(&subscription); err != nil {
+			log.Printf("bot: error adding subscription for user %v: %v", user.ID, err)
+			b.send <- MessageContent{ChatID: chatID, Text: "Subscription failed, please contact the administrator"}
+			return
 		}
 	}
+	b.addSubscription(subscription)
+	log.Printf("bot: user %v (%v) subscribed", user.ID, name)
+	b.send <- MessageContent{ChatID: chatID, Text: fmt.Sprintf("Hello *%v*, you are now subscribed to updates", sanitize(name))}
+}
+
+func (b *TgBot) unsubscribe(userID int) {
+	b.removeSubscription(userID)
+	if b.database != nil {
+		if err := b.database.DeleteSubscription(&entity.UserSubscription{UserID: userID}); err != nil {
+			log.Printf("bot: error deleting subscription for user %v: %v", userID, err)
+		}
+	}
+	log.Printf("bot: user %v unsubscribed", userID)
 }
 
 // eventPump sending events to all subscribers
@@ -250,6 +305,15 @@ func (b *TgBot) sendMessage(id int64, text string) {
 	if err == nil {
 		return
 	}
+	// Forbidden is final: the user blocked the bot or no longer exists, and every later alert would
+	// fail the same way.
+	if isForbidden(err) {
+		log.Printf("bot: sending message to %v: %v", id, err)
+		if b.isSubscriber(int(id)) {
+			b.unsubscribe(int(id))
+		}
+		return
+	}
 	// The retries below exist for one failure: Telegram refusing the markup. A transport failure
 	// tells us nothing about the text, and retrying it only multiplies a timeout by the number of
 	// attempts - three wedged requests instead of one, all of them holding a delivery slot.
@@ -261,16 +325,13 @@ func (b *TgBot) sendMessage(id int64, text string) {
 	_, err = b.api.Send(safeMsg)
 	if err != nil {
 		log.Printf("bot: error sending unmarkuped message: %v", err)
-		if isTransportError(err) {
-			return
-		}
-		// maybe error was while parsing, so we can send a message about this error
-		msg = tgbotapi.NewMessage(id, fmt.Sprintf("Error: %v", err))
-		_, err = b.api.Send(msg)
-		if err != nil {
-			log.Printf("bot: error sending message: %v", err)
-		}
 	}
+}
+
+// isForbidden reports whether Telegram refused delivery to this user for good.
+func isForbidden(err error) bool {
+	var apiErr tgbotapi.Error
+	return errors.As(err, &apiErr) && strings.HasPrefix(apiErr.Message, "Forbidden:")
 }
 
 // isTransportError reports whether the send failed before Telegram had an opinion about it - a
@@ -305,7 +366,7 @@ func (b *TgBot) OnTransactionStart(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 	msg += fmt.Sprintf("Transaction ID: %v START\n", event.TransactionId)
 	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
-	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	msg += fmt.Sprintf("ID Tag: %v\n", sanitize(event.IdTag))
 	if event.Info != "" {
 		msg += fmt.Sprintf("%v\n", sanitize(event.Info))
 	}
@@ -316,7 +377,7 @@ func (b *TgBot) OnTransactionStop(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 	msg += fmt.Sprintf("Transaction ID: %v STOP\n", event.TransactionId)
 	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
-	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	msg += fmt.Sprintf("ID Tag: %v\n", sanitize(event.IdTag))
 	msg += fmt.Sprintf("Info: %v\n", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
 }
@@ -325,13 +386,13 @@ func (b *TgBot) OnTransactionEvent(event *internal.EventMessage) {
 	msg := fmt.Sprintf("*%v*: Connector %v: `%v`\n", event.ChargePointId, event.ConnectorId, event.Status)
 	msg += fmt.Sprintf("Transaction ID: %v ACTIVE\n", event.TransactionId)
 	msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
-	msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+	msg += fmt.Sprintf("ID Tag: %v\n", sanitize(event.IdTag))
 	msg += fmt.Sprintf("Info: %v\n", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
 }
 
 func (b *TgBot) OnAuthorize(event *internal.EventMessage) {
-	msg := fmt.Sprintf("*%v*: user: `%v`\n", event.ChargePointId, event.IdTag)
+	msg := fmt.Sprintf("*%v*: user: `%v`\n", sanitize(event.ChargePointId), event.IdTag)
 	msg += fmt.Sprintf("Auth status: %v\n", event.Status)
 	if event.Username != "" {
 		msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
@@ -355,7 +416,7 @@ func (b *TgBot) OnAlert(event *internal.EventMessage) {
 		msg += fmt.Sprintf("User: %v\n", sanitize(event.Username))
 	}
 	if event.IdTag != "" {
-		msg += fmt.Sprintf("ID Tag: %v\n", event.IdTag)
+		msg += fmt.Sprintf("ID Tag: %v\n", sanitize(event.IdTag))
 	}
 	msg += fmt.Sprintf("%v", sanitize(event.Info))
 	b.event <- MessageContent{Text: msg}
@@ -374,7 +435,7 @@ func (b *TgBot) composeStatusMessage() string {
 		status, err := b.database.GetLastStatus()
 		if err != nil {
 			log.Printf("bot: error getting last status: %v", err)
-			msg += fmt.Sprintf("Error getting last status:\n `%v`", err)
+			msg += "Status is not available right now\n"
 		} else {
 			for _, s := range status {
 				msg += fmt.Sprintf("*%v*: ", s.ChargePointID)
@@ -419,7 +480,8 @@ func removeMarkup(input string) string {
 
 func sanitize(input string) string {
 	// Define a list of reserved characters that need to be escaped
-	reservedChars := "\\`*_{}[]()#+-.!|"
+	// every character MarkdownV2 reserves: https://core.telegram.org/bots/api#markdownv2-style
+	reservedChars := "\\`*_{}[]()~>#+-=.!|"
 
 	// Loop through each character in the input string
 	sanitized := ""

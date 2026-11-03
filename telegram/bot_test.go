@@ -6,11 +6,13 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"evsys/entity"
+	"evsys/internal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
@@ -203,8 +205,9 @@ drop is logged - a stalled queue leaves nothing behind at all.
 */
 func TestDispatchDropsWhenSlotsAreExhausted(t *testing.T) {
 	var logs bytes.Buffer
+	previous := log.Writer()
 	log.SetOutput(&logs)
-	t.Cleanup(func() { log.SetOutput(nil) })
+	t.Cleanup(func() { log.SetOutput(previous) })
 
 	rec := newRecorder(true)
 	bot := testBot(rec.deliver)
@@ -293,3 +296,152 @@ type timeoutError struct{}
 func (timeoutError) Error() string   { return "timeout awaiting response headers" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
+
+// fakeSubscriptions is the part of the database the bot's registration touches. The embedded nil
+// interface panics on anything else, which keeps these tests honest about what they exercise.
+type fakeSubscriptions struct {
+	internal.Database
+	added, deleted []int
+	addErr         error
+}
+
+func (f *fakeSubscriptions) AddSubscription(s *entity.UserSubscription) error {
+	if f.addErr != nil {
+		return f.addErr
+	}
+	f.added = append(f.added, s.UserID)
+	return nil
+}
+
+func (f *fakeSubscriptions) DeleteSubscription(s *entity.UserSubscription) error {
+	f.deleted = append(f.deleted, s.UserID)
+	return nil
+}
+
+func command(text string, from *tgbotapi.User, chatType string) *tgbotapi.Message {
+	name := strings.Fields(text)[0]
+	return &tgbotapi.Message{
+		Text:     text,
+		From:     from,
+		Chat:     &tgbotapi.Chat{ID: 77, Type: chatType},
+		Entities: &[]tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len(name)}},
+	}
+}
+
+func TestRegistration(t *testing.T) {
+	person := &tgbotapi.User{ID: 42, UserName: "op_erator"}
+	tests := []struct {
+		name       string
+		invite     string
+		message    *tgbotapi.Message
+		subscribed bool
+		replies    int
+	}{
+		{"valid invite", "s3cret", command("/start s3cret", person, "private"), true, 1},
+		{"no code", "s3cret", command("/start", person, "private"), false, 0},
+		{"wrong code", "s3cret", command("/start nope", person, "private"), false, 0},
+		{"closed registration refuses the empty code", "", command("/start", person, "private"), false, 0},
+		{"closed registration refuses any code", "", command("/start s3cret", person, "private"), false, 0},
+		{"group chat", "s3cret", command("/start s3cret", person, "group"), false, 0},
+		{"bot account", "s3cret", command("/start s3cret", &tgbotapi.User{ID: 42, UserName: "x", IsBot: true}, "private"), false, 0},
+		{"no sender", "s3cret", command("/start s3cret", nil, "private"), false, 0},
+		{"no username", "s3cret", command("/start s3cret", &tgbotapi.User{ID: 42}, "private"), true, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bot := testBot(func(int64, string) {})
+			bot.inviteCode = tt.invite
+			db := &fakeSubscriptions{}
+			bot.database = db
+
+			bot.handleCommand(tt.message)
+
+			if got := bot.isSubscriber(42); got != tt.subscribed {
+				t.Errorf("subscribed = %v, want %v", got, tt.subscribed)
+			}
+			if tt.subscribed && len(db.added) != 1 {
+				t.Errorf("saved %d subscriptions, want 1", len(db.added))
+			}
+			if len(bot.send) != tt.replies {
+				t.Errorf("%d replies, want %d", len(bot.send), tt.replies)
+			}
+		})
+	}
+}
+
+func TestStrangersGetNoAnswerToCommands(t *testing.T) {
+	stranger := &tgbotapi.User{ID: 42, UserName: "stranger"}
+	for _, text := range []string{"/status", "/test", "/stop"} {
+		bot := testBot(func(int64, string) {}, 1)
+		bot.handleCommand(command(text, stranger, "private"))
+		if len(bot.send) != 0 {
+			t.Errorf("%s answered a non-subscriber", text)
+		}
+		if bot.subscriptionCount() != 1 {
+			t.Errorf("%s changed the subscribers", text)
+		}
+	}
+}
+
+func TestSubscriberCommands(t *testing.T) {
+	bot := testBot(func(int64, string) {}, 42)
+	db := &fakeSubscriptions{}
+	bot.database = db
+	subscriber := &tgbotapi.User{ID: 42, UserName: "op"}
+
+	bot.handleCommand(command("/test", subscriber, "private"))
+	bot.handleCommand(command("/start", subscriber, "private"))
+	if len(bot.send) != 2 {
+		t.Fatalf("%d replies, want 2", len(bot.send))
+	}
+	if len(db.added) != 0 {
+		t.Error("/start saved an existing subscriber again")
+	}
+
+	bot.handleCommand(command("/stop", subscriber, "private"))
+	if bot.isSubscriber(42) || len(db.deleted) != 1 {
+		t.Errorf("/stop: subscribed %v, deleted %v", bot.isSubscriber(42), db.deleted)
+	}
+}
+
+// A failed save must not leave the user receiving alerts until the next restart with no record of it.
+func TestFailedSaveDoesNotSubscribe(t *testing.T) {
+	bot := testBot(func(int64, string) {})
+	bot.inviteCode = "s3cret"
+	bot.database = &fakeSubscriptions{addErr: errors.New("mongodb://user:pass@host refused")}
+
+	bot.handleCommand(command("/start s3cret", &tgbotapi.User{ID: 42, UserName: "op"}, "private"))
+
+	if bot.isSubscriber(42) {
+		t.Error("subscribed despite the failed save")
+	}
+	reply := <-bot.send
+	if strings.Contains(reply.Text, "mongodb") {
+		t.Errorf("internal error reached the user: %q", reply.Text)
+	}
+}
+
+func TestIsForbidden(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{tgbotapi.Error{Message: "Forbidden: bot was blocked by the user"}, true},
+		{tgbotapi.Error{Message: "Forbidden: user is deactivated"}, true},
+		{tgbotapi.Error{Message: "Bad Request: can't parse entities"}, false},
+		{errors.New("Forbidden: not from the API"), false},
+	}
+	for _, tt := range tests {
+		if got := isForbidden(tt.err); got != tt.want {
+			t.Errorf("isForbidden(%v) = %v, want %v", tt.err, got, tt.want)
+		}
+	}
+}
+
+func TestSanitizeEscapesEveryReservedCharacter(t *testing.T) {
+	for _, char := range "_*[]()~`>#+-=|{}.!\\" {
+		if got := sanitize(string(char)); got != "\\"+string(char) {
+			t.Errorf("sanitize(%q) = %q", char, got)
+		}
+	}
+}

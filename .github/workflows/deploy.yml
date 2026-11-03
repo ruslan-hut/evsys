@@ -32,6 +32,7 @@ jobs:
           sed -i 's|${PAYMENT_API_URL}|'"$PAYMENT_API_URL"'|g' evsys.yml
           sed -i 's|${PAYMENT_API_KEY}|'"$PAYMENT_API_KEY"'|g' evsys.yml
           sed -i 's|${TELEGRAM_API_KEY}|'"$TELEGRAM_API_KEY"'|g' evsys.yml
+          sed -i 's|${TELEGRAM_INVITE_CODE}|'"$TELEGRAM_INVITE_CODE"'|g' evsys.yml
           sed -i 's|${OCPI_URL}|'"$OCPI_URL"'|g' evsys.yml
           sed -i 's|${OCPI_TOKEN}|'"$OCPI_TOKEN"'|g' evsys.yml
         env:
@@ -51,6 +52,7 @@ jobs:
           PAYMENT_API_URL: ${{ secrets.PAYMENT_API_URL }}
           PAYMENT_API_KEY: ${{ secrets.PAYMENT_API_KEY }}
           TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
+          TELEGRAM_INVITE_CODE: ${{ secrets.TELEGRAM_INVITE_CODE }}
           OCPI_URL: ${{ vars.OCPI_URL }}
           OCPI_TOKEN: ${{ secrets.OCPI_TOKEN }}
 
