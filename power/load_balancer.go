@@ -36,8 +36,10 @@ type profileStatus struct {
 const profileAccepted = "Accepted"
 
 // powerSlots are assigned highest-first, one connector per slot;
-// when all slots are taken, further connectors get baseLimit
-var powerSlots = []int{150, 115, 85}
+// when all slots are taken, further connectors get baseLimit.
+// Values must differ, because taken slots are tracked by value. The first three
+// all reach the R150C's own ceiling of about 151 A (~104 kW).
+var powerSlots = []int{160, 155, 150}
 
 type LoadBalancer struct {
 	database     Repository
