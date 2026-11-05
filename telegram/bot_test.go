@@ -134,13 +134,13 @@ func TestSubscriptionsAreSafeUnderConcurrency(t *testing.T) {
 		}
 	}()
 
-	// Start reloading the whole set from the database
+	// Start loading from the database
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 20; i++ {
-			bot.setSubscriptions(map[int]entity.UserSubscription{
-				9000: {UserID: 9000, SubscriptionType: "status"},
+			bot.mergeLoaded([]entity.UserSubscription{
+				{UserID: 9000, SubscriptionType: "status"},
 			})
 		}
 	}()
@@ -443,5 +443,154 @@ func TestSanitizeEscapesEveryReservedCharacter(t *testing.T) {
 		if got := sanitize(string(char)); got != "\\"+string(char) {
 			t.Errorf("sanitize(%q) = %q", char, got)
 		}
+	}
+}
+
+// failingLoad is a database whose subscriptions become readable after a number of failed attempts.
+type failingLoad struct {
+	internal.Database
+	mutex    sync.Mutex
+	failures int
+	calls    int
+	result   []entity.UserSubscription
+}
+
+func (f *failingLoad) GetSubscriptions() ([]entity.UserSubscription, error) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.calls++
+	if f.failures > 0 {
+		f.failures--
+		return nil, errors.New("server selection timeout")
+	}
+	return f.result, nil
+}
+
+func (f *failingLoad) callCount() int {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.calls
+}
+
+func (f *failingLoad) setFailures(n int) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.failures = n
+}
+
+// TestFailedLoadIsRetried is the regression for the silent bot: one failed read at startup used to
+// leave it with no subscribers until the service was restarted.
+func TestFailedLoadIsRetried(t *testing.T) {
+	rec := newRecorder(false)
+	bot := testBot(rec.deliver)
+	bot.retryEvery = time.Millisecond
+	db := &failingLoad{failures: 3, result: []entity.UserSubscription{{UserID: 1}, {UserID: 2}}}
+	bot.database = db
+	t.Cleanup(func() { close(bot.stop) })
+
+	bot.loadSubscriptions()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for bot.subscriptionCount() != 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("subscriptions were not loaded after %d attempts", db.callCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if calls := db.callCount(); calls != 4 {
+		t.Errorf("attempts = %d, want 4", calls)
+	}
+}
+
+// Nothing is retried when the first read works, and no notice goes out.
+func TestSuccessfulLoadIsNotRetried(t *testing.T) {
+	rec := newRecorder(false)
+	bot := testBot(rec.deliver)
+	bot.retryEvery = time.Millisecond
+	db := &failingLoad{result: []entity.UserSubscription{{UserID: 1}}}
+	bot.database = db
+	t.Cleanup(func() { close(bot.stop) })
+
+	bot.loadSubscriptions()
+	time.Sleep(20 * time.Millisecond)
+
+	if calls := db.callCount(); calls != 1 {
+		t.Errorf("attempts = %d, want 1", calls)
+	}
+	if len(bot.event) != 0 {
+		t.Errorf("%d events queued, want none", len(bot.event))
+	}
+}
+
+// Events during the outage cannot reach anyone, so once the load succeeds the subscribers are told.
+func TestSubscribersAreToldAboutMissedEvents(t *testing.T) {
+	rec := newRecorder(false)
+	bot := testBot(rec.deliver)
+	bot.retryEvery = time.Hour // held back until the event below has been counted
+	db := &failingLoad{failures: 1, result: []entity.UserSubscription{{UserID: 7}}}
+	bot.database = db
+	t.Cleanup(func() { close(bot.stop) })
+
+	bot.loadSubscriptions()
+	bot.countIfSubscriptionsMissing()
+	bot.countIfSubscriptionsMissing()
+
+	if !bot.tryLoadSubscriptions() {
+		t.Fatal("second load failed")
+	}
+	select {
+	case event := <-bot.event:
+		if !strings.Contains(event.Text, "2 notifications") {
+			t.Errorf("notice = %q, want the count of missed events", event.Text)
+		}
+	default:
+		t.Fatal("no notice about the missed events")
+	}
+
+	bot.countIfSubscriptionsMissing()
+	if len(bot.event) != 0 || bot.undelivered != 0 {
+		t.Error("events after the load must not be counted as missed")
+	}
+}
+
+// Registration works during the outage, and a late load must not forget who registered.
+func TestLateLoadKeepsNewSubscribers(t *testing.T) {
+	rec := newRecorder(false)
+	bot := testBot(rec.deliver)
+	bot.retryEvery = time.Hour
+	bot.database = &failingLoad{failures: 1, result: []entity.UserSubscription{{UserID: 1}}}
+	t.Cleanup(func() { close(bot.stop) })
+
+	bot.loadSubscriptions()
+	bot.addSubscription(entity.UserSubscription{UserID: 2})
+	if !bot.tryLoadSubscriptions() {
+		t.Fatal("second load failed")
+	}
+
+	if !bot.isSubscriber(1) || !bot.isSubscriber(2) {
+		t.Errorf("subscribers = %v, want both 1 and 2", bot.subscribers())
+	}
+}
+
+func TestStopEndsTheRetries(t *testing.T) {
+	bot := testBot(newRecorder(false).deliver)
+	bot.retryEvery = time.Millisecond
+	db := &failingLoad{failures: 1 << 30}
+	bot.database = db
+
+	bot.loadSubscriptions()
+	deadline := time.Now().Add(2 * time.Second)
+	for db.callCount() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatal("no retries happened")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(bot.stop)
+	time.Sleep(20 * time.Millisecond) // a retry already past the select may still finish
+	before := db.callCount()
+	time.Sleep(50 * time.Millisecond)
+	if after := db.callCount(); after != before {
+		t.Errorf("attempts went from %d to %d after Stop", before, after)
 	}
 }

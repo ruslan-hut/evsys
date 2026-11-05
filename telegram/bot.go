@@ -34,6 +34,10 @@ const (
 	// time a wedged queue drains, so sends over the limit are dropped and logged rather than
 	// queued behind a stall.
 	deliverySlots = 8
+	// subscriptionsRetry is how often a failed load of the subscriptions is tried again. Until one
+	// succeeds nobody is known to alert, so this bounds how long the bot stays silent after the
+	// database comes back.
+	subscriptionsRetry = 30 * time.Second
 )
 
 // TgBot implements EventHandler
@@ -46,9 +50,15 @@ type TgBot struct {
 	// write, which is fatal for the whole process, not just for the bot.
 	subscriptions map[int]entity.UserSubscription
 	mutex         sync.RWMutex
-	event         chan MessageContent
-	send          chan MessageContent
-	stop          chan struct{}
+	// subscriptionsMissing is set while the load at startup keeps failing, and undelivered counts
+	// the events that went past the subscribers nobody could read. Both are guarded by mutex.
+	subscriptionsMissing bool
+	undelivered          int
+	// retryEvery is subscriptionsRetry, a field so tests need not wait for it.
+	retryEvery time.Duration
+	event      chan MessageContent
+	send       chan MessageContent
+	stop       chan struct{}
 	// slots hands out the delivery permits counted by deliverySlots.
 	slots chan struct{}
 	// inviteCode is what /start must carry to subscribe. Empty closes registration.
@@ -71,6 +81,7 @@ func NewBot(apiKey, inviteCode string) (*TgBot, error) {
 		send:          make(chan MessageContent, 100),
 		stop:          make(chan struct{}),
 		slots:         make(chan struct{}, deliverySlots),
+		retryEvery:    subscriptionsRetry,
 	}
 	tgBot.deliver = tgBot.sendMessage
 	api, err := tgbotapi.NewBotAPIWithClient(apiKey, &http.Client{Timeout: apiTimeout})
@@ -81,11 +92,35 @@ func NewBot(apiKey, inviteCode string) (*TgBot, error) {
 	return tgBot, nil
 }
 
-// setSubscriptions replaces the whole set, as loading from the database does.
-func (b *TgBot) setSubscriptions(subscriptions map[int]entity.UserSubscription) {
+// mergeLoaded adds what the database returned and ends the outage, reporting how many events it
+// cost. It merges rather than replaces: a late load must not forget someone who registered while it
+// was failing.
+func (b *TgBot) mergeLoaded(subscriptions []entity.UserSubscription) int {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	b.subscriptions = subscriptions
+	for _, subscription := range subscriptions {
+		b.subscriptions[subscription.UserID] = subscription
+	}
+	undelivered := b.undelivered
+	b.subscriptionsMissing = false
+	b.undelivered = 0
+	return undelivered
+}
+
+func (b *TgBot) markSubscriptionsMissing() {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.subscriptionsMissing = true
+}
+
+// countIfSubscriptionsMissing records an event that could not reach the subscribers nobody could read.
+func (b *TgBot) countIfSubscriptionsMissing() {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if b.subscriptionsMissing {
+		b.undelivered++
+		log.Printf("bot: subscriptions are not loaded, a notification did not reach them (%d so far)", b.undelivered)
+	}
 }
 
 func (b *TgBot) addSubscription(subscription entity.UserSubscription) {
@@ -132,21 +167,63 @@ func (b *TgBot) SetDatabase(database internal.Database) {
 }
 
 func (b *TgBot) Start() {
-	loaded := make(map[int]entity.UserSubscription)
-	if b.database != nil {
-		subscriptions, err := b.database.GetSubscriptions()
-		if err != nil {
-			log.Printf("bot: error getting subscriptions: %v", err)
-		} else {
-			for _, subscription := range subscriptions {
-				loaded[subscription.UserID] = subscription
-			}
-		}
-	}
-	b.setSubscriptions(loaded)
+	b.loadSubscriptions()
 	go b.sendPump()
 	go b.eventPump()
 	go b.updatesPump()
+}
+
+// loadSubscriptions reads the subscribers, and keeps trying in the background if that fails. The bot
+// has no other record of who to alert, so giving up here means silence until someone restarts the
+// service, and silence looks exactly like a network with nothing to report.
+func (b *TgBot) loadSubscriptions() {
+	if b.database == nil {
+		return
+	}
+	if b.tryLoadSubscriptions() {
+		return
+	}
+	b.markSubscriptionsMissing()
+	go b.retryLoadSubscriptions()
+}
+
+func (b *TgBot) tryLoadSubscriptions() bool {
+	subscriptions, err := b.database.GetSubscriptions()
+	if err != nil {
+		log.Printf("bot: error getting subscriptions, nobody receives alerts until this succeeds: %v", err)
+		return false
+	}
+	undelivered := b.mergeLoaded(subscriptions)
+	log.Printf("bot: loaded %d subscriptions", len(subscriptions))
+	if undelivered > 0 {
+		b.announceUndelivered(undelivered)
+	}
+	return true
+}
+
+func (b *TgBot) retryLoadSubscriptions() {
+	ticker := time.NewTicker(b.retryEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-b.stop:
+			return
+		case <-ticker.C:
+			if b.tryLoadSubscriptions() {
+				return
+			}
+		}
+	}
+}
+
+// announceUndelivered tells subscribers that alerts were missed: what was lost is not resent, so they
+// must know to look.
+func (b *TgBot) announceUndelivered(count int) {
+	text := sanitize(fmt.Sprintf("Subscriptions could not be read at startup, %d notifications were not delivered. Check /status.", count))
+	select {
+	case b.event <- MessageContent{Text: text}:
+	case <-b.stop:
+	}
 }
 
 // Start listening for updates
@@ -258,6 +335,7 @@ func (b *TgBot) eventPump() {
 			// dispatched rather than sent from here: this pump is the only path alerts take, so a
 			// send that blocks on it delays every later alert - which is how a fault notification
 			// arrives after the shift that needed it, or never
+			b.countIfSubscriptionsMissing()
 			for _, subscription := range b.subscribers() {
 				b.dispatch(int64(subscription.UserID), event.Text)
 			}
