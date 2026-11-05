@@ -3,13 +3,18 @@ package telegram
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"evsys/entity"
 	"evsys/internal"
@@ -592,5 +597,220 @@ func TestStopEndsTheRetries(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if after := db.callCount(); after != before {
 		t.Errorf("attempts went from %d to %d after Stop", before, after)
+	}
+}
+
+func TestSplitMessage(t *testing.T) {
+	t.Run("short text is left alone", func(t *testing.T) {
+		text := "*PE00001*: Online\n\nend\n"
+		if got := splitMessage(text, 100); len(got) != 1 || got[0] != text {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("prefers a blank line to a line end", func(t *testing.T) {
+		got := splitMessage("aaa\nbbb\n\nccc\nddd", 12)
+		if len(got) != 2 || got[0] != "aaa\nbbb" || got[1] != "ccc\nddd" {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("falls back to a line end", func(t *testing.T) {
+		got := splitMessage("aaa\nbbb\nccc", 8)
+		if len(got) != 2 || got[0] != "aaa\nbbb" || got[1] != "ccc" {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("cuts a line longer than the limit", func(t *testing.T) {
+		got := splitMessage(strings.Repeat("x", 25), 10)
+		if strings.Join(got, "") != strings.Repeat("x", 25) || len(got) != 3 {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("counts characters, not bytes", func(t *testing.T) {
+		text := strings.Repeat("я", 10)
+		if got := splitMessage(text, 10); len(got) != 1 {
+			t.Errorf("got %d parts", len(got))
+		}
+		for _, part := range splitMessage(strings.Repeat("я", 25), 10) {
+			if !utf8.ValidString(part) || utf8.RuneCountInString(part) > 10 {
+				t.Errorf("bad part %q", part)
+			}
+		}
+	})
+	t.Run("keeps an escape sequence whole", func(t *testing.T) {
+		for _, part := range splitMessage(strings.Repeat("\\.", 30), 11) {
+			if (len(part)-len(strings.TrimRight(part, "\\")))%2 != 0 {
+				t.Errorf("part ends inside an escape: %q", part)
+			}
+		}
+	})
+	t.Run("no empty parts", func(t *testing.T) {
+		for _, part := range splitMessage("aaa\n\n\n\n\nbbb\n\n\n", 5) {
+			if strings.TrimSpace(part) == "" {
+				t.Errorf("empty part in %q", part)
+			}
+		}
+	})
+}
+
+// statusDatabase is the part of the database /status reads.
+type statusDatabase struct {
+	internal.Database
+	status []entity.ChargePointStatus
+}
+
+func (s *statusDatabase) GetLastStatus() ([]entity.ChargePointStatus, error) {
+	return s.status, nil
+}
+
+// A status too long for one message must arrive whole, with every charge point next to its connectors.
+func TestLongStatusFitsTelegramLimit(t *testing.T) {
+	var status []entity.ChargePointStatus
+	for i := 0; i < 80; i++ {
+		status = append(status, entity.ChargePointStatus{
+			ChargePointID: fmt.Sprintf("PE%05d", i),
+			IsOnline:      true,
+			EventTime:     time.Now(),
+			Connectors: []entity.ConnectorStatus{
+				{ConnectorID: 1, Status: "Faulted", StatusTime: time.Now(), Info: "Socket has an error. Charge is not possible"},
+				{ConnectorID: 2, Status: "Available", StatusTime: time.Now()},
+			},
+		})
+	}
+	bot := testBot(func(int64, string) {}, 1)
+	bot.database = &statusDatabase{status: status}
+
+	chunks := splitMessage(bot.composeStatusMessage(), messageChunk)
+	if len(chunks) < 2 {
+		t.Fatalf("%d parts, the test needs a status that does not fit in one", len(chunks))
+	}
+	for _, chunk := range chunks {
+		if n := utf8.RuneCountInString(chunk); n > 4096 {
+			t.Errorf("part of %d characters", n)
+		}
+	}
+	joined := strings.Join(chunks, "\n\n")
+	for _, s := range status {
+		if !strings.Contains(joined, "*"+s.ChargePointID+"*") {
+			t.Errorf("%s is missing", s.ChargePointID)
+		}
+	}
+	for _, chunk := range chunks[:len(chunks)-1] {
+		if !strings.Contains(chunk[strings.LastIndex(chunk, "*PE"):], "Connector 2") {
+			t.Errorf("a part ends in the middle of a charge point: ...%q", chunk[len(chunk)-60:])
+		}
+	}
+	if !strings.Contains(chunks[len(chunks)-1], "Active subscriptions: 1") {
+		t.Error("the closing line is lost")
+	}
+}
+
+// fakeTelegram answers API requests in place of the network.
+type fakeTelegram struct {
+	mutex  sync.Mutex
+	texts  []string
+	answer func(attempt int) (string, error)
+}
+
+func (f *fakeTelegram) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.ParseForm(); err != nil {
+		return nil, err
+	}
+	f.mutex.Lock()
+	f.texts = append(f.texts, req.PostForm.Get("text"))
+	attempt := len(f.texts)
+	f.mutex.Unlock()
+	body, err := f.answer(attempt)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+const telegramOK = `{"ok":true,"result":{"message_id":1}}`
+
+func botWithFakeTelegram(answer func(attempt int) (string, error), subscribers ...int) (*TgBot, *fakeTelegram) {
+	fake := &fakeTelegram{answer: answer}
+	bot := testBot(nil, subscribers...)
+	bot.api = &tgbotapi.BotAPI{Token: "test", Client: &http.Client{Transport: fake}}
+	return bot, fake
+}
+
+// longText is numbered lines long enough for three parts.
+func longText() string {
+	var lines []string
+	for i := 0; i < 1000; i++ {
+		lines = append(lines, "line "+strconv.Itoa(i)+strings.Repeat("x", 5))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestPartsAreSentInOrder(t *testing.T) {
+	bot, fake := botWithFakeTelegram(func(int) (string, error) { return telegramOK, nil })
+	bot.sendMessage(1, longText())
+
+	if len(fake.texts) < 2 {
+		t.Fatalf("%d requests, want several", len(fake.texts))
+	}
+	if got := strings.Join(fake.texts, "\n"); got != longText() {
+		t.Error("parts do not add up to the original text in order")
+	}
+}
+
+func TestShortMessageIsOneRequest(t *testing.T) {
+	bot, fake := botWithFakeTelegram(func(int) (string, error) { return telegramOK, nil })
+	bot.sendMessage(1, "*PE00001*: Online")
+	if len(fake.texts) != 1 || fake.texts[0] != "*PE00001*: Online" {
+		t.Errorf("requests = %q", fake.texts)
+	}
+}
+
+// A user who blocked the bot is removed at the first part, and the rest are not tried.
+func TestForbiddenStopsTheRemainingParts(t *testing.T) {
+	bot, fake := botWithFakeTelegram(func(int) (string, error) {
+		return `{"ok":false,"description":"Forbidden: bot was blocked by the user"}`, nil
+	}, 1)
+	bot.sendMessage(1, longText())
+
+	if len(fake.texts) != 1 {
+		t.Errorf("%d requests, want 1", len(fake.texts))
+	}
+	if bot.isSubscriber(1) {
+		t.Error("the subscription was not removed")
+	}
+}
+
+// A transport failure holds a delivery slot for up to apiTimeout, so it must not repeat per part.
+func TestTransportErrorStopsTheRemainingParts(t *testing.T) {
+	bot, fake := botWithFakeTelegram(func(int) (string, error) { return "", timeoutError{} })
+	bot.sendMessage(1, longText())
+	if len(fake.texts) != 1 {
+		t.Errorf("%d requests, want 1", len(fake.texts))
+	}
+}
+
+// Rejected markup costs only that part: it goes out plain, within the limit, and the rest follow.
+func TestRejectedMarkupIsResentAndTheRestFollow(t *testing.T) {
+	bot, fake := botWithFakeTelegram(func(attempt int) (string, error) {
+		if attempt == 1 {
+			return `{"ok":false,"description":"Bad Request: can't parse entities"}`, nil
+		}
+		return telegramOK, nil
+	})
+	parts := splitMessage(longText(), messageChunk)
+	bot.sendMessage(1, longText())
+
+	if want := len(parts) + 1; len(fake.texts) != want {
+		t.Fatalf("%d requests, want %d", len(fake.texts), want)
+	}
+	if !strings.HasPrefix(fake.texts[1], "This message caused an error") {
+		t.Errorf("second request = %.40q", fake.texts[1])
+	}
+	if n := utf8.RuneCountInString(fake.texts[1]); n > 4096 {
+		t.Errorf("resent part has %d characters", n)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -38,6 +39,9 @@ const (
 	// succeeds nobody is known to alert, so this bounds how long the bot stays silent after the
 	// database comes back.
 	subscriptionsRetry = 30 * time.Second
+	// messageChunk is the longest text sent in one request, in characters. Telegram allows 4096. The
+	// margin is for the prefix added when a message is resent without markup.
+	messageChunk = 4000
 )
 
 // TgBot implements EventHandler
@@ -375,13 +379,23 @@ func (b *TgBot) dispatch(id int64, text string) {
 	}()
 }
 
-// sendMessage common routine to send a message via bot API
+// sendMessage common routine to send a message via bot API. The parts of a long message go one after
+// another within a single delivery slot, so they arrive in order and count as one send.
 func (b *TgBot) sendMessage(id int64, text string) {
+	for _, chunk := range splitMessage(text, messageChunk) {
+		if !b.sendChunk(id, chunk) {
+			return
+		}
+	}
+}
+
+// sendChunk sends one part and reports whether the next part is worth trying.
+func (b *TgBot) sendChunk(id int64, text string) bool {
 	msg := tgbotapi.NewMessage(id, text)
 	msg.ParseMode = "MarkdownV2"
 	_, err := b.api.Send(msg)
 	if err == nil {
-		return
+		return true
 	}
 	// Forbidden is final: the user blocked the bot or no longer exists, and every later alert would
 	// fail the same way.
@@ -390,20 +404,69 @@ func (b *TgBot) sendMessage(id int64, text string) {
 		if b.isSubscriber(int(id)) {
 			b.unsubscribe(int(id))
 		}
-		return
+		return false
 	}
 	// The retries below exist for one failure: Telegram refusing the markup. A transport failure
 	// tells us nothing about the text, and retrying it only multiplies a timeout by the number of
 	// attempts - three wedged requests instead of one, all of them holding a delivery slot.
 	if isTransportError(err) {
 		log.Printf("bot: sending message to %v: %v", id, err)
-		return
+		return false
 	}
 	safeMsg := tgbotapi.NewMessage(id, fmt.Sprintf("This message caused an error:\n%v", removeMarkup(text)))
 	_, err = b.api.Send(safeMsg)
 	if err != nil {
 		log.Printf("bot: error sending unmarkuped message: %v", err)
 	}
+	return true
+}
+
+// splitMessage cuts text into parts of at most limit characters. It breaks at a blank line where it
+// can, which keeps a charge point together with its connectors in /status, then at a line end. Markup
+// opens and closes within one line, so only a single line longer than limit can lose it; sendChunk
+// resends such a part without markup.
+func splitMessage(text string, limit int) []string {
+	if utf8.RuneCountInString(text) <= limit {
+		return []string{text}
+	}
+	var chunks []string
+	rest := []rune(text)
+	for len(rest) > limit {
+		window := string(rest[:limit+1])
+		cut := strings.LastIndex(window, "\n\n")
+		if cut <= 0 {
+			cut = strings.LastIndex(window, "\n")
+		}
+		if cut <= 0 {
+			cut = hardCut(rest, limit)
+		} else {
+			cut = utf8.RuneCountInString(window[:cut])
+		}
+		chunks = appendChunk(chunks, string(rest[:cut]))
+		rest = []rune(strings.TrimLeft(string(rest[cut:]), "\n"))
+	}
+	return appendChunk(chunks, string(rest))
+}
+
+// hardCut places a cut inside a line, leaving no escape sequence split in two.
+func hardCut(text []rune, limit int) int {
+	cut := limit
+	for cut > 1 && text[cut-1] == '\\' {
+		cut--
+	}
+	if (limit-cut)%2 == 0 {
+		return limit
+	}
+	return limit - 1
+}
+
+// appendChunk skips what is left empty by trimming: Telegram refuses an empty message.
+func appendChunk(chunks []string, chunk string) []string {
+	chunk = strings.TrimRight(chunk, "\n")
+	if chunk == "" {
+		return chunks
+	}
+	return append(chunks, chunk)
 }
 
 // isForbidden reports whether Telegram refused delivery to this user for good.
