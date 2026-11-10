@@ -571,10 +571,7 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	}
 
 	if conf.Ocpi.Enabled {
-		ocpiClient := ocpi.New(conf.Ocpi.Url, conf.Ocpi.Token)
-		systemHandler.AddEventListener(ocpiClient)
-		systemHandler.SetAuthService(ocpiClient)
-		log.Println("ocpi client is configured and enabled")
+		registerOcpi(systemHandler, ocpi.New(conf.Ocpi.Url, conf.Ocpi.Token), conf.Ocpi.DisableEvents)
 	}
 
 	if conf.Webhooks.Enabled {
@@ -647,4 +644,24 @@ func NewCentralSystem(conf *config.Config) (*CentralSystem, error) {
 	cs.api = apiServer
 
 	return cs, nil
+}
+
+// ocpiService is the OCPI client: an event listener for status and transaction
+// updates and the authorization service for roaming tokens.
+type ocpiService interface {
+	internal.EventHandler
+	AuthService
+}
+
+// registerOcpi always keeps OCPI authorization, which is synchronous and has no
+// webhook counterpart. Events are skipped when disableEvents is set, for the case
+// where the OCPI service subscribes to them through webhooks instead.
+func registerOcpi(handler *SystemHandler, client ocpiService, disableEvents bool) {
+	handler.SetAuthService(client)
+	if disableEvents {
+		log.Println("ocpi client is configured and enabled; direct events are disabled, authorization only")
+		return
+	}
+	handler.AddEventListener(client)
+	log.Println("ocpi client is configured and enabled")
 }

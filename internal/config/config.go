@@ -55,6 +55,10 @@ type Config struct {
 		Enabled bool   `yaml:"enabled" env-default:"false"`
 		Url     string `yaml:"url" env-default:""`
 		Token   string `yaml:"token" env-default:""`
+		// DisableEvents stops the direct status and transaction POSTs to the OCPI
+		// service once it receives them as webhooks; authorization stays on the client.
+		// Negative on purpose: cleanenv applies env-default over an explicit false.
+		DisableEvents bool `yaml:"disable_events" env-default:"false"`
 	}
 	// Webhooks gates the event webhook subsystem; recipients themselves live in the
 	// webhook_subscribers collection, so enabling this requires Mongo.

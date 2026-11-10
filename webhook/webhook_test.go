@@ -264,3 +264,56 @@ func TestClaimBlocksConcurrentDelivery(t *testing.T) {
 		t.Error("claim after release refused")
 	}
 }
+
+// The OCPI client posts json.Marshal(event) directly; a subscriber switched over to
+// webhooks must find the same object in envelope.data, evse and location_id included.
+func TestEnvelopeDataMatchesDirectOcpiBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		send  func(w *Webhook, m *internal.EventMessage)
+		message *internal.EventMessage
+	}{
+		{"status", (*Webhook).OnStatusNotification, &internal.EventMessage{
+			ChargePointId: "PE00002", ConnectorId: 2, LocationId: "ELP", Evse: "ES*WBR*E00002*2",
+			Status: "Faulted", Info: "Internal communications error", Time: time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC),
+		}},
+		{"offline status without charge point", (*Webhook).OnStatusNotification, &internal.EventMessage{
+			LocationId: "ELP", Evse: "ES*WBR*E00005*1", Status: "Offline",
+		}},
+		{"transaction start", (*Webhook).OnTransactionStart, &internal.EventMessage{
+			ChargePointId: "PE00001", ConnectorId: 1, LocationId: "ELP", Evse: "ES*WBR*E00001*1",
+			IdTag: "TAG1", TransactionId: 5300, Time: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
+		}},
+		{"transaction stop", (*Webhook).OnTransactionStop, &internal.EventMessage{
+			ChargePointId: "PE00001", ConnectorId: 1, LocationId: "ELP", Evse: "ES*WBR*E00001*1",
+			IdTag: "TAG1", TransactionId: 5300, Consumed: 28500, Payload: map[string]any{"reason": "Local"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &stubDatabase{subscribers: []entity.WebhookSubscriber{
+				{Name: "nomadus", URL: "http://b", Events: []string{"status", "transaction.*"}, IsEnabled: true},
+			}}
+			w := newTestWebhook(db)
+			tt.send(w, tt.message)
+
+			outbox := db.deliveries()
+			if len(outbox) != 1 {
+				t.Fatalf("expected 1 delivery, got %d", len(outbox))
+			}
+			var raw struct {
+				Data json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(outbox[0].Payload, &raw); err != nil {
+				t.Fatalf("unmarshal envelope: %v", err)
+			}
+			direct, err := json.Marshal(tt.message)
+			if err != nil {
+				t.Fatalf("marshal direct body: %v", err)
+			}
+			if string(raw.Data) != string(direct) {
+				t.Errorf("envelope data differs from direct OCPI body:\n webhook: %s\n direct:  %s", raw.Data, direct)
+			}
+		})
+	}
+}

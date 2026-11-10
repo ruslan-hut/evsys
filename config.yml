@@ -43,6 +43,9 @@ ocpi:
   enabled: false
   url: 127.0.0.1:5002
   token: OCPI_TOKEN
+  # true: no direct status/transaction POSTs, the OCPI service gets them as webhooks;
+  # authorization requests are still sent
+  disable_events: false
 # event webhooks; recipients are configured in the webhook_subscribers collection,
 # so this requires mongo to be enabled
 webhooks:
