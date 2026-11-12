@@ -44,6 +44,9 @@ ocpi:
   enabled: true
   url: ${OCPI_URL}
   token: ${OCPI_TOKEN}
+  # status and transaction events reach Nomadus through the nomadus webhook
+  # subscriber; Authorize stays direct
+  disable_events: true
 # recipients are configured in the webhook_subscribers collection; with no
 # enabled subscribers the subsystem is idle
 webhooks:
