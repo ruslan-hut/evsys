@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"strings"
 )
@@ -88,7 +88,7 @@ func NewBot(apiKey, inviteCode string) (*TgBot, error) {
 		retryEvery:    subscriptionsRetry,
 	}
 	tgBot.deliver = tgBot.sendMessage
-	api, err := tgbotapi.NewBotAPIWithClient(apiKey, &http.Client{Timeout: apiTimeout})
+	api, err := tgbotapi.NewBotAPIWithClient(apiKey, tgbotapi.APIEndpoint, &http.Client{Timeout: apiTimeout})
 	if err != nil {
 		return nil, err
 	}
@@ -232,13 +232,14 @@ func (b *TgBot) announceUndelivered(count int) {
 
 // Start listening for updates
 func (b *TgBot) updatesPump() {
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = updatesLongPoll
-	updates, err := b.api.GetUpdatesChan(u)
-	if err != nil {
+	// long polling does not work while a webhook is set; library v4 removed it on every start, v5 does not
+	if _, err := b.api.Request(tgbotapi.DeleteWebhookConfig{}); err != nil {
 		log.Printf("bot: error getting updates: %v", err)
 		return
 	}
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = updatesLongPoll
+	updates := b.api.GetUpdatesChan(u)
 	for update := range updates {
 		if update.Message == nil || !update.Message.IsCommand() {
 			continue
@@ -254,7 +255,7 @@ func (b *TgBot) handleCommand(message *tgbotapi.Message) {
 	if message.From == nil || message.From.IsBot || message.Chat == nil || !message.Chat.IsPrivate() {
 		return
 	}
-	userID := message.From.ID
+	userID := int(message.From.ID) // Telegram ids are int64, the subscription store keeps int
 	chatID := message.Chat.ID
 	switch message.Command() {
 	case "start":
@@ -303,7 +304,7 @@ func (b *TgBot) subscribe(user *tgbotapi.User, chatID int64) {
 	if name == "" {
 		name = fmt.Sprintf("id%d", user.ID)
 	}
-	subscription := entity.UserSubscription{UserID: user.ID, User: name, SubscriptionType: "status"}
+	subscription := entity.UserSubscription{UserID: int(user.ID), User: name, SubscriptionType: "status"}
 	if b.database != nil {
 		if err := b.database.AddSubscription(&subscription); err != nil {
 			log.Printf("bot: error adding subscription for user %v: %v", user.ID, err)
@@ -471,8 +472,14 @@ func appendChunk(chunks []string, chunk string) []string {
 
 // isForbidden reports whether Telegram refused delivery to this user for good.
 func isForbidden(err error) bool {
-	var apiErr tgbotapi.Error
-	return errors.As(err, &apiErr) && strings.HasPrefix(apiErr.Message, "Forbidden:")
+	// library v5 returns API errors as *tgbotapi.Error (v4 returned the value); accept both, because
+	// errors.As does not match a pointer against a value target and the mismatch fails silently
+	var ptr *tgbotapi.Error
+	if errors.As(err, &ptr) && ptr != nil {
+		return strings.HasPrefix(ptr.Message, "Forbidden:")
+	}
+	var val tgbotapi.Error
+	return errors.As(err, &val) && strings.HasPrefix(val.Message, "Forbidden:")
 }
 
 // isTransportError reports whether the send failed before Telegram had an opinion about it - a

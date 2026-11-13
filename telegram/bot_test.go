@@ -19,7 +19,7 @@ import (
 	"evsys/entity"
 	"evsys/internal"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // testBot builds a bot with the Telegram API left out. Everything under test here happens before a
@@ -281,6 +281,11 @@ func TestIsTransportError(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "telegram rejecting the markup, as library v5 returns it",
+			err:  &tgbotapi.Error{Message: "Bad Request: can't parse entities"},
+			want: false,
+		},
+		{
 			name: "plain error",
 			err:  errors.New("something else"),
 			want: false,
@@ -329,7 +334,7 @@ func command(text string, from *tgbotapi.User, chatType string) *tgbotapi.Messag
 		Text:     text,
 		From:     from,
 		Chat:     &tgbotapi.Chat{ID: 77, Type: chatType},
-		Entities: &[]tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len(name)}},
+		Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len(name)}},
 	}
 }
 
@@ -434,6 +439,10 @@ func TestIsForbidden(t *testing.T) {
 		{tgbotapi.Error{Message: "Forbidden: bot was blocked by the user"}, true},
 		{tgbotapi.Error{Message: "Forbidden: user is deactivated"}, true},
 		{tgbotapi.Error{Message: "Bad Request: can't parse entities"}, false},
+		// library v5 returns API errors by pointer, also wrapped
+		{&tgbotapi.Error{Message: "Forbidden: bot was blocked by the user"}, true},
+		{fmt.Errorf("send: %w", &tgbotapi.Error{Message: "Forbidden: user is deactivated"}), true},
+		{&tgbotapi.Error{Message: "Bad Request: can't parse entities"}, false},
 		{errors.New("Forbidden: not from the API"), false},
 	}
 	for _, tt := range tests {
@@ -736,8 +745,27 @@ const telegramOK = `{"ok":true,"result":{"message_id":1}}`
 func botWithFakeTelegram(answer func(attempt int) (string, error), subscribers ...int) (*TgBot, *fakeTelegram) {
 	fake := &fakeTelegram{answer: answer}
 	bot := testBot(nil, subscribers...)
-	bot.api = &tgbotapi.BotAPI{Token: "test", Client: &http.Client{Transport: fake}}
+	// the endpoint of a BotAPI is private, so it is built the normal way, with getMe answered, and
+	// only then pointed at the fake that records the messages
+	api, err := tgbotapi.NewBotAPIWithClient("test", tgbotapi.APIEndpoint, &http.Client{Transport: getMeTransport{}})
+	if err != nil {
+		panic(err)
+	}
+	api.Client = &http.Client{Transport: fake}
+	bot.api = api
 	return bot, fake
+}
+
+// getMeTransport answers the one request NewBotAPIWithClient makes.
+type getMeTransport struct{}
+
+func (getMeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"id":1,"is_bot":true,"username":"test_bot"}}`)),
+		Request:    req,
+	}, nil
 }
 
 // longText is numbered lines long enough for three parts.
